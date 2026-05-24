@@ -22,6 +22,7 @@ CREATE TABLE "roles" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
     "deleted_at" TIMESTAMPTZ(3),
     "deleted_by" UUID,
 
@@ -36,6 +37,7 @@ CREATE TABLE "permissions" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
     "deleted_at" TIMESTAMPTZ(3),
     "deleted_by" UUID,
 
@@ -50,6 +52,7 @@ CREATE TABLE "policies" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
     "deleted_at" TIMESTAMPTZ(3),
     "deleted_by" UUID,
 
@@ -70,6 +73,7 @@ CREATE TABLE "users" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
     "deleted_at" TIMESTAMPTZ(3),
     "deleted_by" UUID,
 
@@ -79,7 +83,12 @@ CREATE TABLE "users" (
 -- CreateTable
 CREATE TABLE "patients" (
     "id" UUID NOT NULL,
-    "hn" TEXT NOT NULL,
+    "hn" VARCHAR(9) NOT NULL,
+    "first_name_en" TEXT NOT NULL,
+    "last_name_en" TEXT NOT NULL,
+    "first_name_th" TEXT,
+    "last_name_th" TEXT,
+    "email" TEXT,
     "date_of_birth" DATE NOT NULL,
     "gender" "Gender" NOT NULL,
     "blood_group" "BloodGroup" NOT NULL DEFAULT 'UNKNOWN',
@@ -92,6 +101,7 @@ CREATE TABLE "patients" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
     "deleted_at" TIMESTAMPTZ(3),
     "deleted_by" UUID,
 
@@ -106,10 +116,26 @@ CREATE TABLE "departments" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
     "deleted_at" TIMESTAMPTZ(3),
     "deleted_by" UUID,
 
     CONSTRAINT "departments_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "department_appointment_types" (
+    "id" UUID NOT NULL,
+    "department_id" UUID NOT NULL,
+    "appointment_type" "AppointmentType" NOT NULL,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID NOT NULL,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMPTZ(3),
+    "deleted_by" UUID,
+
+    CONSTRAINT "department_appointment_types_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -125,6 +151,7 @@ CREATE TABLE "doctors" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
     "deleted_at" TIMESTAMPTZ(3),
     "deleted_by" UUID,
 
@@ -146,6 +173,7 @@ CREATE TABLE "doctor_schedules" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
     "deleted_at" TIMESTAMPTZ(3),
     "deleted_by" UUID,
 
@@ -170,36 +198,16 @@ CREATE TABLE "appointments" (
     "completed_at" TIMESTAMPTZ(3),
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
 
     CONSTRAINT "appointments_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "staff_domains" (
-    "domain" TEXT NOT NULL,
-    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "created_by" UUID NOT NULL,
-    "updated_at" TIMESTAMPTZ(3) NOT NULL,
-    "deleted_at" TIMESTAMPTZ(3),
-    "deleted_by" UUID,
-
-    CONSTRAINT "staff_domains_pkey" PRIMARY KEY ("domain")
 );
 
 -- CreateIndex
 CREATE UNIQUE INDEX "roles_code_key" ON "roles"("code");
 
 -- CreateIndex
-CREATE INDEX "roles_deleted_at_idx" ON "roles"("deleted_at");
-
--- CreateIndex
 CREATE UNIQUE INDEX "permissions_code_key" ON "permissions"("code");
-
--- CreateIndex
-CREATE INDEX "permissions_deleted_at_idx" ON "permissions"("deleted_at");
-
--- CreateIndex
-CREATE INDEX "policies_deleted_at_idx" ON "policies"("deleted_at");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "policies_role_id_permission_id_key" ON "policies"("role_id", "permission_id");
@@ -214,19 +222,16 @@ CREATE UNIQUE INDEX "users_google_sub_key" ON "users"("google_sub");
 CREATE INDEX "users_role_id_idx" ON "users"("role_id");
 
 -- CreateIndex
-CREATE INDEX "users_deleted_at_idx" ON "users"("deleted_at");
-
--- CreateIndex
 CREATE UNIQUE INDEX "patients_hn_key" ON "patients"("hn");
 
 -- CreateIndex
-CREATE INDEX "patients_deleted_at_idx" ON "patients"("deleted_at");
+CREATE UNIQUE INDEX "patients_email_key" ON "patients"("email");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "departments_name_key" ON "departments"("name");
 
 -- CreateIndex
-CREATE INDEX "departments_deleted_at_idx" ON "departments"("deleted_at");
+CREATE UNIQUE INDEX "department_appointment_types_department_id_appointment_type_key" ON "department_appointment_types"("department_id", "appointment_type");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "doctors_user_id_key" ON "doctors"("user_id");
@@ -241,13 +246,7 @@ CREATE UNIQUE INDEX "doctors_medical_license_no_key" ON "doctors"("medical_licen
 CREATE INDEX "doctors_department_id_idx" ON "doctors"("department_id");
 
 -- CreateIndex
-CREATE INDEX "doctors_deleted_at_idx" ON "doctors"("deleted_at");
-
--- CreateIndex
 CREATE INDEX "doctor_schedules_doctor_id_day_of_week_effective_from_idx" ON "doctor_schedules"("doctor_id", "day_of_week", "effective_from");
-
--- CreateIndex
-CREATE INDEX "doctor_schedules_deleted_at_idx" ON "doctor_schedules"("deleted_at");
 
 -- CreateIndex
 CREATE INDEX "appointments_doctor_id_start_at_idx" ON "appointments"("doctor_id", "start_at");
@@ -258,17 +257,20 @@ CREATE INDEX "appointments_patient_id_start_at_idx" ON "appointments"("patient_i
 -- CreateIndex
 CREATE INDEX "appointments_status_idx" ON "appointments"("status");
 
--- CreateIndex
-CREATE INDEX "staff_domains_deleted_at_idx" ON "staff_domains"("deleted_at");
-
 -- AddForeignKey
 ALTER TABLE "roles" ADD CONSTRAINT "roles_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "roles" ADD CONSTRAINT "roles_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "roles" ADD CONSTRAINT "roles_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "permissions" ADD CONSTRAINT "permissions_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "permissions" ADD CONSTRAINT "permissions_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "permissions" ADD CONSTRAINT "permissions_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
@@ -283,6 +285,9 @@ ALTER TABLE "policies" ADD CONSTRAINT "policies_permission_id_fkey" FOREIGN KEY 
 ALTER TABLE "policies" ADD CONSTRAINT "policies_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
+ALTER TABLE "policies" ADD CONSTRAINT "policies_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
 ALTER TABLE "policies" ADD CONSTRAINT "policies_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
@@ -292,10 +297,16 @@ ALTER TABLE "users" ADD CONSTRAINT "users_role_id_fkey" FOREIGN KEY ("role_id") 
 ALTER TABLE "users" ADD CONSTRAINT "users_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
+ALTER TABLE "users" ADD CONSTRAINT "users_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "patients" ADD CONSTRAINT "patients_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "patients" ADD CONSTRAINT "patients_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "patients" ADD CONSTRAINT "patients_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
@@ -304,7 +315,22 @@ ALTER TABLE "patients" ADD CONSTRAINT "patients_deleted_by_fkey" FOREIGN KEY ("d
 ALTER TABLE "departments" ADD CONSTRAINT "departments_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
+ALTER TABLE "departments" ADD CONSTRAINT "departments_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
 ALTER TABLE "departments" ADD CONSTRAINT "departments_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "department_appointment_types" ADD CONSTRAINT "department_appointment_types_department_id_fkey" FOREIGN KEY ("department_id") REFERENCES "departments"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "department_appointment_types" ADD CONSTRAINT "department_appointment_types_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "department_appointment_types" ADD CONSTRAINT "department_appointment_types_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "department_appointment_types" ADD CONSTRAINT "department_appointment_types_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "doctors" ADD CONSTRAINT "doctors_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
@@ -316,6 +342,9 @@ ALTER TABLE "doctors" ADD CONSTRAINT "doctors_department_id_fkey" FOREIGN KEY ("
 ALTER TABLE "doctors" ADD CONSTRAINT "doctors_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
+ALTER TABLE "doctors" ADD CONSTRAINT "doctors_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
 ALTER TABLE "doctors" ADD CONSTRAINT "doctors_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
@@ -323,6 +352,9 @@ ALTER TABLE "doctor_schedules" ADD CONSTRAINT "doctor_schedules_doctor_id_fkey" 
 
 -- AddForeignKey
 ALTER TABLE "doctor_schedules" ADD CONSTRAINT "doctor_schedules_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "doctor_schedules" ADD CONSTRAINT "doctor_schedules_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "doctor_schedules" ADD CONSTRAINT "doctor_schedules_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
@@ -340,10 +372,10 @@ ALTER TABLE "appointments" ADD CONSTRAINT "appointments_department_id_fkey" FORE
 ALTER TABLE "appointments" ADD CONSTRAINT "appointments_created_by_user_id_fkey" FOREIGN KEY ("created_by_user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
+ALTER TABLE "appointments" ADD CONSTRAINT "appointments_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
 ALTER TABLE "appointments" ADD CONSTRAINT "appointments_cancelled_by_user_id_fkey" FOREIGN KEY ("cancelled_by_user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
--- AddForeignKey
-ALTER TABLE "staff_domains" ADD CONSTRAINT "staff_domains_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "staff_domains" ADD CONSTRAINT "staff_domains_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+-- HN format constraint (numeric 7-9 digits) — Prisma 5 cannot express CHECK natively.
+ALTER TABLE "patients" ADD CONSTRAINT "patients_hn_format" CHECK ("hn" ~ '^[0-9]{7,9}$');
