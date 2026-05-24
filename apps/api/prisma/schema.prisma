@@ -96,7 +96,7 @@ enum BloodGroup {
 // ─── Auth principal ──────────────────────────────────────────────────────────
 // Every signed-in identity. PATIENT users link to a `Patient` row (1-1) via
 // `Patient.userId`. DOCTOR users link to a `Doctor` row (1-1) via
-// `Doctor.userId`. STAFF / ADMIN do not require a clinical record.
+// `Doctor.userId`. ADMIN users do not require a clinical record.
 //
 // The super-admin user is seeded at the nil UUID
 // (`00000000-0000-0000-0000-000000000000`) and is the default `created_by`
@@ -129,9 +129,6 @@ model User {
   // 1-1 clinical links.
   patient Patient?
   doctor  Doctor?
-
-  // Inverse: patients this STAFF/ADMIN owns as the primary care contact.
-  ownedPatients Patient[] @relation("PatientPrimaryStaff")
 
   // Appointment audit inverses.
   bookedAppointments    Appointment[] @relation("AppointmentsCreatedBy")
@@ -170,11 +167,6 @@ model Patient {
   emergencyPersonPhone    String     @map("emergency_person_phone")
   address                 String     @db.Text
 
-  // Optional FK to the STAFF/ADMIN User that owns this patient. NULL means
-  // self-service patient pending admin assignment. Enforced as STAFF/ADMIN
-  // at the application layer.
-  primaryStaffUserId String? @map("primary_staff_user_id") @db.Uuid
-
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -182,13 +174,11 @@ model Patient {
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   user          User  @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  primaryStaff  User? @relation("PatientPrimaryStaff", fields: [primaryStaffUserId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   createdByUser User  @relation("PatientCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("PatientDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   appointments Appointment[]
 
-  @@index([primaryStaffUserId])
   @@index([deletedAt])
   @@map("patients")
 }
