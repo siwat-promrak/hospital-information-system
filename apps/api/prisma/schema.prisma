@@ -235,6 +235,9 @@ model User {
   createdDoctors                    Doctor[]                    @relation("DoctorCreatedBy")
   updatedDoctors                    Doctor[]                    @relation("DoctorUpdatedBy")
   deletedDoctors                    Doctor[]                    @relation("DoctorDeletedBy")
+  createdDoctorDepartments          DoctorDepartment[]          @relation("DoctorDepartmentCreatedBy")
+  updatedDoctorDepartments          DoctorDepartment[]          @relation("DoctorDepartmentUpdatedBy")
+  deletedDoctorDepartments          DoctorDepartment[]          @relation("DoctorDepartmentDeletedBy")
   createdDepartments                Department[]                @relation("DepartmentCreatedBy")
   updatedDepartments                Department[]                @relation("DepartmentUpdatedBy")
   deletedDepartments                Department[]                @relation("DepartmentDeletedBy")
@@ -316,7 +319,7 @@ model Department {
   updatedByUser User? @relation("DepartmentUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("DepartmentDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  doctors                 Doctor[]
+  doctors                 DoctorDepartment[]
   appointments            Appointment[]
   allowedAppointmentTypes DepartmentAppointmentType[]
 
@@ -351,7 +354,6 @@ model DepartmentAppointmentType {
 model Doctor {
   id               String  @id @default(uuid()) @db.Uuid
   userId           String  @unique @map("user_id") @db.Uuid
-  departmentId     String  @map("department_id") @db.Uuid
   doctorCode       String  @unique @map("doctor_code") // e.g. "MD-0001"
   gender           Gender?
   medicalLicenseNo String  @unique @map("medical_license_no")
@@ -365,17 +367,44 @@ model Doctor {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  user          User       @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  department    Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  createdByUser User       @relation("DoctorCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  updatedByUser User?      @relation("DoctorUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  deletedByUser User?      @relation("DoctorDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user          User  @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser User  @relation("DoctorCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User? @relation("DoctorUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedByUser User? @relation("DoctorDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  departments  DoctorDepartment[]
   schedules    DoctorSchedule[]
   appointments Appointment[]
 
-  @@index([departmentId])
   @@map("doctors")
+}
+
+/// Join row declaring which `Department`(s) a `Doctor` belongs to. Doctors
+/// can span multiple departments; the `isPrimary` flag identifies a doctor's
+/// "home" department for HR/display purposes. "At most one primary per
+/// doctor" is enforced at the application layer, not by a DB constraint.
+model DoctorDepartment {
+  id           String  @id @default(uuid()) @db.Uuid
+  doctorId     String  @map("doctor_id") @db.Uuid
+  departmentId String  @map("department_id") @db.Uuid
+  isPrimary    Boolean @default(false) @map("is_primary")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy String    @map("created_by") @db.Uuid
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  doctor        Doctor     @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser User       @relation("DoctorDepartmentCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?      @relation("DoctorDepartmentUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedByUser User?      @relation("DoctorDepartmentDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([doctorId, departmentId])
+  @@index([departmentId])
+  @@map("doctor_departments")
 }
 
 // ─── Schedule ────────────────────────────────────────────────────────────────
