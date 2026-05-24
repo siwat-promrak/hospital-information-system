@@ -110,6 +110,48 @@ return result;
 
 Exception: don't add a blank line if `return` is the only statement in the block.
 
+### 2a. Extract types, constants, and enums into dedicated files
+
+Module-scoped TypeScript types/interfaces, enums, and named constants MUST NOT be declared inside a service, controller, guard, component, hook, or page file. Put them in a sibling file alongside the consumer(s).
+
+File-naming convention:
+- `*.types.ts` — TypeScript `type` / `interface` declarations.
+- `*.const.ts` — primitive / object constants (header names, cookie keys, regex patterns, default values, …).
+- `<concept>.ts` — domain catalogs that are richer than a single constant (e.g. `permissions.ts`, `roles.ts`, `appointment-types.ts`). One file per concept.
+
+What this rule applies to:
+- Exported AND non-exported interfaces, types, enums.
+- Module-level `const` declarations whose value is fixed at module load (header strings, lists of cookie names, default option sets, regex literals, etc.).
+- Const maps used as a TypeScript "enum substitute" (`as const` objects).
+
+What MAY stay inline in the consumer file:
+- DTOs (`class FooDto { ... }`) — they ARE the controller contract; colocating them with the controller is fine, though a `dto/` subfolder is also allowed.
+- Composite Swagger decorators — see rule 6, those belong in `<module>.swagger.ts` regardless.
+- Truly function-scoped constants declared inside a method/function body (small loop bounds, single-use literals).
+
+```ts
+// bad — interface + constants declared in the consumer
+// users.service.ts
+export interface AuthenticatedUser { /* ... */ }
+const SESSION_COOKIE_NAMES = ['next-auth.session-token', ...];
+
+@Injectable()
+export class UsersService { /* ... */ }
+
+// good — extracted to siblings
+// users.types.ts
+export interface AuthenticatedUser { /* ... */ }
+
+// auth.const.ts
+export const SESSION_COOKIE_NAMES = ['next-auth.session-token', ...] as const;
+
+// users.service.ts
+import type { AuthenticatedUser } from './users.types';
+// no inline declarations
+```
+
+This keeps the consumer file focused on behavior, makes types/constants individually grep-friendly, and allows other files to import them without circular dependencies on a class export.
+
 ## Commits & Pull Requests
 
 ### 3. Focused commits, describe what changed
@@ -194,6 +236,43 @@ Every PR description MUST include these two sections, in this order, using `##` 
 - Keep response example payloads **inline** in the `*.swagger.ts` file by default — do NOT extract to a separate `*.examples.ts` until a second consumer (e.g. an e2e test fixture) appears. Indirection without reuse is overhead.
 - Promote to a `<module>/swagger/` subfolder (one file per decorator, kebab-case file `<verb-resource>.decorator.ts` + PascalCase export `ApiVerbResource`) **only** when a module grows past ~3-4 endpoint decorators. Default to flat.
 - Do NOT create a cross-cutting `apps/api/src/swagger/` directory — Swagger decorators belong to the feature module that owns them.
+
+### 6a. RBAC catalog — never hardcode permission or role codes
+
+Permission and role codes have a single source of truth in `apps/api/src/auth/`. Application code (guards, decorators, services, DTOs, tests) AND the Prisma seeders MUST import from it — never inline the string literal.
+
+- `apps/api/src/auth/permissions.ts` exports:
+  - `PERMISSION` — typed `as const` map (e.g. `PERMISSION.SCHEDULE_MANAGE === 'schedule.manage'`).
+  - `PermissionCode` — union type of the values.
+  - `PERMISSION_CATALOG` — ordered list with descriptions, consumed by the Prisma seeder.
+- `apps/api/src/auth/roles.ts` exports:
+  - `ROLE` — typed `as const` map (e.g. `ROLE.STAFF === 'STAFF'`).
+  - `RoleCode` — union type.
+  - `ROLE_CATALOG`, `SIGN_IN_ELIGIBLE_ROLES`, and `DEFAULT_ROLE_PERMISSIONS` (the seeded 5/11/1 baseline).
+
+```ts
+// bad
+@RequirePermission('schedule.manage')
+async createSchedule() { /* ... */ }
+
+if (user.roleCode === 'DOCTOR') { /* ... */ }
+
+// good
+import { PERMISSION } from '../auth/permissions';
+import { ROLE } from '../auth/roles';
+
+@RequirePermission(PERMISSION.SCHEDULE_MANAGE)
+async createSchedule() { /* ... */ }
+
+if (user.roleCode === ROLE.DOCTOR) { /* ... */ }
+```
+
+Adding a new permission is a three-step change in this exact order:
+1. Add a new entry to `PERMISSION` AND `PERMISSION_CATALOG` (with description) in `apps/api/src/auth/permissions.ts`.
+2. (Optional) Grant it to one or more roles by editing `DEFAULT_ROLE_PERMISSIONS` in `apps/api/src/auth/roles.ts`.
+3. Re-run `pnpm --filter @hospital/api db:seed` so the new row + policies land in the DB.
+
+Never re-declare permission/role codes in `prisma/seed/*.ts` — those files already import from the catalog. The same applies to `messages/*.json` namespaces in F12: derive the keys from the catalog, do not hand-list them.
 
 ## Package management
 

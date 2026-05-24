@@ -85,8 +85,8 @@ below live in `docs/user-stories.md`.
 | ID  | Title                                     | Branch                          | Scope (one sentence)                                                                                | User stories                                          | Depends on    | Acceptance / verify                                                                                                                                                                                                       | Effort | Priority |
 | --- | ----------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | -------- |
 | F01 | Database foundation                       | `feat/db-foundation`            | Docker Compose Postgres + Prisma schema (12 tables incl. RBAC + `doctor_departments` M:N) + first migration with 4 raw-SQL CHECK constraints + per-table seed split (no doctor/schedule/appointment seed) + shared `PrismaService`. | E1 (data model)                                       | —             | `pnpm db:up && pnpm prisma migrate dev && pnpm db:seed` succeeds; Prisma Studio shows populated tables; `pnpm type-check && pnpm build` green.                                                                              | M      | P0       |
-| F02 | Backend auth core                         | `feat/auth-backend`             | NestJS `auth/` module: JWT verify (jose), guards, error filter, `POST /auth/resolve`. Loads `user.role.policies` once per request and exposes `permissionCodes[]` on the request context for the `PermissionsGuard` / `@RequirePermission()` decorator. Resolves ADMIN, STAFF, and DOCTOR (DOCTOR carries `schedule.manage`). | US-2.3, US-2.4, US-2.5, US-3.1                        | F01           | New auth e2e/unit specs pass; `/auth/resolve` covered by Swagger; protected stub endpoint returns `401` without cookie, `200` with valid JWT minted via test helper, `403 INSUFFICIENT_PERMISSION` when permission missing. | M      | P0       |
-| F03 | Frontend NextAuth wiring + sign-in        | `feat/auth-frontend`            | Install NextAuth v5, Google provider, `/signin` page, role-aware home dispatcher, sign-out. No patient sign-in. | US-2.1, US-2.2, US-3.4                                | F02           | Manual: Google sign-in lands on `/[locale]`, role dispatcher routes ADMIN to the admin dashboard, STAFF to the clinic dashboard, and DOCTOR to the schedule editor; sign-out clears cookie; `/signin?error=email_unverified` renders localized error. | M      | P0       |
+| F02 | Backend auth core + auth log              | `feat/auth-backend`             | NestJS `auth/` module: JWT verify (jose), guards, error filter, `POST /auth/resolve`, `POST /auth/signout`. Loads `user.role.policies` per request and exposes `permissionCodes[]` on the request context for `PermissionsGuard` / `@RequirePermission()`. Resolves ADMIN, STAFF, and DOCTOR (DOCTOR carries `schedule.manage`). Adds the append-only `auth_logs` table (forward migration `add_auth_log`) and an `AuthLogService` that records `SIGN_IN_SUCCESS` / `SIGN_IN_FAILED` / `PERMISSION_DENIED` / `SIGN_OUT` events with optional IP + User-Agent forensic columns. | US-2.3, US-2.4, US-2.5, US-2.6, US-2.7, US-3.1        | F01           | New auth unit + e2e specs pass; `/auth/resolve` + `/auth/signout` covered by Swagger; protected stub returns `401` without cookie, `200` with valid JWT minted via test helper, `403 INSUFFICIENT_PERMISSION` when permission missing; every sign-in success / failure / permission-denial / sign-out writes exactly one row to `auth_logs`. | M      | P0       |
+| F03 | Frontend NextAuth wiring + sign-in        | `feat/auth-frontend`            | Install NextAuth v5, Google provider, `/signin` page, role-aware home dispatcher, sign-out (calls F02's `POST /auth/signout` then clears the cookie). Configures NextAuth `session.maxAge` + `session.updateAge` for sliding-window renewal — no custom refresh-token model. No patient sign-in. | US-2.1, US-2.2, US-3.4                                | F02           | Manual: Google sign-in lands on `/[locale]`, role dispatcher routes ADMIN to the admin dashboard, STAFF to the clinic dashboard, and DOCTOR to the schedule editor; sign-out calls the BE audit endpoint then clears cookie; `/signin?error=email_unverified` renders localized error. | M      | P0       |
 | F05 | Doctors & departments directory           | `feat/directory`                | Read-only BE endpoints + minimal FE list/detail pages for departments and doctors. Doctor lists include the doctor's department affiliations (via `doctor_departments`); a doctor may appear under multiple departments. | US-4.1, US-4.2, US-4.3                                | F02, F03      | Manual: `/departments` and `/doctors` list seeded data; doctor detail page renders affiliations with the `isPrimary` flag; STAFF can view (gated on `doctor.list` / `doctor.read`); ADMIN and DOCTOR receive `403 INSUFFICIENT_PERMISSION` unless granted.                  | M      | P0       |
 | F06 | Doctor schedule CRUD                      | `feat/schedules`                | BE `/doctors/:id/schedules` CRUD + UI for users with `schedule.manage` (STAFF unrestricted; DOCTOR limited to own schedules via service-layer scope). Each schedule carries `departmentId`; the doctor must be affiliated with that department. Three DB CHECK constraints back-stop window/break validity. | US-5.1, US-5.2, US-5.3, US-5.4                        | F05           | Manual: a STAFF user creates a schedule with `departmentId`; overlap returns `409`; mismatched department returns `409 DOCTOR_NOT_IN_DEPARTMENT`; edit & delete work; a DOCTOR can manage only their own schedules (else `403 INSUFFICIENT_PERMISSION_SCOPE`); a user without `schedule.manage` (e.g. ADMIN by default) returns `403 INSUFFICIENT_PERMISSION`. | L      | P0       |
 | F07 | Appointment types + slot finder           | `feat/slots`                    | BE-only: `/appointment-types` and `/doctors/:id/slots` (requires `departmentId`). No UI. Gated on `appointment.create`. | US-6.1, US-6.2                                        | F06           | Unit tests cover slot grid arithmetic, break-window exclusion, and exclusion of past/booked slots; manual `curl` against seed data returns expected slots; mismatched `(departmentId, type)` returns `400 DEPARTMENT_TYPE_NOT_ALLOWED`.                                                                                          | M      | P0       |
@@ -237,7 +237,7 @@ pnpm --filter @his/api prisma studio  # verify rows in each table
 
 ---
 
-### F02 — Backend auth core (P0, M)
+### F02 — Backend auth core + auth log (P0, M)
 
 **Why a standalone feature**
 
@@ -245,32 +245,65 @@ The auth contract (`POST /auth/resolve` + JWT verification + the
 permission guard) is the single most reviewable security surface.
 Isolating it from any frontend wiring lets the reviewer focus on
 cryptographic correctness, role resolution, and the RBAC enforcement
-layer.
+layer. Bundling the append-only `auth_logs` table in the same PR keeps
+the audit trail wired up from day one — the guards and the resolve
+service are the producers, so co-landing them avoids a "logs were added
+later but the auth flow already shipped" gap.
 
 **Files expected to change**
 
 - `apps/api/src/auth/` — `auth.module.ts`, `auth.controller.ts`,
-  `auth.service.ts`, `internal-secret.guard.ts`, `jwt.guard.ts`,
-  `permissions.guard.ts`, `require-permission.decorator.ts`,
-  `current-user.decorator.ts`, `swagger/` subfolder
-  (`resolve.swagger.ts`, `index.ts`).
-- `apps/api/src/auth/dto/resolve.dto.ts` — class-validator DTO for the
-  Google profile payload.
-- `apps/api/src/common/` — global `HttpExceptionFilter` producing the
-  shared `{ statusCode, code, message, details? }` envelope; `errors.ts`
-  enumerating stable `code` constants (incl. `NOT_INVITED`,
-  `USER_DISABLED`, `INSUFFICIENT_PERMISSION`).
-- `apps/api/src/app.module.ts` — register filter as APP_FILTER; register
-  `JwtGuard` + `PermissionsGuard` as APP_GUARD so every endpoint is
-  protected by default.
-- `apps/api/src/users/` — minimal `UsersService` (find by email
-  including `role.policies.permission` so the request handler has the
-  permission set; link `googleSub`).
-- `apps/api/test/auth.e2e-spec.ts` — happy path (ADMIN resolves with its
-  5-permission set; STAFF resolves with its 11-permission set; DOCTOR
-  resolves with `['schedule.manage']`), disabled user rejected, invalid
-  JWT rejected, `INSUFFICIENT_PERMISSION` on a stub endpoint that
-  requires `permission.assign`.
+  `auth.service.ts`, `auth.swagger.ts` (composite Swagger decorators per
+  CLAUDE.md §6), `auth.const.ts` (`SESSION_COOKIE_NAMES`,
+  `INTERNAL_SECRET_HEADER`), `auth.types.ts` (`SessionTokenPayload`,
+  `ResolveResult`), `session-token.ts` (HS256 verify + cookie / Bearer
+  parsers via `jose`), `permissions.ts` (`PERMISSION` catalog),
+  `roles.ts` (`ROLE` catalog + `SIGN_IN_ELIGIBLE_ROLES` +
+  `DEFAULT_ROLE_PERMISSIONS`), `guards/` (`jwt.guard.ts`,
+  `permissions.guard.ts`, `internal-secret.guard.ts`), `decorators/`
+  (`public.decorator.ts`, `internal-route.decorator.ts`,
+  `require-permission.decorator.ts`, `current-user.decorator.ts`),
+  `dto/resolve.dto.ts` (class-validator DTO for the Google profile).
+- `apps/api/src/auth-log/` — `auth-log.module.ts` (`@Global()`),
+  `auth-log.service.ts` (`record()` + four convenience writers,
+  `await`-ed with internal try/catch so a DB outage never breaks auth),
+  `auth-log.const.ts` (`AUTH_LOG_EVENT` typed catalog + truncation
+  limits), `auth-log.types.ts` (`AuthLogContext`, `AuthLogPayload`),
+  `request-context.ts` (extracts ip / UA / path / method from the
+  Express request; reads `X-Forwarded-For` first).
+- `apps/api/src/common/` — `errors.ts` (`ErrorCode` catalog incl.
+  `NOT_INVITED`, `USER_DISABLED`, `INSUFFICIENT_PERMISSION`,
+  `AUTH_INTERNAL_FORBIDDEN`, `EMAIL_UNVERIFIED`, `INTERNAL_ERROR`),
+  `app-exception.ts` (`AppException` with `code` + `details`),
+  `filters/http-exception.filter.ts` (global filter producing the
+  shared `{ statusCode, code, message, details? }` envelope; coerces
+  Nest `HttpException` and class-validator arrays into the same shape).
+- `apps/api/src/app.module.ts` — register `HttpExceptionFilter` as
+  `APP_FILTER`; register `InternalSecretGuard`, `JwtGuard`, and
+  `PermissionsGuard` (in that order) as `APP_GUARD` so every endpoint
+  is protected by default; import `AuthLogModule` and `UsersModule`.
+- `apps/api/src/health/health.controller.ts` — mark `@Public()` so the
+  liveness check bypasses `JwtGuard`.
+- `apps/api/src/users/` — `users.module.ts`, `users.service.ts`
+  (`findActiveById`, `findByEmail`, `isEmailDisabled`, `linkGoogleSub`;
+  loads `role.policies.permission` with `deletedAt: null` filter so
+  revokes take effect on the next request), `users.types.ts`
+  (`AuthenticatedUser`).
+- `apps/api/prisma/schema.prisma` — adds the `AuthLogEvent` enum and
+  the `AuthLog` model (append-only — no `created_by` / `updated_*` /
+  `deleted_*`). Inverse `User.authLogs` added.
+- `apps/api/prisma/migrations/<timestamp>_add_auth_log/migration.sql` —
+  forward migration on top of the F01 init. Plain CREATE TYPE +
+  CREATE TABLE — no CHECK constraints.
+- `apps/api/src/auth/*.spec.ts` + `apps/api/src/auth-log/auth-log.service.spec.ts`
+  — unit specs covering the resolve flow, JWT helpers, permissions
+  guard (incl. denial logging), and the auth-log writer (normalisation,
+  truncation, error swallowing).
+- `apps/api/test/auth.e2e-spec.ts` + `test/jest-e2e.json` +
+  `test/utils/sign-jwt.ts` — e2e covers ADMIN/STAFF/DOCTOR resolve
+  happy paths, the four rejection codes, `GET /me`, the
+  `permission.assign`-gated stub, and one assertion per `AuthLogEvent`
+  verifying the expected row hits `auth_logs`.
 - `apps/api/package.json` — exact-pin add `jose@5.9.6`.
 
 **Permission enforcement**
@@ -281,12 +314,14 @@ layer.
   (cached on the request context — Nest's request-scoped DI or a
   request-bound interceptor) and exposes the codes as
   `request.user.permissionCodes: string[]`. The
-  `@RequirePermission('schedule.manage')` decorator checks the required
-  code against that set.
+  `@RequirePermission(PERMISSION.SCHEDULE_MANAGE)` decorator checks the
+  required code against that set.
 - Handlers with no `@RequirePermission()` only need a valid session
-  (e.g. sign-out endpoint).
+  (e.g. `POST /auth/signout`, `GET /me`).
 - Permission denials return `403` with `code=INSUFFICIENT_PERMISSION`
-  and `details: { required: ['<code>'], held: ['<code>', ...] }`.
+  and `details: { required: ['<code>'], held: ['<code>', ...] }`, and
+  write a `PERMISSION_DENIED` row to `auth_logs` (US-2.6) before the
+  exception is thrown.
 - **App-layer scope (DOCTOR own-schedule restriction):** the coarse
   `schedule.manage` permission is held by both STAFF and DOCTOR. The
   schedule CRUD service (F06) MUST additionally enforce
@@ -295,10 +330,36 @@ layer.
   layer only checks the code; the scope check belongs to the feature
   service.
 
+**Auth-log behaviour (US-2.6 / US-2.7)**
+
+- `AuthService.resolve()` `await`s an `AuthLogService.logSignInSuccess`
+  (happy path) or `logSignInFailure` (each rejection: `EMAIL_UNVERIFIED`
+  → `USER_DISABLED` → `NOT_INVITED` → role-not-eligible). The
+  `reason` column carries the stable `ErrorCode`.
+- `PermissionsGuard` becomes async and `await`s
+  `AuthLogService.logPermissionDenied(userId, email, required, held,
+  context)` before throwing `403`. `userId` and `email` are `null`
+  when the JWT decoded but no user row is attached (defensive).
+- `POST /auth/signout` writes a `SIGN_OUT` row, returns `204`, and does
+  NOT clear any cookie (the FE owns cookie clearing via NextAuth's
+  `signOut()`).
+- Writes are `await`-ed so the row is guaranteed before the HTTP
+  response, BUT the underlying Prisma `create` is wrapped in
+  `try/catch` inside `AuthLogService` — a log failure logs at `ERROR`
+  level and returns; the auth response is never broken by an audit
+  failure.
+
 **Migration / breaking-change notes**
 
-- No schema changes (F01 already covers `User.googleSub`, the soft-delete
-  cluster used for disabling, and the RBAC tables).
+- One **forward migration** on top of the F01 init:
+  `apps/api/prisma/migrations/<timestamp>_add_auth_log/migration.sql`.
+  Adds the `AuthLogEvent` enum and the `auth_logs` table with three
+  indexes (`(user_id, created_at)`, `(event, created_at)`, `(email)`)
+  and one FK to `users` (`ON DELETE NO ACTION` so audit rows survive
+  user soft-delete). No CHECK constraints, no data backfill — apply
+  with `pnpm --filter @hospital/api prisma migrate dev`.
+- Reviewers already on `feat/db-foundation` schemas need to re-run
+  `prisma migrate dev` (or `migrate reset`) to pick up the new table.
 
 **Manual smoke test**
 
@@ -314,13 +375,26 @@ curl -i -X POST http://localhost:3001/api/v1/auth/resolve \
   -H "X-Internal-Secret: $INTERNAL_API_SECRET" \
   -d '{ "email": "staff1@gmail.com", "googleSub": "g-123",
         "emailVerified": true, "name": "Pim Sukjai", "picture": null }'
+
+# Sign-out (writes a SIGN_OUT row, no cookie clearing):
+curl -i -X POST http://localhost:3001/api/v1/auth/signout \
+  -H "Cookie: next-auth.session-token=<jwt>"
+
+# Inspect the audit trail:
+psql "$DATABASE_URL" \
+  -c "SELECT event, email, reason, created_at
+        FROM auth_logs
+        ORDER BY created_at DESC LIMIT 10;"
 ```
 
-Expected: `200` with `{ userId, roleCode, permissionCodes }`. A
-not-pre-created email returns `code=NOT_INVITED`. A request missing the
+Expected: `/auth/resolve` returns `200` with `{ userId, roleCode,
+permissionCodes }` and writes one `SIGN_IN_SUCCESS` row. A
+not-pre-created email returns `code=NOT_INVITED` and writes a
+`SIGN_IN_FAILED` row with `reason='NOT_INVITED'`. A request missing the
 internal secret header returns `401 AUTH_INTERNAL_FORBIDDEN`. A
-permission-gated stub endpoint returns `403 INSUFFICIENT_PERMISSION`
-when the caller's role doesn't grant the required code.
+permission-gated stub returns `403 INSUFFICIENT_PERMISSION` and writes
+a `PERMISSION_DENIED` row with the `required` + `held` arrays.
+`/auth/signout` returns `204` and writes a `SIGN_OUT` row.
 
 ---
 
@@ -337,7 +411,11 @@ same-origin proxying.
 
 - `apps/web/src/auth.ts` — NextAuth v5 config (Google provider, JWT
   strategy, HS256 secret, `signIn` callback calling backend
-  `/auth/resolve`).
+  `/auth/resolve`). Session lifetime configured with `session.maxAge`
+  (hard ceiling, e.g. 7 days) and `session.updateAge` (sliding-window
+  renewal interval, e.g. 1 hour) — see the **Session renewal model**
+  convention in `docs/user-stories.md`. No custom refresh-token table;
+  the JWT cookie auto-renews on activity within `maxAge`.
 - `apps/web/src/middleware.ts` — locale + auth middleware; redirects
   unauthenticated visits to `/[locale]/signin`.
 - `apps/web/src/app/[locale]/signin/page.tsx` — single "Continue with
@@ -369,11 +447,18 @@ same-origin proxying.
 
 1. `pnpm dev`.
 2. Open `http://localhost:3000` → redirects to `/en/signin`.
-3. Click "Continue with Google" → complete OAuth.
+3. Click "Continue with Google" → complete OAuth. The successful resolve
+   writes a `SIGN_IN_SUCCESS` row to `auth_logs` (F02).
 4. Land on `/en` (role dispatcher).
-5. Click "Sign out" → back to `/en/signin`.
+5. Click "Sign out" — the FE calls `POST /auth/signout` first (writes a
+   `SIGN_OUT` row to `auth_logs`) and then clears the cookie via
+   NextAuth's `signOut()` → back to `/en/signin`.
 6. Visit `/en/signin?error=email_unverified` directly → localized error
    visible.
+7. Verify the audit trail in Prisma Studio or psql:
+   `SELECT event, email, reason FROM auth_logs ORDER BY created_at DESC
+   LIMIT 5;` should show the `SIGN_IN_SUCCESS` and `SIGN_OUT` rows from
+   steps 3 and 5.
 
 ---
 
