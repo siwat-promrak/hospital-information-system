@@ -6,12 +6,24 @@ This document groups stories by epic (E1–E12). Each epic maps to one or more
 features in `feature-roadmap.md`. Story IDs are stable: when a story is
 implemented, reference its ID in commit messages and PR descriptions.
 
-Roles used in this document:
+Roles used in this document (matches the `Role` enum in Prisma):
 
-- **PATIENT** — end user who books appointments for themselves.
-- **STAFF** — clinic employee who manages schedules and books on behalf of any
-  patient.
-- **ADMIN** — superset of STAFF; can additionally manage staff accounts.
+- **PATIENT** — end user. Signs in with Google, completes onboarding (if no
+  existing `Patient` matches their email), then can view / cancel / book
+  their own appointments.
+- **STAFF** — clinic-side coordinator / receptionist. Books and cancels
+  appointments on behalf of patients they own (via `Patient.primaryStaffUserId`),
+  manages doctor schedules, registers walk-in patients. Cannot manage user
+  accounts or see patients owned by other STAFF.
+- **ADMIN** — superset of STAFF. Bypasses the ownership filter (sees / acts
+  on all patients), invites and soft-deletes STAFF/ADMIN users, reassigns
+  patient ownership (`PATCH /admin/patients/:id`).
+- **DOCTOR** — **data-only role** in P0. A `User` with `role=DOCTOR` always
+  has a linked `Doctor` row (1:1) + a `Department`, so STAFF can book against
+  them. They have **no dedicated UI portal** in this take-home (the spec
+  only names "hospital staff" as users). If a DOCTOR ever signs in via
+  Google, sign-in resolution succeeds and they can technically authenticate,
+  but no role-specific routes exist for them yet.
 
 Conventions:
 
