@@ -2,6 +2,8 @@ import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
+import { AuthLogService } from '../../auth-log/auth-log.service';
+import { buildAuthLogContext } from '../../auth-log/request-context';
 import { AppException } from '../../common/app-exception';
 import type { AuthenticatedUser } from '../../users/users.types';
 import { INTERNAL_ROUTE_KEY } from '../decorators/internal-route.decorator';
@@ -16,13 +18,17 @@ import { REQUIRED_PERMISSIONS_KEY } from '../decorators/require-permission.decor
  * Behaviour:
  *  - No `@RequirePermission()` on the handler → pass (any signed-in user).
  *  - Caller holds at least one of the declared codes → pass.
- *  - Otherwise → 403 `INSUFFICIENT_PERMISSION` with `{ required, held }`.
+ *  - Otherwise → 403 `INSUFFICIENT_PERMISSION` with `{ required, held }`
+ *    AND a `PERMISSION_DENIED` row in `auth_logs`.
  */
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly authLog: AuthLogService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     if (this.shouldSkip(context)) {
       return true;
     }
@@ -43,6 +49,8 @@ export class PermissionsGuard implements CanActivate {
     const user = request.user;
 
     if (!user) {
+      await this.recordDenial(request, null, null, required, []);
+
       throw AppException.insufficientPermission(required, []);
     }
 
@@ -50,10 +58,28 @@ export class PermissionsGuard implements CanActivate {
     const granted = required.some((code) => held.includes(code));
 
     if (!granted) {
+      await this.recordDenial(request, user.id, user.email, required, [...held]);
+
       throw AppException.insufficientPermission(required, held);
     }
 
     return true;
+  }
+
+  private recordDenial(
+    request: Request,
+    userId: string | null,
+    email: string | null,
+    required: string[],
+    held: string[],
+  ): Promise<void> {
+    return this.authLog.logPermissionDenied(
+      userId,
+      email,
+      required,
+      held,
+      buildAuthLogContext(request),
+    );
   }
 
   private shouldSkip(context: ExecutionContext): boolean {

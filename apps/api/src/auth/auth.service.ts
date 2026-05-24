@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
+import { AuthLogService } from '../auth-log/auth-log.service';
+import type { AuthLogContext } from '../auth-log/auth-log.types';
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '../common/errors';
 import { UsersService } from '../users/users.service';
@@ -12,7 +14,10 @@ import { SIGN_IN_ELIGIBLE_ROLES, type RoleCode } from './roles';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly authLog: AuthLogService,
+  ) {}
 
   /**
    * Resolve a Google profile to an existing user row and return the
@@ -28,9 +33,15 @@ export class AuthService {
    *
    * On success, link the Google `sub` to the user (idempotent) and return
    * the permission codes loaded from the role's active policies.
+   *
+   * Every outcome (success or rejection) writes a single row to
+   * `auth_logs`. Writes are fire-and-forget — a log failure never breaks
+   * the auth response.
    */
-  async resolve(dto: ResolveDto): Promise<ResolveResult> {
+  async resolve(dto: ResolveDto, context: AuthLogContext): Promise<ResolveResult> {
     if (!dto.emailVerified) {
+      await this.authLog.logSignInFailure(dto.email, ErrorCode.EMAIL_UNVERIFIED, context);
+
       throw AppException.unauthorized(
         ErrorCode.EMAIL_UNVERIFIED,
         'Google email is not verified.',
@@ -41,21 +52,19 @@ export class AuthService {
 
     if (!user) {
       const disabled = await this.users.isEmailDisabled(dto.email);
+      const reason = disabled ? ErrorCode.USER_DISABLED : ErrorCode.NOT_INVITED;
+      const message = disabled
+        ? 'User account is disabled.'
+        : 'No invitation exists for this email.';
 
-      if (disabled) {
-        throw AppException.unauthorized(
-          ErrorCode.USER_DISABLED,
-          'User account is disabled.',
-        );
-      }
+      await this.authLog.logSignInFailure(dto.email, reason, context);
 
-      throw AppException.unauthorized(
-        ErrorCode.NOT_INVITED,
-        'No invitation exists for this email.',
-      );
+      throw AppException.unauthorized(reason, message);
     }
 
     if (!this.isSignInEligibleRole(user.roleCode)) {
+      await this.authLog.logSignInFailure(dto.email, ErrorCode.NOT_INVITED, context);
+
       throw AppException.unauthorized(
         ErrorCode.NOT_INVITED,
         'Role is not eligible for sign-in.',
@@ -64,7 +73,18 @@ export class AuthService {
 
     await this.users.linkGoogleSub(user.id, dto.googleSub);
 
+    await this.authLog.logSignInSuccess(user.id, user.email, context);
+
     return this.toResolveResult(user);
+  }
+
+  /**
+   * Records a sign-out event. The actual cookie clearing is handled by
+   * NextAuth on the FE — this endpoint exists purely so the auth log gets
+   * a row for voluntary session termination.
+   */
+  async signOut(user: AuthenticatedUser, context: AuthLogContext): Promise<void> {
+    await this.authLog.logSignOut(user.id, user.email, context);
   }
 
   private isSignInEligibleRole(code: string): code is RoleCode {

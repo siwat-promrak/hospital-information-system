@@ -1,10 +1,25 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 
+import { buildAuthLogContext } from '../auth-log/request-context';
 import type { AuthenticatedUser } from '../users/users.types';
 
 import { AuthService } from './auth.service';
-import { ApiAuthResolve, ApiMe, ApiMePermissionsCheck } from './auth.swagger';
+import {
+  ApiAuthResolve,
+  ApiAuthSignOut,
+  ApiMe,
+  ApiMePermissionsCheck,
+} from './auth.swagger';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { InternalRoute } from './decorators/internal-route.decorator';
 import { RequirePermission } from './decorators/require-permission.decorator';
@@ -20,8 +35,18 @@ export class AuthController {
   @InternalRoute()
   @HttpCode(HttpStatus.OK)
   @ApiAuthResolve()
-  resolve(@Body() dto: ResolveDto): Promise<ResolveResponseDto> {
-    return this.auth.resolve(dto);
+  resolve(@Body() dto: ResolveDto, @Req() request: Request): Promise<ResolveResponseDto> {
+    return this.auth.resolve(dto, buildAuthLogContext(request));
+  }
+
+  @Post('auth/signout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiAuthSignOut()
+  async signOut(
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() request: Request,
+  ): Promise<void> {
+    await this.auth.signOut(user, buildAuthLogContext(request));
   }
 
   @Get('me')

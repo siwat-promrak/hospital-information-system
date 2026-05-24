@@ -17,6 +17,7 @@ import { Test } from '@nestjs/testing';
 import type { Server } from 'node:http';
 import request from 'supertest';
 
+import { AUTH_LOG_EVENT } from '../src/auth-log/auth-log.const';
 import { INTERNAL_SECRET_HEADER } from '../src/auth/auth.const';
 import { PERMISSION } from '../src/auth/permissions';
 import { DEFAULT_ROLE_PERMISSIONS, ROLE } from '../src/auth/roles';
@@ -142,6 +143,17 @@ async function ensureFixtures(prisma: PrismaService): Promise<SeededIds | null> 
 }
 
 async function teardownFixtures(prisma: PrismaService, ids: SeededIds): Promise<void> {
+  // Auth-log rows hold FKs to the test users — delete them first so the
+  // user.deleteMany below isn't blocked by ON DELETE NO ACTION.
+  await prisma.authLog.deleteMany({
+    where: {
+      OR: [
+        { userId: { in: [ids.adminId, ids.staffId, ids.doctorId, ids.disabledId] } },
+        { email: { in: [DOCTOR_EMAIL, DISABLED_EMAIL, 'stranger@gmail.com'] } },
+      ],
+    },
+  });
+
   await prisma.user.deleteMany({
     where: { id: { in: [ids.doctorId, ids.disabledId] } },
   });
@@ -384,5 +396,152 @@ describe('F02 — Auth core e2e', () => {
     expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION);
     expect(res.body.details.required).toEqual([PERMISSION.PERMISSION_ASSIGN]);
     expect(res.body.details.held).not.toContain(PERMISSION.PERMISSION_ASSIGN);
+  });
+
+  // ─── auth_logs ─────────────────────────────────────────────────────────────
+  // Each test below issues a request and then reads back the most recent
+  // matching `auth_logs` row to verify the write happened. The auth-log
+  // writes are `await`-ed inside AuthService / PermissionsGuard so the row
+  // is guaranteed to exist by the time the response returns.
+
+  maybe('SIGN_IN_SUCCESS row is written on a successful resolve', async () => {
+    const before = new Date();
+
+    await request(server)
+      .post('/api/v1/auth/resolve')
+      .set(INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+      .set('User-Agent', 'jest-supertest/e2e')
+      .send({
+        email: ids!.staffEmail,
+        googleSub: 'g-log-staff',
+        emailVerified: true,
+        name: 'Pim Sukjai',
+      })
+      .expect(200);
+
+    const row = await prisma.authLog.findFirst({
+      where: {
+        event: AUTH_LOG_EVENT.SIGN_IN_SUCCESS,
+        userId: ids!.staffId,
+        createdAt: { gte: before },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    expect(row).not.toBeNull();
+    expect(row!.email).toBe(ids!.staffEmail);
+    expect(row!.reason).toBeNull();
+    expect(row!.requiredPermissions).toEqual([]);
+    expect(row!.heldPermissions).toEqual([]);
+    expect(row!.userAgent).toBe('jest-supertest/e2e');
+    expect(row!.method).toBe('POST');
+    expect(row!.path).toContain('/auth/resolve');
+  });
+
+  maybe('SIGN_IN_FAILED row carries the reason code for NOT_INVITED', async () => {
+    const before = new Date();
+    const email = 'stranger@gmail.com';
+
+    await request(server)
+      .post('/api/v1/auth/resolve')
+      .set(INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+      .send({ email, googleSub: 'g-x', emailVerified: true, name: 'Stranger' })
+      .expect(401);
+
+    const row = await prisma.authLog.findFirst({
+      where: {
+        event: AUTH_LOG_EVENT.SIGN_IN_FAILED,
+        email,
+        createdAt: { gte: before },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    expect(row).not.toBeNull();
+    expect(row!.userId).toBeNull();
+    expect(row!.reason).toBe(ErrorCode.NOT_INVITED);
+  });
+
+  maybe('SIGN_IN_FAILED row uses USER_DISABLED for soft-deleted accounts', async () => {
+    const before = new Date();
+
+    await request(server)
+      .post('/api/v1/auth/resolve')
+      .set(INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+      .send({
+        email: DISABLED_EMAIL,
+        googleSub: 'g-x',
+        emailVerified: true,
+        name: 'Disabled E2E',
+      })
+      .expect(401);
+
+    const row = await prisma.authLog.findFirst({
+      where: {
+        event: AUTH_LOG_EVENT.SIGN_IN_FAILED,
+        email: DISABLED_EMAIL,
+        createdAt: { gte: before },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    expect(row).not.toBeNull();
+    expect(row!.reason).toBe(ErrorCode.USER_DISABLED);
+  });
+
+  maybe('PERMISSION_DENIED row captures required + held when STAFF hits an ADMIN-only route', async () => {
+    const before = new Date();
+    const jwt = await signTestJwt(
+      { userId: ids!.staffId, roleCode: ROLE.STAFF, email: ids!.staffEmail },
+      NEXTAUTH_SECRET,
+    );
+
+    await request(server)
+      .get('/api/v1/me/permissions-check')
+      .set('Authorization', `Bearer ${jwt}`)
+      .expect(403);
+
+    const row = await prisma.authLog.findFirst({
+      where: {
+        event: AUTH_LOG_EVENT.PERMISSION_DENIED,
+        userId: ids!.staffId,
+        createdAt: { gte: before },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    expect(row).not.toBeNull();
+    expect(row!.requiredPermissions).toEqual([PERMISSION.PERMISSION_ASSIGN]);
+    expect(row!.heldPermissions).toEqual(
+      expect.arrayContaining([PERMISSION.APPOINTMENT_CREATE, PERMISSION.SCHEDULE_MANAGE]),
+    );
+    expect(row!.heldPermissions).not.toContain(PERMISSION.PERMISSION_ASSIGN);
+    expect(row!.path).toContain('/me/permissions-check');
+    expect(row!.method).toBe('GET');
+  });
+
+  maybe('SIGN_OUT writes a row and clears no cookie on the BE side', async () => {
+    const before = new Date();
+    const jwt = await signTestJwt(
+      { userId: ids!.adminId, roleCode: ROLE.ADMIN, email: ids!.adminEmail },
+      NEXTAUTH_SECRET,
+    );
+
+    await request(server)
+      .post('/api/v1/auth/signout')
+      .set('Authorization', `Bearer ${jwt}`)
+      .expect(204);
+
+    const row = await prisma.authLog.findFirst({
+      where: {
+        event: AUTH_LOG_EVENT.SIGN_OUT,
+        userId: ids!.adminId,
+        createdAt: { gte: before },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    expect(row).not.toBeNull();
+    expect(row!.email).toBe(ids!.adminEmail);
   });
 });

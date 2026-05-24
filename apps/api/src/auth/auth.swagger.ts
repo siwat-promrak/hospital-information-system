@@ -2,6 +2,7 @@ import { applyDecorators } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiUnauthorizedResponse,
@@ -110,6 +111,34 @@ export function ApiMe(): MethodDecorator & ClassDecorator {
         },
       },
     }),
+    ApiUnauthorizedResponse({
+      description: 'Missing or invalid session token',
+      schema: {
+        example: ENVELOPE_EXAMPLE(
+          ErrorCode.AUTH_MISSING_TOKEN,
+          'Missing session token.',
+          401,
+        ),
+      },
+    }),
+  );
+}
+
+/**
+ * `POST /auth/signout` — records a SIGN_OUT event in `auth_logs`. The
+ * cookie itself is cleared by NextAuth on the FE; this endpoint is purely
+ * an audit hook so we capture voluntary session termination alongside
+ * sign-in events.
+ */
+export function ApiAuthSignOut(): MethodDecorator & ClassDecorator {
+  return applyDecorators(
+    ApiOperation({
+      summary: 'Record a SIGN_OUT auth-log event for the current user',
+      description:
+        'Cookie clearing is handled client-side by NextAuth. This endpoint ' +
+        'only writes the audit row.',
+    }),
+    ApiNoContentResponse({ description: 'Auth-log row written' }),
     ApiUnauthorizedResponse({
       description: 'Missing or invalid session token',
       schema: {
