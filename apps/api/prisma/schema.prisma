@@ -170,9 +170,10 @@ model Policy {
 }
 
 // ─── Auth principal ──────────────────────────────────────────────────────────
-// Every signed-in identity. PATIENT users link to a `Patient` row (1-1) via
-// `Patient.userId`. DOCTOR users link to a `Doctor` row (1-1) via
+// Every signed-in identity. DOCTOR users link to a `Doctor` row (1-1) via
 // `Doctor.userId`. ADMIN / STAFF users do not require a clinical record.
+// Patients are pure records (no `User` link); only staff/admin operators
+// register and manage patients.
 //
 // The super-admin user is seeded at the nil UUID
 // (`00000000-0000-0000-0000-000000000000`) and is the default `created_by`
@@ -210,9 +211,8 @@ model User {
   createdUsers  User[] @relation("UserCreatedBy")
   deletedUsers  User[] @relation("UserDeletedBy")
 
-  // 1-1 clinical links.
-  patient Patient?
-  doctor  Doctor?
+  // 1-1 clinical link (doctors only — patients are pure records).
+  doctor Doctor?
 
   // Appointment audit inverses.
   bookedAppointments    Appointment[] @relation("AppointmentsCreatedBy")
@@ -242,10 +242,11 @@ model User {
 }
 
 // ─── Clinical entities ───────────────────────────────────────────────────────
+// Patients are pure records owned by ADMIN / STAFF operators — there is no
+// `User` link because patients do not sign in (no patient portal in P0).
 
 model Patient {
   id                      String     @id @default(uuid()) @db.Uuid
-  userId                  String     @unique @map("user_id") @db.Uuid
   hn                      String     @unique // Hospital Number — e.g. "HN-2026-0001"
   dateOfBirth             DateTime   @map("date_of_birth") @db.Date
   gender                  Gender
@@ -263,7 +264,6 @@ model Patient {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  user          User  @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   createdByUser User  @relation("PatientCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("PatientDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
