@@ -7,17 +7,30 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { FE_PATH } from "@/auth/routes";
 import { PERMISSION_CODE } from "@/auth/permissions";
 import DepartmentCardLink from "@/components/department/DepartmentCardLink";
+import PaginationControl from "@/components/shared/PaginationControl";
 import { listDepartments } from "@/lib/api/department.api";
+import { parsePositiveInt } from "@/lib/utils/parse";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { hasPermission, requireSession } from "@/lib/server/session";
+import { DOCTOR_QUERY_PARAM } from "@/lib/api/doctor.const";
+import {
+  DEFAULT_PAGE,
+  DEFAULT_PAGE_SIZE,
+  PAGINATION_QUERY_PARAM,
+} from "@/lib/api/pagination.const";
 
 interface DepartmentsPageProps {
   params: Promise<{ locale: AppLocale }>;
+  searchParams: Promise<{ page?: string }>;
 }
 
-export default async function DepartmentsPage({ params }: DepartmentsPageProps) {
+export default async function DepartmentsPage({
+  params,
+  searchParams,
+}: DepartmentsPageProps) {
   const { locale } = await params;
+  const { page: pageParam } = await searchParams;
 
   setRequestLocale(locale);
 
@@ -29,7 +42,9 @@ export default async function DepartmentsPage({ params }: DepartmentsPageProps) 
     return <ForbiddenCard message={tErrors(K.Directory.Errors.forbidden)} />;
   }
 
-  const departments = await listDepartments();
+  const page = parsePositiveInt(pageParam) ?? DEFAULT_PAGE;
+  const pageSize = DEFAULT_PAGE_SIZE;
+  const result = await listDepartments({ page, pageSize });
 
   return (
     <Stack spacing={3}>
@@ -41,7 +56,7 @@ export default async function DepartmentsPage({ params }: DepartmentsPageProps) 
           {tHeader(K.Directory.Departments.subtitle)}
         </Typography>
       </Box>
-      {departments.length === 0 ? (
+      {result.data.length === 0 ? (
         <Card variant="outlined" sx={{ p: 4, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
             {tHeader(K.Directory.Departments.empty)}
@@ -59,16 +74,21 @@ export default async function DepartmentsPage({ params }: DepartmentsPageProps) 
             },
           }}
         >
-          {departments.map((dept) => (
+          {result.data.map((dept) => (
             <DepartmentCardLink
               key={dept.id}
               name={dept.name}
               description={dept.description}
-              href={`${FE_PATH.DOCTORS}?departmentId=${dept.id}`}
+              href={`${FE_PATH.DOCTORS}?${PAGINATION_QUERY_PARAM.PAGE}=${DEFAULT_PAGE}&${DOCTOR_QUERY_PARAM.DEPARTMENT_ID}=${dept.id}`}
             />
           ))}
         </Box>
       )}
+      <PaginationControl
+        page={result.page}
+        totalPages={result.totalPages}
+        basePath={FE_PATH.DEPARTMENTS}
+      />
     </Stack>
   );
 }

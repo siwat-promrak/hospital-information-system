@@ -61,6 +61,15 @@
     "signedInAs": "Signed in as",
     "language": "Language"
   },
+  "Pagination": {
+    "ariaLabel": "Pagination navigation",
+    "previous": "Previous page",
+    "next": "Next page",
+    "first": "First page",
+    "last": "Last page",
+    "currentPage": "Page {page}, current page",
+    "gotoPage": "Go to page {page}"
+  },
   "Directory": {
     "Departments": {
       "title": "Departments",

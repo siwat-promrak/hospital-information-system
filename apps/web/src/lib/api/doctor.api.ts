@@ -5,7 +5,10 @@ import type {
   DoctorDetailRow,
   DoctorListRow,
 } from "@/types/doctor.types";
+import type { Paginated, PaginationParams } from "@/types/pagination.types";
 
+import { DOCTOR_QUERY_PARAM } from "./doctor.const";
+import { buildPaginationQuery } from "./pagination";
 import { userFetch } from "./server-fetch";
 
 /**
@@ -14,14 +17,18 @@ import { userFetch } from "./server-fetch";
  * BE's `JwtGuard` + `PermissionsGuard` decide whether to serve or 403.
  */
 
-export function listDoctors(filter?: {
+interface ListDoctorsParams extends PaginationParams {
   departmentId?: string;
-}): Promise<DoctorListRow[]> {
-  const search = filter?.departmentId
-    ? `?departmentId=${encodeURIComponent(filter.departmentId)}`
-    : "";
+}
 
-  return userFetch<DoctorListRow[]>(`${BE_PATH.DOCTORS}${search}`);
+export function listDoctors(
+  params?: ListDoctorsParams,
+): Promise<Paginated<DoctorListRow>> {
+  const query = buildPaginationQuery(params, {
+    [DOCTOR_QUERY_PARAM.DEPARTMENT_ID]: params?.departmentId,
+  });
+
+  return userFetch<Paginated<DoctorListRow>>(`${BE_PATH.DOCTORS}${query}`);
 }
 
 export function getDoctor(id: string): Promise<DoctorDetailRow> {

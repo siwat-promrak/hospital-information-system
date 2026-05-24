@@ -61,6 +61,15 @@
     "signedInAs": "เข้าสู่ระบบในชื่อ",
     "language": "ภาษา"
   },
+  "Pagination": {
+    "ariaLabel": "การนำทางหน้า",
+    "previous": "หน้าก่อนหน้า",
+    "next": "หน้าถัดไป",
+    "first": "หน้าแรก",
+    "last": "หน้าสุดท้าย",
+    "currentPage": "หน้า {page} หน้าปัจจุบัน",
+    "gotoPage": "ไปยังหน้า {page}"
+  },
   "Directory": {
     "Departments": {
       "title": "แผนก",

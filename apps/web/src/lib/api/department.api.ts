@@ -5,7 +5,9 @@ import type {
   DepartmentDoctorRow,
   DepartmentRow,
 } from "@/types/department.types";
+import type { Paginated, PaginationParams } from "@/types/pagination.types";
 
+import { buildPaginationQuery } from "./pagination";
 import { userFetch } from "./server-fetch";
 
 /**
@@ -15,14 +17,19 @@ import { userFetch } from "./server-fetch";
  * or 403.
  */
 
-export function listDepartments(): Promise<DepartmentRow[]> {
-  return userFetch<DepartmentRow[]>(BE_PATH.DEPARTMENTS);
+export function listDepartments(
+  params?: PaginationParams,
+): Promise<Paginated<DepartmentRow>> {
+  return userFetch<Paginated<DepartmentRow>>(
+    `${BE_PATH.DEPARTMENTS}${buildPaginationQuery(params)}`,
+  );
 }
 
 export function listDepartmentDoctors(
   departmentId: string,
-): Promise<DepartmentDoctorRow[]> {
-  return userFetch<DepartmentDoctorRow[]>(
-    BE_PATH_BUILDER.departmentDoctors(departmentId),
+  params?: PaginationParams,
+): Promise<Paginated<DepartmentDoctorRow>> {
+  return userFetch<Paginated<DepartmentDoctorRow>>(
+    `${BE_PATH_BUILDER.departmentDoctors(departmentId)}${buildPaginationQuery(params)}`,
   );
 }

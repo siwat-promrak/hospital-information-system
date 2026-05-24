@@ -78,6 +78,15 @@ export const K = {
     goHome: "goHome",
     title: "title",
   },
+  Pagination: {
+    ariaLabel: "ariaLabel",
+    currentPage: "currentPage",
+    first: "first",
+    gotoPage: "gotoPage",
+    last: "last",
+    next: "next",
+    previous: "previous",
+  },
   SignIn: {
     continueWithGoogle: "continueWithGoogle",
     errors: {
@@ -116,6 +125,7 @@ export const NS = {
   Nav: "Nav",
   NavItems: "Nav.items",
   NotFound: "NotFound",
+  Pagination: "Pagination",
   SignIn: "SignIn",
   SignInErrors: "SignIn.errors",
   SignOut: "SignOut",

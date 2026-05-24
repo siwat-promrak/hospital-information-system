@@ -10,7 +10,11 @@ import { useTransition } from "react";
 import { FE_PATH } from "@/auth/routes";
 import { K, NS } from "@/i18n/keys.generated";
 import { useRouter } from "@/i18n/navigation";
-
+import { DOCTOR_QUERY_PARAM } from "@/lib/api/doctor.const";
+import {
+  DEFAULT_PAGE,
+  PAGINATION_QUERY_PARAM,
+} from "@/lib/api/pagination.const";
 import type { DepartmentRow } from "@/types/department.types";
 
 interface DoctorListFilterProps {
@@ -21,7 +25,8 @@ interface DoctorListFilterProps {
 /**
  * Department-filter selector for `/doctors`. Updates the `departmentId`
  * query param via `router.replace` so the URL stays the canonical source
- * of truth and back/forward navigation works.
+ * of truth and back/forward navigation works. Resets `page` to 1 on every
+ * change so the new filter never lands on an out-of-range offset.
  */
 export default function DoctorListFilter({
   departments,
@@ -33,10 +38,16 @@ export default function DoctorListFilter({
 
   function handleChange(event: SelectChangeEvent<string>) {
     const value = event.target.value;
-    const search = value ? `?departmentId=${encodeURIComponent(value)}` : "";
+    const search = new URLSearchParams();
+
+    search.set(PAGINATION_QUERY_PARAM.PAGE, String(DEFAULT_PAGE));
+
+    if (value) {
+      search.set(DOCTOR_QUERY_PARAM.DEPARTMENT_ID, value);
+    }
 
     startTransition(() => {
-      router.replace(`${FE_PATH.DOCTORS}${search}`);
+      router.replace(`${FE_PATH.DOCTORS}?${search.toString()}`);
     });
   }
 
