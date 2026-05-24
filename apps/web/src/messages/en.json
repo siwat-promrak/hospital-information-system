@@ -9,5 +9,28 @@
     "title": "Page not found",
     "description": "The page you're looking for doesn't exist.",
     "goHome": "Go to home"
+  },
+  "SignIn": {
+    "title": "Sign in",
+    "subtitle": "Continue to Hospital Information System",
+    "continueWithGoogle": "Continue with Google",
+    "errors": {
+      "email_unverified": "Your Google account's email is not verified. Please verify it with Google and try again.",
+      "not_invited": "No invitation exists for this email. Ask an administrator to add you to the system first.",
+      "user_disabled": "Your account has been disabled. Contact an administrator if you believe this is in error.",
+      "internal": "Something went wrong while signing you in. Please try again in a moment."
+    }
+  },
+  "SignOut": {
+    "label": "Sign out"
+  },
+  "Dashboard": {
+    "welcome": "Welcome, {name}",
+    "roleLabel": "Role",
+    "permissionsLabel": "Permissions",
+    "comingSoonAdmin": "Admin dashboard — user, role, and policy management ships in F11.",
+    "comingSoonStaff": "Staff dashboard — patient registration, booking, and appointments ship in F08.",
+    "comingSoonDoctor": "Doctor dashboard — own-schedule editor ships in F06.",
+    "noPermissions": "No permissions granted yet."
   }
 }

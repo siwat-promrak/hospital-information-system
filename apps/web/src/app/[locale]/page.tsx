@@ -1,57 +1,35 @@
-import { Suspense } from "react";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
-import { getTranslations, setRequestLocale } from "next-intl/server";
-import { K } from "@/i18n/keys.generated";
+import { setRequestLocale } from "next-intl/server";
+
+import { DASHBOARD_PATH, ROLE, type RoleCode } from "@/auth/roles";
+import { redirect } from "@/i18n/navigation";
 import type { AppLocale } from "@/i18n/routing";
-import LocaleSwitcher from "./LocaleSwitcher";
+import { requireSession } from "@/lib/server/session";
 
-type HomePageProps = {
+interface HomePageProps {
   params: Promise<{ locale: AppLocale }>;
-};
+}
 
+/**
+ * Role dispatcher. Unauthenticated callers never reach this page — the
+ * middleware redirects them to `/[locale]/signin` first. For authed
+ * callers we route by `roleCode`:
+ *
+ *   ADMIN  → `/admin`
+ *   STAFF  → `/staff`
+ *   DOCTOR → `/me/schedule`
+ *
+ * Future custom roles (US-11.6) that are not yet in `DASHBOARD_PATH`
+ * fall through to the staff dashboard as a sensible default; admins can
+ * adjust as new roles come online.
+ */
 export default async function HomePage({ params }: HomePageProps) {
   const { locale } = await params;
 
   setRequestLocale(locale);
 
-  const t = await getTranslations("Home");
+  const session = await requireSession();
+  const destination =
+    DASHBOARD_PATH[session.user.roleCode as RoleCode] ?? DASHBOARD_PATH[ROLE.STAFF];
 
-  return (
-    <Box
-      component="main"
-      sx={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        p: 4,
-        position: "relative",
-      }}
-    >
-      <Box sx={{ position: "absolute", top: 16, right: 16 }}>
-        <Suspense fallback={null}>
-          <LocaleSwitcher />
-        </Suspense>
-      </Box>
-      <Stack spacing={3} alignItems="center">
-        <Typography variant="h3" component="h1" color="primary">
-          {t(K.Home.title)}
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          {t(K.Home.subtitle)}
-        </Typography>
-        <Stack direction="row" spacing={2}>
-          <Button variant="contained" color="primary">
-            {t(K.Home.primaryAction)}
-          </Button>
-          <Button variant="contained" color="secondary">
-            {t(K.Home.secondaryAction)}
-          </Button>
-        </Stack>
-      </Stack>
-    </Box>
-  );
+  redirect({ href: destination, locale });
 }

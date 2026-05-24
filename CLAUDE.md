@@ -152,6 +152,64 @@ import type { AuthenticatedUser } from './users.types';
 
 This keeps the consumer file focused on behavior, makes types/constants individually grep-friendly, and allows other files to import them without circular dependencies on a class export.
 
+### 2b. No magic string literals — extract every semantic constant
+
+Rule 2a says **where** module-level constants live. Rule 2b says **what** must become a constant in the first place: any string literal whose value carries domain meaning MUST come from a named constant or typed catalog. Inlining the literal at the call site is forbidden — even if the literal currently appears in only one file.
+
+**MUST be extracted (no exceptions):**
+- HTTP endpoint paths — frontend route segments (`"/signin"`, `"/admin"`), backend route segments (`"/auth/resolve"`, `"/auth/signout"`), version prefixes (`"/api/v1"`, `"/api/be"`).
+- HTTP header names — `"X-Internal-Secret"`, `"Authorization"`, `"X-Forwarded-For"`.
+- Cookie names — `"next-auth.session-token"`, `"authjs.session-token"`.
+- Provider / external-system identifiers — OAuth provider ids (`"google"`), database role codes, queue names, env-var name strings.
+- Discriminator strings used in `===` comparisons — event types, role codes, error codes, permission codes (per rule 6a), status enums when stored as strings.
+- Any string compared with `===` to a different literal of the same value at a separate call site. **Rule of thumb: if a rename touches more than one file, it MUST be a constant.**
+
+**MAY stay inline:**
+- Translation keys passed to `t(K.X.Y)` — the `K` catalog already centralises them (rule 4).
+- User-facing copy whose authoritative source is a message file (consumed only through next-intl `t()`).
+- Free-text strings consumed only by humans (log messages, `Error` constructor arguments, accessibility labels also via i18n).
+- Test fixtures where the literal IS the test data (e.g. an expected response body).
+- One-shot string literals used in exactly one place AND carrying no domain meaning beyond that line (e.g. a sort direction `"asc"` in a private helper).
+
+**Where the constants live:**
+- Backend: per-domain catalog under the owning module — e.g. `apps/api/src/auth/auth.const.ts` (`INTERNAL_SECRET_HEADER`, `SESSION_COOKIE_NAMES`), `apps/api/src/auth-log/auth-log.const.ts` (`AUTH_LOG_EVENT`).
+- Frontend: per-domain catalog under `apps/web/src/<domain>/` — e.g. `apps/web/src/auth/routes.ts` (`FE_PATH`, `BE_PATH`), `apps/web/src/auth/oauth.ts` (`OAUTH_PROVIDER`).
+- Cross-tier constants that MUST agree between FE and BE (e.g. the internal-secret header name, the version prefix) live in BOTH `apps/api/src/auth/auth.const.ts` AND `apps/web/src/auth/auth.const.ts` — drift causes silent auth failures. A future shared `packages/` workspace will dedupe these, but mirroring is the current contract.
+
+```ts
+// bad — magic strings duplicated across files
+// auth.ts
+if (account?.provider !== "google") { /* ... */ }
+return `/signin?error=${key}`;
+
+// SignInButton.tsx
+await signIn("google", { callbackUrl });
+
+// SignOutButton.tsx
+await fetch(`${BACKEND_REWRITE_PREFIX}/auth/signout`, ...);
+
+
+// good — single source of truth per literal
+// auth/oauth.ts
+export const OAUTH_PROVIDER = { GOOGLE: "google" } as const;
+
+// auth/routes.ts
+export const FE_PATH = { SIGNIN: "/signin", ADMIN: "/admin", ... } as const;
+export const BE_PATH = { AUTH_RESOLVE: "/auth/resolve", AUTH_SIGN_OUT: "/auth/signout" } as const;
+
+// auth.ts
+if (account?.provider !== OAUTH_PROVIDER.GOOGLE) { /* ... */ }
+return `${FE_PATH.SIGNIN}?error=${key}`;
+
+// SignInButton.tsx
+await signIn(OAUTH_PROVIDER.GOOGLE, { callbackUrl });
+
+// SignOutButton.tsx
+await fetch(`${BACKEND_REWRITE_PREFIX}${BE_PATH.AUTH_SIGN_OUT}`, ...);
+```
+
+Rule 6a (the RBAC catalog) is the canonical instance of this rule — permission codes and role codes always come from `PERMISSION` / `ROLE`. Rule 2b extends the same discipline to every other category of domain-carrying string literal.
+
 ## Commits & Pull Requests
 
 ### 3. Focused commits, describe what changed
