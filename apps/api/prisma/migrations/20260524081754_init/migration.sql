@@ -4,6 +4,12 @@ CREATE TYPE "Role" AS ENUM ('ADMIN', 'STAFF', 'PATIENT');
 -- CreateEnum
 CREATE TYPE "AppointmentStatus" AS ENUM ('BOOKED', 'CANCELLED', 'COMPLETED');
 
+-- CreateEnum
+CREATE TYPE "AppointmentType" AS ENUM ('NEW_PATIENT_VISIT', 'FOLLOW_UP', 'CONSULTATION', 'PROCEDURE');
+
+-- CreateEnum
+CREATE TYPE "DayOfWeek" AS ENUM ('SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
@@ -63,7 +69,7 @@ CREATE TABLE "DoctorSchedule" (
     "id" TEXT NOT NULL,
     "doctorId" TEXT NOT NULL,
     "departmentId" TEXT NOT NULL,
-    "dayOfWeek" INTEGER NOT NULL,
+    "dayOfWeek" "DayOfWeek" NOT NULL,
     "startMinute" INTEGER NOT NULL,
     "endMinute" INTEGER NOT NULL,
     "acceptsBooking" BOOLEAN NOT NULL DEFAULT true,
@@ -81,7 +87,7 @@ CREATE TABLE "Appointment" (
     "patientId" TEXT NOT NULL,
     "doctorId" TEXT NOT NULL,
     "departmentId" TEXT NOT NULL,
-    "appointmentType" TEXT NOT NULL,
+    "appointmentType" "AppointmentType" NOT NULL,
     "status" "AppointmentStatus" NOT NULL DEFAULT 'BOOKED',
     "startAt" TIMESTAMP(3) NOT NULL,
     "endAt" TIMESTAMP(3) NOT NULL,
