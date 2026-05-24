@@ -10,10 +10,13 @@ import {
 } from '@nestjs/terminus';
 import { ApiTags } from '@nestjs/swagger';
 
+import { Public } from '../auth/decorators/public.decorator';
+
 import { ApiHealthCheck } from './health.swagger';
 import { ServiceHealthIndicator } from './indicators/service.health-indicator';
 
 @ApiTags('health')
+@Public()
 @Controller({ path: 'health', version: VERSION_NEUTRAL })
 export class HealthController {
   constructor(
