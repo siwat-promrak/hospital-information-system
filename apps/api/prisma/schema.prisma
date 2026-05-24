@@ -262,8 +262,17 @@ model User {
 // `User` link because patients do not sign in (no patient portal in P0).
 
 model Patient {
-  id                      String     @id @default(uuid()) @db.Uuid
-  hn                      String     @unique // Hospital Number — e.g. "HN-2026-0001"
+  id String @id @default(uuid()) @db.Uuid
+  hn String @unique @db.VarChar(9)
+  // Hospital Number: 7-9 digit numeric, format <YY><sequence>.
+  // CHECK constraint enforced via raw SQL in init migration
+  // (Prisma 5 cannot express CHECK constraints natively).
+
+  firstNameEn             String     @map("first_name_en")
+  lastNameEn              String     @map("last_name_en")
+  firstNameTh             String?    @map("first_name_th")
+  lastNameTh              String?    @map("last_name_th")
+  email                   String?    @unique // nullable; some patients have no email. Stored lowercased via normalizeEmail().
   dateOfBirth             DateTime   @map("date_of_birth") @db.Date
   gender                  Gender
   bloodGroup              BloodGroup @default(UNKNOWN) @map("blood_group")
