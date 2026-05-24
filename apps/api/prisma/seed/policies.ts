@@ -1,5 +1,6 @@
 /**
- * Seeds the default role→permission grants:
+ * Seeds the default role→permission grants from the catalog declared in
+ * `src/auth/roles.ts` (`DEFAULT_ROLE_PERMISSIONS`):
  *
  *   - ADMIN : 5 permissions — user/role/policy management only.
  *             (`user.invite`, `user.disable`, `user.list`, `role.manage`,
@@ -22,34 +23,10 @@
  */
 import { PrismaClient, type User } from '@prisma/client';
 
+import { DEFAULT_ROLE_PERMISSIONS, ROLE } from '../../src/auth/roles';
+
 import type { PermissionMap } from './permissions';
 import type { SeededRoles } from './roles';
-
-const ADMIN_GRANTS: string[] = [
-  'user.invite',
-  'user.disable',
-  'user.list',
-  'role.manage',
-  'permission.assign',
-];
-
-const STAFF_GRANTS: string[] = [
-  'appointment.create',
-  'appointment.cancel',
-  'appointment.list',
-  'appointment.read',
-  'schedule.manage',
-  'patient.create',
-  'patient.read',
-  'patient.update',
-  'patient.list',
-  'doctor.read',
-  'doctor.list',
-];
-
-const DOCTOR_GRANTS: string[] = [
-  'schedule.manage',
-];
 
 export async function seedPolicies(
   prisma: PrismaClient,
@@ -57,10 +34,10 @@ export async function seedPolicies(
   permissions: PermissionMap,
   superAdmin: User,
 ): Promise<number> {
-  const grants: Array<{ roleId: string; codes: string[] }> = [
-    { roleId: roles.admin.id, codes: ADMIN_GRANTS },
-    { roleId: roles.staff.id, codes: STAFF_GRANTS },
-    { roleId: roles.doctor.id, codes: DOCTOR_GRANTS },
+  const grants: Array<{ roleId: string; codes: readonly string[] }> = [
+    { roleId: roles.admin.id, codes: DEFAULT_ROLE_PERMISSIONS[ROLE.ADMIN] },
+    { roleId: roles.staff.id, codes: DEFAULT_ROLE_PERMISSIONS[ROLE.STAFF] },
+    { roleId: roles.doctor.id, codes: DEFAULT_ROLE_PERMISSIONS[ROLE.DOCTOR] },
   ];
 
   let count = 0;
