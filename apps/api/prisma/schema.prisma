@@ -25,6 +25,7 @@ datasource db {
 enum Role {
   ADMIN
   STAFF
+  DOCTOR
   PATIENT
 }
 
@@ -58,6 +59,31 @@ enum DayOfWeek {
   THU
   FRI
   SAT
+}
+
+// `Gender` is captured on patients (required) and doctors (optional). Stored
+// as an enum so the schema documents the supported set and avoids drift from
+// free-text values.
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+// `BloodGroup` covers the eight ABO/Rh combinations plus an explicit
+// `UNKNOWN` default so patient rows never require backfilling when blood
+// type has not been recorded yet.
+enum BloodGroup {
+  A_POSITIVE
+  A_NEGATIVE
+  B_POSITIVE
+  B_NEGATIVE
+  AB_POSITIVE
+  AB_NEGATIVE
+  O_POSITIVE
+  O_NEGATIVE
+  UNKNOWN
 }
 
 // ─── Auth principal ──────────────────────────────────────────────────────────
