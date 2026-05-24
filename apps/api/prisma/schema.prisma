@@ -83,6 +83,17 @@ enum Gender {
   FEMALE
 }
 
+// `AuthLogEvent` enumerates the auth-flow events captured in the append-only
+// `auth_logs` table. Resolve success/failure cover the sign-in path,
+// permission denials capture INSUFFICIENT_PERMISSION rejections, and
+// SIGN_OUT records voluntary session termination from the FE.
+enum AuthLogEvent {
+  SIGN_IN_SUCCESS
+  SIGN_IN_FAILED
+  PERMISSION_DENIED
+  SIGN_OUT
+}
+
 // `BloodGroup` covers the eight ABO/Rh combinations plus an explicit
 // `UNKNOWN` default so patient rows never require backfilling when blood
 // type has not been recorded yet.
@@ -256,6 +267,11 @@ model User {
   createdDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeCreatedBy")
   updatedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeUpdatedBy")
   deletedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeDeletedBy")
+
+  // Auth log inverse — append-only events on the user (sign-in, sign-out,
+  // permission denials). Nullable on the AuthLog side because failed
+  // sign-ins for unknown emails still need a row.
+  authLogs AuthLog[]
 
   @@index([roleId])
   @@map("users")
@@ -507,4 +523,43 @@ model Appointment {
   @@index([patientId, startAt])
   @@index([status])
   @@map("appointments")
+}
+
+// ─── Audit log ───────────────────────────────────────────────────────────────
+// Append-only auth-event log. Rows are NEVER mutated or soft-deleted after
+// insert — these logs ARE the audit trail, so they intentionally do NOT
+// carry the project-wide `created_by` / `updated_*` / `deleted_*` cluster.
+// The system is the writer; `createdAt` doubles as the event timestamp.
+//
+// `userId` is nullable because failed sign-ins for unknown emails still
+// need a row (forensic value) and there is no User row to point at.
+// `email` is captured (lowercased) on every event, including failures, so
+// queries by email return a complete history even after a user is
+// soft-deleted.
+//
+// `requiredPermissions` / `heldPermissions` are populated only for
+// `PERMISSION_DENIED` events; they encode the same `{ required, held }`
+// details the API returns to the caller.
+
+model AuthLog {
+  id                  String       @id @default(uuid()) @db.Uuid
+  userId              String?      @map("user_id") @db.Uuid
+  email               String?
+  event               AuthLogEvent
+  reason              String? // ErrorCode for failures (NOT_INVITED, USER_DISABLED, …)
+  requiredPermissions String[]     @default([]) @map("required_permissions")
+  heldPermissions     String[]     @default([]) @map("held_permissions")
+  path                String?      @db.VarChar(512)
+  method              String?      @db.VarChar(16)
+  ip                  String?      @db.VarChar(45) // IPv6 max length
+  userAgent           String?      @map("user_agent") @db.VarChar(512)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([userId, createdAt])
+  @@index([event, createdAt])
+  @@index([email])
+  @@map("auth_logs")
 }
