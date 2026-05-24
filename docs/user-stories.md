@@ -6,21 +6,32 @@ This document groups stories by epic (E1–E12). Each epic maps to one or more
 features in `feature-roadmap.md`. Story IDs are stable: when a story is
 implemented, reference its ID in commit messages and PR descriptions.
 
-Roles used in this document (matches the `Role` enum in Prisma):
+> **Out of scope per the spec interpretation locked in 2026-05-24:** patients
+> do NOT sign in to this system. They are pure records managed by STAFF /
+> ADMIN. The previously-considered patient self-service epics (view / cancel
+> / book own appointments) have been removed entirely. The `Role` enum has
+> also been removed; roles are now DB rows in the `roles` table with
+> permissions granted via `policies`.
 
-- **PATIENT** — end user. Signs in with Google, completes onboarding (if no
-  existing `Patient` matches their email), then can view / cancel / book
-  their own appointments.
-- **ADMIN** — clinic-side operator. Books and cancels appointments on behalf
-  of any patient, manages doctor schedules, registers walk-in patients, and
-  invites / soft-deletes other ADMIN users. The single clinic-side role —
-  STAFF was removed and patient-ownership filtering with it.
-- **DOCTOR** — **data-only role** in P0. A `User` with `role=DOCTOR` always
-  has a linked `Doctor` row (1:1) + a `Department`, so ADMIN can book
-  against them. They have **no dedicated UI portal** in this take-home (the
-  spec only names "hospital staff" as users). If a DOCTOR ever signs in via
-  Google, sign-in resolution succeeds and they can technically authenticate,
-  but no role-specific routes exist for them yet.
+Roles used in this document (DB rows in the `roles` table — the `Role` enum
+is gone):
+
+- **STAFF** — clinic-side operator (receptionist / coordinator). Pre-created
+  by an ADMIN. Holds the role with the seeded permissions to book / cancel /
+  list appointments, manage doctor schedules, register and edit patients,
+  and view doctors. Cannot manage users or assign permissions. **Ownership
+  filtering is NOT in P0** — every STAFF can act on every patient (no
+  per-staff patient assignment).
+- **ADMIN** — clinic-side superuser. Everything STAFF can do, plus invite /
+  disable / list other users (`user.invite`, `user.disable`, `user.list`)
+  and assign permissions to roles (`permission.assign`).
+- **DOCTOR** — **data-only role** in P0. A `User` with `role.code = DOCTOR`
+  always has a linked `Doctor` row (1:1) + a `Department`, so STAFF / ADMIN
+  can book against them. They have **zero permissions** in P0 (no policies
+  seeded) and **no dedicated UI portal**. They can technically authenticate
+  via Google, but the home dispatcher routes them to a "No portal in P0"
+  landing page (or back to sign-out) because nothing is authorized for them.
+  This is intentional per the take-home spec scope.
 
 Conventions:
 
@@ -39,6 +50,14 @@ Conventions:
   lookups compare against the normalized form. The Google profile email is
   lowercased before resolution.
 - **`Appointment.reason`** is `text` (no length cap).
+- **Authorization via RBAC** — every protected endpoint maps to one or more
+  permission codes. The Nest guard loads `user.role.policies[].permission.code`
+  once per request via Prisma (cached on the request context) and checks
+  the required permission against that set. The `Role` Prisma enum is gone:
+  roles are now DB rows (`roles` table), permissions are code-defined
+  (canonical list in `apps/api/prisma/seed/permissions.ts`), and admins
+  attach permissions to roles at runtime via the `permission.assign`
+  capability (US-11.5).
 
 ---
 
@@ -179,11 +198,16 @@ shape, so that I can render and log them uniformly.
 
 ## E3 — Role resolution & onboarding
 
-### US-3.1 — Admin resolution on first sign-in
+Patient sign-in has been removed from scope (see top callout). The
+onboarding epic is now reduced to staff/admin resolution + the home
+dispatcher; the previous US-3.2 (patient auto-creation) and US-3.3
+(patient onboarding form) are gone.
 
-**US-3.1** — As an ADMIN whose account was pre-created by another ADMIN, I
-want my Google sign-in to resolve to my existing `User` record, so that I
-land in the admin workspace immediately.
+### US-3.1 — Staff/Admin resolution on first sign-in
+
+**US-3.1** — As a STAFF or ADMIN whose account was pre-created by an ADMIN,
+I want my Google sign-in to resolve to my existing `User` record, so that
+I land in the clinic workspace immediately.
 
 **Acceptance criteria:**
 
@@ -193,51 +217,24 @@ land in the admin workspace immediately.
 - Backend **lowercases** the incoming email via `normalizeEmail()` before
   any lookup.
 - Backend matches an existing `User` by the normalized `email` whose
-  `role = ADMIN` and whose `disabledAt IS NULL`.
+  `role.code IN ('ADMIN', 'STAFF')` and whose `disabledAt IS NULL`.
+- DOCTOR users (`role.code = 'DOCTOR'`) also resolve successfully, but
+  they hold zero permissions in P0 — the home dispatcher routes them to
+  a "No portal in P0" landing page (US-3.4).
 - The domain allowlist (`STAFF_ALLOWED_DOMAINS`) governs which email
-  domains may resolve as ADMIN; non-matching domains fall through to the
-  patient flow in US-3.2.
+  domains may sign in at all; emails outside the allowlist that don't
+  match any pre-created `User` are rejected with `code=NOT_INVITED`
+  (there is no patient fallback).
 - On match, backend sets `googleSub` if previously null and returns
-  `{ userId, role, patientId: null }`.
-- Resolved role is encoded in the JWT and used by the home dispatcher.
+  `{ userId, roleCode, permissionCodes[] }` (the permission list is loaded
+  from `user.role.policies[].permission.code`).
+- Resolved role and permissions are encoded in the JWT and used by the
+  home dispatcher and per-request permission guard.
 
-**Notes / assumptions:** Admins are created via E11; this story assumes the
-row exists.
-
-### US-3.2 — Patient auto-creation on first sign-in
-
-**US-3.2** — As a new patient signing in with Google, I want a `User` row
-auto-created, so that I can proceed to onboarding without paperwork.
-
-**Acceptance criteria:**
-
-- `POST /auth/resolve` with a normalized email NOT matching any
-  ADMIN user creates (or finds by email) a `User` with `role=PATIENT`.
-- If an existing `Patient` row matches by normalized email, the new
-  `User.patientId` is linked to it (auto-link; no onboarding) and the
-  response carries `{ userId, role: PATIENT, patientId }`.
-- If no `Patient` exists, response carries
-  `{ userId, role: PATIENT, patientId: null }` and the user is routed to
-  the onboarding flow.
-- The email-domain allowlist (`STAFF_ALLOWED_DOMAINS`) is **not**
-  consulted here — anyone signing in who is not a pre-created ADMIN is a
-  patient by default.
-
-### US-3.3 — Patient onboarding form
-
-**US-3.3** — As a newly-created patient without a `Patient` profile, I want
-to fill in my demographics, so that staff can identify me for booking.
-
-**Acceptance criteria:**
-
-- `/onboarding` collects: full name (prefilled from Google), date of birth,
-  phone, gender, address.
-- Form uses react-hook-form + zod; all fields except address are required.
-- Submitting calls `POST /me/patient`; on success, backend creates a
-  `Patient` row and links `User.patientId`.
-- After success, user is redirected to `/[locale]` (patient home).
-- Accessing any patient-area route without a linked patient redirects to
-  `/onboarding`.
+**Notes / assumptions:** Staff and admins are created via E11 (`user.invite`);
+this story assumes the `User` row already exists. DOCTOR users are created
+alongside their `Doctor` clinical record by seed / future tooling — the
+take-home does not expose a doctor-creation UI.
 
 ### US-3.4 — Home dispatcher routes by role
 
@@ -246,11 +243,12 @@ right workspace, so that I don't have to remember role-specific URLs.
 
 **Acceptance criteria:**
 
-- `GET /[locale]` reads the session role:
-  - `ADMIN` → renders admin dashboard.
-  - `PATIENT` with linked `patientId` → renders patient dashboard.
-  - `PATIENT` without `patientId` → server-side redirect to `/onboarding`.
+- `GET /[locale]` reads the session role code:
+  - `ADMIN` or `STAFF` → renders the clinic / staff dashboard.
+  - `DOCTOR` → renders a "No portal in P0" landing page with a sign-out
+    CTA (data-only role; zero permissions).
   - Unauthenticated → server-side redirect to `/signin`.
+- There is no PATIENT branch — patients cannot authenticate.
 
 ---
 
@@ -499,75 +497,6 @@ slot becomes free for reuse.
 - After cancellation, the slot is immediately available to other bookings
   (verified by re-running US-6.2).
 - UI shows a confirm dialog before calling the endpoint.
-
----
-
-## E9 — Patient self-service: view & cancel own appointments
-
-### US-9.1 — Patient lists their own appointments
-
-**US-9.1** — As a patient, I want to see my upcoming and past
-appointments, so that I can plan around them.
-
-**Acceptance criteria:**
-
-- `GET /me/appointments?status=&from=&to=` returns appointments where
-  `patientId = session.patientId`.
-- Default split in UI: "Upcoming" (status `BOOKED`, `startAt >= now`) and
-  "Past" (`status IN (COMPLETED, CANCELLED)` or `startAt < now`).
-- A patient can never see another patient's appointments — backend
-  enforces filter by session, ignoring any `patientId` query param.
-
-### US-9.2 — Patient cancels their own appointment
-
-**US-9.2** — As a patient, I want to cancel my own upcoming appointment,
-so that I don't waste the doctor's time if I can't make it.
-
-**Acceptance criteria:**
-
-- `POST /me/appointments/:id/cancel` cancels only if the appointment
-  belongs to the session's patient and is currently `BOOKED`.
-- Cancelling an appointment owned by another patient returns `404`
-  (not `403`, to avoid existence leak).
-- Cancellation rules from US-8.3 apply (sets `cancelledBy=<patient.userId>`,
-  `cancelledAt`, frees slot).
-- A UI guard hides the "Cancel" button for past or non-`BOOKED`
-  appointments.
-
----
-
-## E10 — Patient self-service: book own appointment
-
-### US-10.1 — Patient picks doctor and slot
-
-**US-10.1** — As a patient, I want to choose a doctor, a date, an
-appointment type, and an open slot, so that I can book myself in.
-
-**Acceptance criteria:**
-
-- A wizard or single-page form walks through:
-  1. Department (optional filter) → Doctor.
-  2. Appointment type.
-  3. Date (MUI date picker, no past dates).
-  4. Slot (chips populated from US-6.2).
-- "Continue" is disabled until each step is valid.
-- Form uses react-hook-form + zod.
-
-### US-10.2 — Patient submits booking
-
-**US-10.2** — As a patient, I want to submit the booking, so that the
-appointment is created in my name.
-
-**Acceptance criteria:**
-
-- `POST /me/appointments` accepts
-  `{ doctorId, appointmentType, startAt, reason? }`.
-- Backend sets `patientId = session.patientId` (ignores any value in body).
-- Backend sets `createdBy = session.userId`.
-- Same conditional `reason` rule and concurrency model as US-7.2.
-- On `409 SLOT_TAKEN`, UI re-fetches the slot list and shows an inline
-  error.
-- On success, UI navigates to the patient's appointment detail.
 
 ---
 
