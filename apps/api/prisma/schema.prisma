@@ -121,7 +121,6 @@ model Role {
   users    User[]
   policies Policy[]
 
-  @@index([deletedAt])
   @@map("roles")
 }
 
@@ -147,7 +146,6 @@ model Permission {
 
   policies Policy[]
 
-  @@index([deletedAt])
   @@map("permissions")
 }
 
@@ -173,7 +171,6 @@ model Policy {
   deletedByUser User?      @relation("PolicyDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([roleId, permissionId])
-  @@index([deletedAt])
   @@map("policies")
 }
 
@@ -257,7 +254,6 @@ model User {
   deletedPolicies        Policy[]         @relation("PolicyDeletedBy")
 
   @@index([roleId])
-  @@index([deletedAt])
   @@map("users")
 }
 
@@ -291,7 +287,6 @@ model Patient {
 
   appointments Appointment[]
 
-  @@index([deletedAt])
   @@map("patients")
 }
 
@@ -314,7 +309,6 @@ model Department {
   doctors      Doctor[]
   appointments Appointment[]
 
-  @@index([deletedAt])
   @@map("departments")
 }
 
@@ -345,7 +339,6 @@ model Doctor {
   appointments Appointment[]
 
   @@index([departmentId])
-  @@index([deletedAt])
   @@map("doctors")
 }
 
@@ -382,7 +375,6 @@ model DoctorSchedule {
   deletedByUser User?  @relation("DoctorScheduleDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([doctorId, dayOfWeek, effectiveFrom])
-  @@index([deletedAt])
   @@map("doctor_schedules")
 }
 
@@ -453,6 +445,5 @@ model StaffDomain {
   updatedByUser User? @relation("StaffDomainUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("StaffDomainDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([deletedAt])
   @@map("staff_domains")
 }
