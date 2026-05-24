@@ -51,22 +51,55 @@ documented here so all downstream stories are grounded.
 
 | Model              | Purpose                                                                                       |
 | ------------------ | --------------------------------------------------------------------------------------------- |
-| `User`             | Auth principal. Fields incl. `email`, `googleSub?`, `role`, `patientId?`, `disabledAt?`.      |
-| `Patient`          | Demographic record. Inverse `user` relation. Created at onboarding or by admin walk-in. |
+| `Role`             | Named role assigned to a `User` (`code`, `name`, `description?`). Seeded with `ADMIN`, `STAFF`, `DOCTOR`. Admins may add custom roles at runtime via `permission.assign`. |
+| `Permission`       | Atomic capability with a stable `code` (e.g. `appointment.create`). **Code-defined**: seeded from a canonical list in `apps/api/prisma/seed/permissions.ts`; adding a new permission requires a code change + migration. |
+| `Policy`           | `(roleId, permissionId)` join row — "role R has permission P". Unique on `(roleId, permissionId)`. Granted / revoked at runtime by admins holding `permission.assign`. |
+| `User`             | Auth principal. Fields incl. `email`, `googleSub?`, `roleId`, `disabledAt?`. No patient link — patients do not sign in. |
+| `Patient`          | Demographic record. Pure record managed by STAFF/ADMIN. **No User link** — patients do not sign in. |
 | `Department`       | Clinic department (e.g. Cardiology). Grouping for doctors.                                    |
-| `Doctor`           | Practitioner. Belongs to one `Department`.                                                    |
+| `Doctor`           | Practitioner. Belongs to one `Department`. 1-1 link to a `User` row with `role.code = DOCTOR`. |
 | `DoctorSchedule`   | Weekly recurring availability with `dayOfWeek`, `startMinute`, `endMinute`, `effectiveFrom`, `effectiveUntil?`. |
 | `AppointmentType`  | `NEW_PATIENT_VISIT` (30), `FOLLOW_UP` (15), `CONSULTATION` (20), `PROCEDURE` (60). Hardcoded const map; not a table in P0. |
-| `Appointment`      | `patientId`, `doctorId`, `appointmentType`, `startAt`, `endAt`, `status`, `reason?` (Postgres `text`, no length cap), `createdBy`, `cancelledBy?`, `cancelledAt?`. |
+| `Appointment`      | `patientId`, `doctorId`, `appointmentType`, `startAt`, `endAt`, `status`, `reason?` (Postgres `text`, no length cap), `createdByUserId`, `cancelledByUserId?`, `cancelledAt?`. |
 | `StaffDomain`      | Model defined for future DB-driven allowlist; **unused in P0** (env-driven via `STAFF_ALLOWED_DOMAINS`). |
 
 Status enum: `BOOKED`, `CANCELLED`, `COMPLETED`.
-Role enum: `ADMIN`, `DOCTOR`, `PATIENT`.
+Role / Permission / Policy are DB tables, not enums (see new rows above).
+
+### Permission catalog (P0)
+
+The 15 canonical permission codes seeded into `permissions`:
+
+| Code                  | Description                                              |
+| --------------------- | -------------------------------------------------------- |
+| `appointment.create`  | Create new appointments for any patient                  |
+| `appointment.cancel`  | Cancel any appointment                                   |
+| `appointment.list`    | List all appointments with filters                       |
+| `appointment.read`    | View an appointment's detail                             |
+| `schedule.manage`     | Create / update / delete doctor schedules                |
+| `patient.create`      | Register new patients (walk-in)                          |
+| `patient.read`        | View patient details                                     |
+| `patient.update`      | Edit patient demographics                                |
+| `patient.list`        | List all patients                                        |
+| `doctor.read`         | View doctor details                                      |
+| `doctor.list`         | List doctors and departments                             |
+| `user.invite`         | Pre-create a User row by email + role                    |
+| `user.disable`        | Soft-delete a User (block sign-in)                       |
+| `user.list`           | List all Users                                           |
+| `permission.assign`   | Create / delete policies (assign permissions to roles)   |
+
+Default policy grants (26 rows total):
+
+- **ADMIN** → all 15 permissions.
+- **STAFF** → 11 permissions (everything except `user.invite`, `user.disable`, `user.list`, `permission.assign`).
+- **DOCTOR** → 0 permissions (data-only role; does not sign in to do anything in P0).
 
 ### Notes / assumptions
 
-- Soft-delete is used only for `User` (via `disabledAt`) to preserve FK
-  integrity from `Appointment.createdBy` / `cancelledBy`.
+- Role + Permission + Policy are seeded by `apps/api/prisma/seed/{roles,permissions,policies}.ts`. The full permission catalog is canonical — adding a new permission requires a code change + migration.
+- The super-admin user is bootstrapped at the nil UUID (`00000000-0000-0000-0000-000000000000`) with `role_id = NULL` so the chicken-and-egg `roles.created_by` / `users.role_id` cycle can resolve (Option C bootstrap). Its `role_id` is back-filled to ADMIN immediately after roles are seeded.
+- `User.role_id` is nullable **only** to permit the bootstrap insert; every non-bootstrap user MUST have a non-null `role_id` (enforced at the API DTO layer).
+- Soft-delete is used only for `User` (via `disabledAt`) to preserve FK integrity from `Appointment.createdByUserId` / `cancelledByUserId`.
 - `Patient` is never soft-deleted in P0 (no requirement to "forget" patients).
 - All timestamps stored as `timestamptz` (UTC), rendered clinic-local in UI.
 
