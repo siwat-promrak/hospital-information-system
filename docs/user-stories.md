@@ -89,6 +89,14 @@ Conventions:
 - **`STAFF_ALLOWED_DOMAINS`** — env-driven email-domain allowlist for
   pre-created staff/admin invites. There is **no** `staff_domains` table;
   the allowlist lives entirely in environment configuration.
+- **Session renewal model** — NO custom refresh-token table. The session
+  is the NextAuth-issued HS256 JWT cookie; F03 configures
+  `session.maxAge` (hard ceiling) + `session.updateAge` (sliding-window
+  renewal interval) on the NextAuth instance. The BE never sees a
+  refresh token because there is none — every authenticated request
+  re-verifies the JWT signature and re-reads policies from the DB
+  (see US-2.4 / US-3.1). The audit trail captures session lifecycle
+  via `auth_logs` (US-2.6 / US-2.7).
 
 ---
 
@@ -97,7 +105,11 @@ Conventions:
 Purely infrastructural epic. No user-facing stories, but the data model is
 documented here so all downstream stories are grounded.
 
-### Data model (P0) — 12 tables
+### Data model (P0) — 13 tables
+
+The first 12 tables ship with F01 (init migration). `auth_logs` is added by
+F02 as a forward migration (`add_auth_log`) since it is the audit surface
+for the auth core.
 
 | Model                         | Purpose                                                                                                                                                                                              |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -112,6 +124,7 @@ documented here so all downstream stories are grounded.
 | `roles`                       | RBAC role (`code` unique). Seeded with `ADMIN`, `STAFF`, `DOCTOR`; admins holding `role.manage` may add custom roles at runtime.                                                                     |
 | `permissions`                 | Atomic capability with a stable `code`. **Code-defined**: seeded from a canonical list in `apps/api/prisma/seed/permissions.ts`; adding a new permission requires a code change + migration.         |
 | `policies`                    | `(roleId, permissionId)` join — "role R has permission P". Unique on the pair. Granted / revoked at runtime by admins holding `permission.assign`.                                                   |
+| `auth_logs`                   | **Append-only audit log** of auth events — `SIGN_IN_SUCCESS`, `SIGN_IN_FAILED`, `PERMISSION_DENIED`, `SIGN_OUT`. `userId` nullable so failed sign-ins for unknown emails still leave a forensic row; `email` is captured normalised on every event. Carries `requiredPermissions[]` / `heldPermissions[]` for `PERMISSION_DENIED` rows, plus optional `ip` / `userAgent` / `path` / `method`. **No audit cluster** — the table IS the audit trail (no `created_by`, no `deleted_*`); `createdAt` is the event timestamp. Added in F02 via the `add_auth_log` migration. |
 
 There is **no `staff_domains` table** — the staff/admin email-domain
 allowlist is env-driven via `STAFF_ALLOWED_DOMAINS`.
@@ -119,11 +132,13 @@ allowlist is env-driven via `STAFF_ALLOWED_DOMAINS`.
 Enums (Prisma): `AppointmentStatus` (`BOOKED`, `CANCELLED`, `COMPLETED`),
 `AppointmentType` (`NEW_PATIENT_VISIT`, `FOLLOW_UP`, `CONSULTATION`,
 `PROCEDURE`), `DayOfWeek` (`SUN`…`SAT`), `Gender` (`MALE`, `FEMALE`),
-`BloodGroup` (8 ABO/Rh combinations + `UNKNOWN`). The `Role` enum is GONE
-(roles are now a table). `AppointmentType` is a Prisma enum on the
-`appointments` and `department_appointment_types` tables; the per-type
-duration map (NEW_PATIENT_VISIT=30, FOLLOW_UP=15, CONSULTATION=20,
-PROCEDURE=60) still lives in application code — no separate table in P0.
+`BloodGroup` (8 ABO/Rh combinations + `UNKNOWN`), `AuthLogEvent`
+(`SIGN_IN_SUCCESS`, `SIGN_IN_FAILED`, `PERMISSION_DENIED`, `SIGN_OUT`).
+The `Role` enum is GONE (roles are now a table). `AppointmentType` is a
+Prisma enum on the `appointments` and `department_appointment_types`
+tables; the per-type duration map (NEW_PATIENT_VISIT=30, FOLLOW_UP=15,
+CONSULTATION=20, PROCEDURE=60) still lives in application code — no
+separate table in P0. `AuthLogEvent` is added in F02 with `auth_logs`.
 
 ### Permission catalog (P0)
 
@@ -242,8 +257,16 @@ ends on this device.
 
 - A "Sign out" action is reachable from the app header for any signed-in
   user.
-- Triggering sign-out clears the session cookie and redirects to `/signin`.
+- Triggering sign-out calls `POST /auth/signout` (which writes a
+  `SIGN_OUT` row to `auth_logs` — see US-2.7) and then clears the session
+  cookie via NextAuth's `signOut()` and redirects to `/signin`.
 - After sign-out, accessing a protected route redirects back to `/signin`.
+
+**Notes / assumptions:** Cookie clearing is the FE's responsibility — the
+BE endpoint exists purely for the audit trail. A network failure on the
+`POST /auth/signout` call MAY still clear the cookie locally; the user
+experience prefers a successful local sign-out over a guaranteed audit
+row.
 
 ### US-2.3 — Unverified Google email is rejected
 
@@ -281,6 +304,66 @@ shape, so that I can render and log them uniformly.
 - A global Nest exception filter maps known errors (validation, auth, not
   found, conflict) to stable `code` strings (e.g. `AUTH_INVALID_TOKEN`,
   `VALIDATION_FAILED`).
+
+### US-2.6 — Append-only auth log
+
+**US-2.6** — As an operator, I want every sign-in attempt and permission
+denial recorded in an append-only audit log, so that I can investigate
+access patterns and forensic events without trusting application logs.
+
+**Acceptance criteria:**
+
+- `auth_logs` is append-only: no `UPDATE`s and no soft-delete cluster —
+  the table IS the audit trail. `createdAt` (timestamptz) doubles as the
+  event timestamp.
+- Four event types are captured:
+  - `SIGN_IN_SUCCESS` — successful `POST /auth/resolve`. Row carries
+    `{ userId, email, ip?, userAgent?, path, method }`.
+  - `SIGN_IN_FAILED` — `POST /auth/resolve` rejected for any reason.
+    `userId` is **null** (the unknown-email case still leaves a forensic
+    row), `email` is the raw input (lowercased), `reason` is the stable
+    error code (`EMAIL_UNVERIFIED`, `NOT_INVITED`, `USER_DISABLED`).
+  - `PERMISSION_DENIED` — `403 INSUFFICIENT_PERMISSION` from
+    `PermissionsGuard`. `requiredPermissions[]` and `heldPermissions[]`
+    mirror the response `details`; `userId` may be null when the JWT
+    decoded but no user row exists (defensive).
+  - `SIGN_OUT` — see US-2.7.
+- Optional forensic columns (`ip`, `userAgent`, `path`, `method`) are
+  captured from the Express request. `ip` reads `X-Forwarded-For`
+  (left-most entry) before falling back to `request.ip`. Oversized
+  values are truncated to column limits (path 512, method 16, ip 45,
+  userAgent 512) — log writes never fail due to oversized inputs.
+- The BE **awaits** the log write before the response is sent so the
+  audit row is guaranteed before the caller sees the outcome. The
+  underlying `INSERT` is wrapped in `try/catch` inside `AuthLogService`;
+  a DB failure is logged at `ERROR` level and swallowed so the auth
+  response is never broken by an audit failure.
+- The FK from `auth_logs.userId` to `users.id` uses `ON DELETE NO
+  ACTION` so logs survive a user soft-delete (audit-trail durability).
+- Indexed on `(userId, createdAt)`, `(event, createdAt)`, and `email`
+  to support common forensic queries ("last 5 sign-ins for user X",
+  "all PERMISSION_DENIED in the last hour", "all events for an email").
+
+**Notes / assumptions:** Admin-side endpoints for *reading* `auth_logs`
+are NOT in P0 — the table is an inserter-only surface in F02. A future
+admin feature MAY expose a read API under `/admin/auth-logs` gated on a
+new permission code; until then, operators query Postgres directly.
+
+### US-2.7 — Backend sign-out endpoint
+
+**US-2.7** — As any signed-in user, I want the BE to record my sign-out
+event, so that the audit trail captures voluntary session termination
+alongside sign-in events.
+
+**Acceptance criteria:**
+
+- `POST /auth/signout` requires a valid session (any role); no
+  `@RequirePermission()` — every authenticated user may sign themselves
+  out.
+- Writes a `SIGN_OUT` row to `auth_logs` with the calling user's id +
+  email + request context, then returns `204 No Content`.
+- The endpoint does NOT clear any cookie — cookie clearing is the FE's
+  responsibility via NextAuth's `signOut()` helper (US-2.2 covers the UX).
 
 ---
 
