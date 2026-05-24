@@ -7,7 +7,7 @@ import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import theme from "@/theme/theme";
 import { routing } from "@/i18n/routing";
-import { K } from "@/i18n/keys.generated";
+import { K, NS } from "@/i18n/keys.generated";
 
 type LocaleLayoutProps = {
   children: React.ReactNode;
@@ -25,7 +25,7 @@ export async function generateMetadata({
     notFound();
   }
 
-  const t = await getTranslations({ locale, namespace: "Home" });
+  const t = await getTranslations({ locale, namespace: NS.Home });
 
   return {
     metadataBase: new URL(

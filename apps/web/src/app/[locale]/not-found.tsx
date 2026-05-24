@@ -3,13 +3,13 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import { K } from "@/i18n/keys.generated";
+import { K, NS } from "@/i18n/keys.generated";
 
 // Locale-aware 404 page. Rendered for unmatched routes under /[locale]/...
 // Server Component — no "use client" needed; relies on NextIntlClientProvider
 // from the parent layout for translations.
 export default function LocaleNotFound() {
-  const t = useTranslations("NotFound");
+  const t = useTranslations(NS.NotFound);
 
   return (
     <Box

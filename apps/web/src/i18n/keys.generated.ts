@@ -3,6 +3,15 @@
 // DO NOT EDIT BY HAND. Run `pnpm --filter @hospital/web gen:i18n` to regenerate.
 
 export const K = {
+  Dashboard: {
+    comingSoonAdmin: "comingSoonAdmin",
+    comingSoonDoctor: "comingSoonDoctor",
+    comingSoonStaff: "comingSoonStaff",
+    noPermissions: "noPermissions",
+    permissionsLabel: "permissionsLabel",
+    roleLabel: "roleLabel",
+    welcome: "welcome",
+  },
   Home: {
     primaryAction: "primaryAction",
     secondaryAction: "secondaryAction",
@@ -14,4 +23,32 @@ export const K = {
     goHome: "goHome",
     title: "title",
   },
+  SignIn: {
+    continueWithGoogle: "continueWithGoogle",
+    errors: {
+      email_unverified: "email_unverified",
+      internal: "internal",
+      not_invited: "not_invited",
+      user_disabled: "user_disabled",
+    },
+    subtitle: "subtitle",
+    title: "title",
+  },
+  SignOut: {
+    label: "label",
+  },
+} as const;
+
+/**
+ * Namespace catalog for use with next-intl's `useTranslations(NS.X)` /
+ * `getTranslations(NS.X)`. Flat keys are PascalCase-concatenated paths
+ * (e.g. `SignIn.errors` → `NS.SignInErrors`).
+ */
+export const NS = {
+  Dashboard: "Dashboard",
+  Home: "Home",
+  NotFound: "NotFound",
+  SignIn: "SignIn",
+  SignInErrors: "SignIn.errors",
+  SignOut: "SignOut",
 } as const;
