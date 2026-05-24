@@ -15,11 +15,13 @@
 //   schedule are stored as minutes-since-midnight (`Int`) so slot math is
 //   pure arithmetic.
 // - Every table except `appointments` carries the audit cluster
-//   `created_at` / `created_by` / `updated_at` / `deleted_at` / `deleted_by`.
-//   `created_by` / `deleted_by` FK to `users.id` with `ON DELETE NO ACTION`
-//   so audit trail survives a user soft-delete. `appointments` omits
-//   `deleted_at` / `deleted_by` — a `status=CANCELLED` transition replaces
-//   soft-delete and admin purge is out of scope.
+//   `created_at` / `created_by` / `updated_at` / `updated_by` /
+//   `deleted_at` / `deleted_by`. `created_by` / `updated_by` / `deleted_by`
+//   FK to `users.id` with `ON DELETE NO ACTION` so audit trail survives a
+//   user soft-delete. `updated_by` is NULLABLE because not every row has
+//   been updated since creation. `appointments` omits `deleted_at` /
+//   `deleted_by` — a `status=CANCELLED` transition replaces soft-delete and
+//   admin purge is out of scope.
 //
 // ─── RBAC model ──────────────────────────────────────────────────────────────
 // Authorization is data-driven: a `User` belongs to a `Role`, a `Role` is
@@ -108,10 +110,12 @@ model Role {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   createdByUser User  @relation("RoleCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User? @relation("RoleUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("RoleDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   users    User[]
@@ -133,10 +137,12 @@ model Permission {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   createdByUser User  @relation("PermissionCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User? @relation("PermissionUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("PermissionDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   policies Policy[]
@@ -156,12 +162,14 @@ model Policy {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   role          Role       @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   permission    Permission @relation(fields: [permissionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   createdByUser User       @relation("PolicyCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?      @relation("PolicyUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User?      @relation("PolicyDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([roleId, permissionId])
@@ -178,7 +186,7 @@ model Policy {
 // The super-admin user is seeded at the nil UUID
 // (`00000000-0000-0000-0000-000000000000`) and is the default `created_by`
 // for every bootstrapped row. Self-referencing audit FKs (`created_by`,
-// `deleted_by`) are modelled with named relations.
+// `updated_by`, `deleted_by`) are modelled with named relations.
 //
 // `role_id` is NULLABLE only to allow the bootstrap insert of the
 // super-admin (which must exist before any `Role` row can be created — see
@@ -200,6 +208,7 @@ model User {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
@@ -207,8 +216,10 @@ model User {
 
   // Self-FK audit relations.
   createdByUser User   @relation("UserCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?  @relation("UserUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User?  @relation("UserDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   createdUsers  User[] @relation("UserCreatedBy")
+  updatedUsers  User[] @relation("UserUpdatedBy")
   deletedUsers  User[] @relation("UserDeletedBy")
 
   // 1-1 clinical link (doctors only — patients are pure records).
@@ -217,23 +228,32 @@ model User {
   // Appointment audit inverses.
   bookedAppointments    Appointment[] @relation("AppointmentsCreatedBy")
   cancelledAppointments Appointment[] @relation("AppointmentsCancelledBy")
+  updatedAppointments   Appointment[] @relation("AppointmentsUpdatedBy")
 
-  // created_by / deleted_by inverses for every other table.
+  // created_by / updated_by / deleted_by inverses for every other table.
   createdPatients        Patient[]        @relation("PatientCreatedBy")
+  updatedPatients        Patient[]        @relation("PatientUpdatedBy")
   deletedPatients        Patient[]        @relation("PatientDeletedBy")
   createdDoctors         Doctor[]         @relation("DoctorCreatedBy")
+  updatedDoctors         Doctor[]         @relation("DoctorUpdatedBy")
   deletedDoctors         Doctor[]         @relation("DoctorDeletedBy")
   createdDepartments     Department[]     @relation("DepartmentCreatedBy")
+  updatedDepartments     Department[]     @relation("DepartmentUpdatedBy")
   deletedDepartments     Department[]     @relation("DepartmentDeletedBy")
   createdDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleCreatedBy")
+  updatedDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleUpdatedBy")
   deletedDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleDeletedBy")
   createdStaffDomains    StaffDomain[]    @relation("StaffDomainCreatedBy")
+  updatedStaffDomains    StaffDomain[]    @relation("StaffDomainUpdatedBy")
   deletedStaffDomains    StaffDomain[]    @relation("StaffDomainDeletedBy")
   createdRoles           Role[]           @relation("RoleCreatedBy")
+  updatedRoles           Role[]           @relation("RoleUpdatedBy")
   deletedRoles           Role[]           @relation("RoleDeletedBy")
   createdPermissions     Permission[]     @relation("PermissionCreatedBy")
+  updatedPermissions     Permission[]     @relation("PermissionUpdatedBy")
   deletedPermissions     Permission[]     @relation("PermissionDeletedBy")
   createdPolicies        Policy[]         @relation("PolicyCreatedBy")
+  updatedPolicies        Policy[]         @relation("PolicyUpdatedBy")
   deletedPolicies        Policy[]         @relation("PolicyDeletedBy")
 
   @@index([roleId])
@@ -261,10 +281,12 @@ model Patient {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   createdByUser User  @relation("PatientCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User? @relation("PatientUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("PatientDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   appointments Appointment[]
@@ -281,10 +303,12 @@ model Department {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   createdByUser User  @relation("DepartmentCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User? @relation("DepartmentUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("DepartmentDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   doctors      Doctor[]
@@ -307,12 +331,14 @@ model Doctor {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   user          User       @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   department    Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   createdByUser User       @relation("DoctorCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?      @relation("DoctorUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User?      @relation("DoctorDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   schedules    DoctorSchedule[]
@@ -346,11 +372,13 @@ model DoctorSchedule {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   doctor        Doctor @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   createdByUser User   @relation("DoctorScheduleCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?  @relation("DoctorScheduleUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User?  @relation("DoctorScheduleDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([doctorId, dayOfWeek, effectiveFrom])
@@ -391,11 +419,13 @@ model Appointment {
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?  @map("updated_by") @db.Uuid
 
   patient         Patient    @relation(fields: [patientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   doctor          Doctor     @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   department      Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   createdByUser   User       @relation("AppointmentsCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser   User?      @relation("AppointmentsUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   cancelledByUser User?      @relation("AppointmentsCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([doctorId, startAt])
@@ -415,10 +445,12 @@ model StaffDomain {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
   createdByUser User  @relation("StaffDomainCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User? @relation("StaffDomainUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("StaffDomainDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([deletedAt])
