@@ -51,7 +51,8 @@ enum AppointmentStatus {
 // `AppointmentType` is the schema-level enum for appointment categories. The
 // per-type duration map (NEW_PATIENT_VISIT=30, FOLLOW_UP=15, CONSULTATION=20,
 // PROCEDURE=60) still lives in application code — only the category is
-// persisted here.
+// persisted here. Each `Department` enumerates which types it offers via the
+// `DepartmentAppointmentType` join table.
 enum AppointmentType {
   NEW_PATIENT_VISIT
   FOLLOW_UP
@@ -228,27 +229,30 @@ model User {
   updatedAppointments   Appointment[] @relation("AppointmentsUpdatedBy")
 
   // created_by / updated_by / deleted_by inverses for every other table.
-  createdPatients        Patient[]        @relation("PatientCreatedBy")
-  updatedPatients        Patient[]        @relation("PatientUpdatedBy")
-  deletedPatients        Patient[]        @relation("PatientDeletedBy")
-  createdDoctors         Doctor[]         @relation("DoctorCreatedBy")
-  updatedDoctors         Doctor[]         @relation("DoctorUpdatedBy")
-  deletedDoctors         Doctor[]         @relation("DoctorDeletedBy")
-  createdDepartments     Department[]     @relation("DepartmentCreatedBy")
-  updatedDepartments     Department[]     @relation("DepartmentUpdatedBy")
-  deletedDepartments     Department[]     @relation("DepartmentDeletedBy")
-  createdDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleCreatedBy")
-  updatedDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleUpdatedBy")
-  deletedDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleDeletedBy")
-  createdRoles           Role[]           @relation("RoleCreatedBy")
-  updatedRoles           Role[]           @relation("RoleUpdatedBy")
-  deletedRoles           Role[]           @relation("RoleDeletedBy")
-  createdPermissions     Permission[]     @relation("PermissionCreatedBy")
-  updatedPermissions     Permission[]     @relation("PermissionUpdatedBy")
-  deletedPermissions     Permission[]     @relation("PermissionDeletedBy")
-  createdPolicies        Policy[]         @relation("PolicyCreatedBy")
-  updatedPolicies        Policy[]         @relation("PolicyUpdatedBy")
-  deletedPolicies        Policy[]         @relation("PolicyDeletedBy")
+  createdPatients                   Patient[]                   @relation("PatientCreatedBy")
+  updatedPatients                   Patient[]                   @relation("PatientUpdatedBy")
+  deletedPatients                   Patient[]                   @relation("PatientDeletedBy")
+  createdDoctors                    Doctor[]                    @relation("DoctorCreatedBy")
+  updatedDoctors                    Doctor[]                    @relation("DoctorUpdatedBy")
+  deletedDoctors                    Doctor[]                    @relation("DoctorDeletedBy")
+  createdDepartments                Department[]                @relation("DepartmentCreatedBy")
+  updatedDepartments                Department[]                @relation("DepartmentUpdatedBy")
+  deletedDepartments                Department[]                @relation("DepartmentDeletedBy")
+  createdDoctorSchedules            DoctorSchedule[]            @relation("DoctorScheduleCreatedBy")
+  updatedDoctorSchedules            DoctorSchedule[]            @relation("DoctorScheduleUpdatedBy")
+  deletedDoctorSchedules            DoctorSchedule[]            @relation("DoctorScheduleDeletedBy")
+  createdRoles                      Role[]                      @relation("RoleCreatedBy")
+  updatedRoles                      Role[]                      @relation("RoleUpdatedBy")
+  deletedRoles                      Role[]                      @relation("RoleDeletedBy")
+  createdPermissions                Permission[]                @relation("PermissionCreatedBy")
+  updatedPermissions                Permission[]                @relation("PermissionUpdatedBy")
+  deletedPermissions                Permission[]                @relation("PermissionDeletedBy")
+  createdPolicies                   Policy[]                    @relation("PolicyCreatedBy")
+  updatedPolicies                   Policy[]                    @relation("PolicyUpdatedBy")
+  deletedPolicies                   Policy[]                    @relation("PolicyDeletedBy")
+  createdDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeCreatedBy")
+  updatedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeUpdatedBy")
+  deletedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeDeletedBy")
 
   @@index([roleId])
   @@map("users")
@@ -312,10 +316,36 @@ model Department {
   updatedByUser User? @relation("DepartmentUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("DepartmentDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  doctors      Doctor[]
-  appointments Appointment[]
+  doctors                 Doctor[]
+  appointments            Appointment[]
+  allowedAppointmentTypes DepartmentAppointmentType[]
 
   @@map("departments")
+}
+
+/// Join row declaring which `AppointmentType` values a given `Department`
+/// offers. Acts as the per-department booking rule: appointment creation
+/// must verify the requested `(departmentId, appointmentType)` pair exists
+/// here. Unique pair so each combination is at most one row.
+model DepartmentAppointmentType {
+  id              String          @id @default(uuid()) @db.Uuid
+  departmentId    String          @map("department_id") @db.Uuid
+  appointmentType AppointmentType @map("appointment_type")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy String    @map("created_by") @db.Uuid
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser User       @relation("DepartmentAppointmentTypeCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?      @relation("DepartmentAppointmentTypeUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedByUser User?      @relation("DepartmentAppointmentTypeDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([departmentId, appointmentType])
+  @@map("department_appointment_types")
 }
 
 model Doctor {
