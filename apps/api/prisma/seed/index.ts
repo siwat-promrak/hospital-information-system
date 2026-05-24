@@ -22,7 +22,8 @@
  *   - 15 permissions
  *   - 26 policies (15 ADMIN + 11 STAFF + 0 DOCTOR)
  *   - 10 users — 1 super-admin + 2 ADMIN + 2 STAFF + 5 DOCTOR
- *   - 3 departments
+ *   - 10 departments
+ *   - ~34 department_appointment_types (per-department allowed types)
  *   - 5 doctors (2 / 2 / 1 across departments)
  *   - 25 doctor schedules (MON-FRI per doctor)
  *   - 10 patients (5 MALE + 5 FEMALE)
@@ -31,6 +32,7 @@
 import { PrismaClient } from '@prisma/client';
 
 import { seedAppointments } from './appointments';
+import { seedDepartmentAppointmentTypes } from './department-appointment-types';
 import { seedDepartments } from './departments';
 import { seedDoctorSchedules } from './doctor-schedules';
 import { seedDoctors } from './doctors';
@@ -52,6 +54,11 @@ async function main(): Promise<void> {
 
   const users = await seedUsers(prisma, roles, superAdmin);
   const departments = await seedDepartments(prisma, superAdmin);
+  const departmentAppointmentTypeCount = await seedDepartmentAppointmentTypes(
+    prisma,
+    departments,
+    superAdmin,
+  );
   const doctors = await seedDoctors(
     prisma,
     users.doctorUsers,
@@ -76,6 +83,7 @@ async function main(): Promise<void> {
     users:
       1 + users.admins.length + users.staff.length + users.doctorUsers.length,
     departments: departments.length,
+    departmentAppointmentTypes: departmentAppointmentTypeCount,
     doctors: doctors.length,
     doctorSchedules: doctors.length * 5,
     patients: patients.length,
