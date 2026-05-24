@@ -3,12 +3,18 @@ import { Prisma } from '@prisma/client';
 
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '../common/errors';
+import {
+  buildPaginatedResponse,
+  resolvePagination,
+  type Paginated,
+} from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type {
   DoctorDepartmentAffiliation,
   DoctorDetailRow,
   DoctorListRow,
+  ListDoctorsArgs,
 } from './doctors.types';
 
 /**
@@ -54,27 +60,37 @@ export class DoctorsService {
    * `doctor_departments` so a doctor still surfaces if they hold the
    * affiliation as primary OR secondary.
    *
-   * Sort is `doctorCode asc` for a stable directory view.
+   * Sort is `doctorCode asc` for a stable directory view. Paginated — see
+   * `Paginated<T>` for the envelope shape.
    */
-  async listAll(filter?: { departmentId?: string }): Promise<DoctorListRow[]> {
+  async listAll(args: ListDoctorsArgs = {}): Promise<Paginated<DoctorListRow>> {
     const where: Prisma.DoctorWhereInput = { deletedAt: null };
 
-    if (filter?.departmentId) {
+    if (args.departmentId) {
       where.departments = {
         some: {
-          departmentId: filter.departmentId,
+          departmentId: args.departmentId,
           deletedAt: null,
         },
       };
     }
 
-    const rows = await this.prisma.doctor.findMany({
-      where,
-      orderBy: { doctorCode: 'asc' },
-      include: doctorWithAffiliationsInclude,
-    });
+    const resolved = resolvePagination(args);
 
-    return rows.map((row) => this.toListRow(row));
+    const [rows, total] = await Promise.all([
+      this.prisma.doctor.findMany({
+        where,
+        orderBy: { doctorCode: 'asc' },
+        include: doctorWithAffiliationsInclude,
+        skip: resolved.skip,
+        take: resolved.take,
+      }),
+      this.prisma.doctor.count({ where }),
+    ]);
+
+    const data = rows.map((row) => this.toListRow(row));
+
+    return buildPaginatedResponse(data, total, resolved);
   }
 
   /**

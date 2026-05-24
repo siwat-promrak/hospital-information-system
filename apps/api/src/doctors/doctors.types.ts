@@ -36,3 +36,14 @@ export interface DoctorDetailRow extends DoctorListRow {
   address: string | null;
   scheduleCount: number;
 }
+
+/**
+ * Service-layer arguments for `listAll`. Pagination + the existing
+ * department filter; new filters (search, role, …) extend this without
+ * changing the controller wiring.
+ */
+export interface ListDoctorsArgs {
+  page?: number;
+  pageSize?: number;
+  departmentId?: string;
+}

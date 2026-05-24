@@ -1,5 +1,6 @@
 import { applyDecorators } from '@nestjs/common';
 import {
+  ApiExtraModels,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -8,6 +9,7 @@ import {
 } from '@nestjs/swagger';
 
 import { ErrorCode } from '../common/errors';
+import { PaginatedDto } from '../common/pagination';
 
 import { DepartmentDoctorDto, DepartmentDto } from './dto/department.dto';
 
@@ -24,16 +26,21 @@ const NOT_FOUND_EXAMPLE = {
   message: 'Department not found.',
 };
 
+const PaginatedDepartmentDto = PaginatedDto(DepartmentDto);
+const PaginatedDepartmentDoctorDto = PaginatedDto(DepartmentDoctorDto);
+
 export function ApiListDepartments(): MethodDecorator & ClassDecorator {
   return applyDecorators(
+    ApiExtraModels(DepartmentDto, PaginatedDepartmentDto),
     ApiOperation({
-      summary: 'List all active departments',
-      description: 'Name-sorted; soft-deleted departments are excluded.',
+      summary: 'List active departments (paginated)',
+      description:
+        'Name-sorted; soft-deleted departments are excluded. Supports ' +
+        '`?page=&pageSize=` (defaults: page=1, pageSize=20, max=100).',
     }),
     ApiOkResponse({
-      description: 'Department directory',
-      type: DepartmentDto,
-      isArray: true,
+      description: 'Department directory page',
+      type: PaginatedDepartmentDto,
     }),
     ApiForbiddenResponse({
       description: 'Caller is missing the `doctor.list` permission.',
@@ -44,17 +51,18 @@ export function ApiListDepartments(): MethodDecorator & ClassDecorator {
 
 export function ApiListDepartmentDoctors(): MethodDecorator & ClassDecorator {
   return applyDecorators(
+    ApiExtraModels(DepartmentDoctorDto, PaginatedDepartmentDoctorDto),
     ApiOperation({
-      summary: 'List doctors affiliated with a department',
+      summary: 'List doctors affiliated with a department (paginated)',
       description:
         'Includes the `isPrimary` flag from the `doctor_departments` join. ' +
-        'Doctors are sorted with primaries first.',
+        'Doctors are sorted with primaries first, then by `doctorCode asc`. ' +
+        'Supports `?page=&pageSize=` (defaults: page=1, pageSize=20, max=100).',
     }),
     ApiParam({ name: 'id', description: 'Department id (uuid).' }),
     ApiOkResponse({
-      description: 'Doctors in the department',
-      type: DepartmentDoctorDto,
-      isArray: true,
+      description: 'Doctors-in-department page',
+      type: PaginatedDepartmentDoctorDto,
     }),
     ApiForbiddenResponse({
       description: 'Caller is missing the `doctor.list` permission.',

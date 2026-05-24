@@ -3,6 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 
 import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { PERMISSION } from '../auth/permissions';
+import type { Paginated } from '../common/pagination';
 
 import { DoctorsService } from './doctors.service';
 import { ApiGetDoctor, ApiListDoctors } from './doctors.swagger';
@@ -20,8 +21,12 @@ export class DoctorsController {
   @Get()
   @RequirePermission(PERMISSION.DOCTOR_LIST)
   @ApiListDoctors()
-  list(@Query() query: ListDoctorsQueryDto): Promise<DoctorDto[]> {
-    return this.doctors.listAll({ departmentId: query.departmentId });
+  list(@Query() query: ListDoctorsQueryDto): Promise<Paginated<DoctorDto>> {
+    return this.doctors.listAll({
+      page: query.page,
+      pageSize: query.pageSize,
+      departmentId: query.departmentId,
+    });
   }
 
   @Get(':id')

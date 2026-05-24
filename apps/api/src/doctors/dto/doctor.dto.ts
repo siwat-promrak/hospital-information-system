@@ -2,6 +2,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender } from '@prisma/client';
 import { IsOptional, IsUUID } from 'class-validator';
 
+import { PaginationQueryDto } from '../../common/pagination';
+
 export class DoctorDepartmentAffiliationDto {
   @ApiProperty({ example: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9' })
   departmentId!: string;
@@ -60,10 +62,11 @@ export class DoctorDetailDto extends DoctorDto {
 }
 
 /**
- * Optional `?departmentId=` filter on `GET /doctors`. Validated up-front so
- * the controller never has to handle malformed uuids.
+ * Query DTO for `GET /doctors`. Composes the shared `PaginationQueryDto`
+ * (`?page=&pageSize=`) with the optional `?departmentId=` filter so the
+ * controller validates everything in one pipe pass.
  */
-export class ListDoctorsQueryDto {
+export class ListDoctorsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     example: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9',
     description: 'Restrict to doctors affiliated with this department.',

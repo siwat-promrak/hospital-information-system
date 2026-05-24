@@ -20,3 +20,20 @@ export interface DepartmentDoctorRow {
   fullName: string;
   isPrimary: boolean;
 }
+
+/**
+ * Service-layer arguments for `listAll`. Only pagination today; future
+ * filters (e.g. `?name=`) extend this without changing the call site.
+ */
+export interface ListDepartmentsArgs {
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * Service-layer arguments for `listDoctorsForDepartment`. Pagination only.
+ */
+export interface ListDepartmentDoctorsArgs {
+  page?: number;
+  pageSize?: number;
+}

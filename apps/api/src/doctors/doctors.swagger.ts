@@ -1,5 +1,6 @@
 import { applyDecorators } from '@nestjs/common';
 import {
+  ApiExtraModels,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -9,6 +10,7 @@ import {
 } from '@nestjs/swagger';
 
 import { ErrorCode } from '../common/errors';
+import { PaginatedDto } from '../common/pagination';
 
 import { DoctorDetailDto, DoctorDto } from './dto/doctor.dto';
 
@@ -25,13 +27,17 @@ const NOT_FOUND_EXAMPLE = {
   message: 'Doctor not found.',
 };
 
+const PaginatedDoctorDto = PaginatedDto(DoctorDto);
+
 export function ApiListDoctors(): MethodDecorator & ClassDecorator {
   return applyDecorators(
+    ApiExtraModels(DoctorDto, PaginatedDoctorDto),
     ApiOperation({
-      summary: 'List active doctors with department affiliations',
+      summary: 'List active doctors with department affiliations (paginated)',
       description:
         'Sort: `doctorCode asc`. Optional `?departmentId=<uuid>` filters ' +
-        'to doctors affiliated with that department (primary or secondary).',
+        'to doctors affiliated with that department (primary or secondary). ' +
+        'Supports `?page=&pageSize=` (defaults: page=1, pageSize=20, max=100).',
     }),
     ApiQuery({
       name: 'departmentId',
@@ -39,9 +45,8 @@ export function ApiListDoctors(): MethodDecorator & ClassDecorator {
       description: 'Restrict to doctors affiliated with this department.',
     }),
     ApiOkResponse({
-      description: 'Doctors directory',
-      type: DoctorDto,
-      isArray: true,
+      description: 'Doctors directory page',
+      type: PaginatedDoctorDto,
     }),
     ApiForbiddenResponse({
       description: 'Caller is missing the `doctor.list` permission.',

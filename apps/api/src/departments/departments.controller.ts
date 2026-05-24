@@ -1,8 +1,12 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 
 import { PERMISSION } from '../auth/permissions';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator';
+import {
+  PaginationQueryDto,
+  type Paginated,
+} from '../common/pagination';
 
 import { DepartmentsService } from './departments.service';
 import {
@@ -22,8 +26,11 @@ export class DepartmentsController {
   @Get()
   @RequirePermission(PERMISSION.DOCTOR_LIST)
   @ApiListDepartments()
-  list(): Promise<DepartmentDto[]> {
-    return this.departments.listAll();
+  list(@Query() query: PaginationQueryDto): Promise<Paginated<DepartmentDto>> {
+    return this.departments.listAll({
+      page: query.page,
+      pageSize: query.pageSize,
+    });
   }
 
   @Get(':id/doctors')
@@ -31,7 +38,11 @@ export class DepartmentsController {
   @ApiListDepartmentDoctors()
   listDoctors(
     @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<DepartmentDoctorDto[]> {
-    return this.departments.listDoctorsForDepartment(id);
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<DepartmentDoctorDto>> {
+    return this.departments.listDoctorsForDepartment(id, {
+      page: query.page,
+      pageSize: query.pageSize,
+    });
   }
 }
