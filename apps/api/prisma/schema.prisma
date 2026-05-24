@@ -320,6 +320,7 @@ model Department {
   deletedByUser User? @relation("DepartmentDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   doctors                 DoctorDepartment[]
+  doctorSchedules         DoctorSchedule[]
   appointments            Appointment[]
   allowedAppointmentTypes DepartmentAppointmentType[]
 
@@ -414,10 +415,15 @@ model DoctorDepartment {
 // clinic-local (0–1440). `breakStartMinute` / `breakEndMinute` carve out a
 // lunch (or similar) gap; the slot generator excludes that window. Effective
 // dates let staff change schedules without losing history.
+//
+// Since a doctor can span multiple departments (see `DoctorDepartment`), each
+// schedule pins which department the working window is for; the booking flow
+// inherits `departmentId` on the new `Appointment` from the chosen schedule.
 
 model DoctorSchedule {
   id               String    @id @default(uuid()) @db.Uuid
   doctorId         String    @map("doctor_id") @db.Uuid
+  departmentId     String    @map("department_id") @db.Uuid
   dayOfWeek        DayOfWeek @map("day_of_week")
   startMinute      Int       @map("start_minute")
   endMinute        Int       @map("end_minute")
@@ -434,12 +440,14 @@ model DoctorSchedule {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  doctor        Doctor @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  createdByUser User   @relation("DoctorScheduleCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  updatedByUser User?  @relation("DoctorScheduleUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  deletedByUser User?  @relation("DoctorScheduleDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  doctor        Doctor     @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser User       @relation("DoctorScheduleCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?      @relation("DoctorScheduleUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedByUser User?      @relation("DoctorScheduleDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([doctorId, dayOfWeek, effectiveFrom])
+  @@index([doctorId, departmentId])
   @@map("doctor_schedules")
 }
 
