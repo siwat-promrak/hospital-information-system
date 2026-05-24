@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "Role" AS ENUM ('ADMIN', 'STAFF', 'DOCTOR', 'PATIENT');
+CREATE TYPE "Role" AS ENUM ('ADMIN', 'DOCTOR', 'PATIENT');
 
 -- CreateEnum
 CREATE TYPE "AppointmentStatus" AS ENUM ('BOOKED', 'CANCELLED', 'COMPLETED');
@@ -50,7 +50,6 @@ CREATE TABLE "patients" (
     "emergency_person_relation" TEXT NOT NULL,
     "emergency_person_phone" TEXT NOT NULL,
     "address" TEXT NOT NULL,
-    "primary_staff_user_id" UUID,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
@@ -167,9 +166,6 @@ CREATE UNIQUE INDEX "patients_user_id_key" ON "patients"("user_id");
 CREATE UNIQUE INDEX "patients_hn_key" ON "patients"("hn");
 
 -- CreateIndex
-CREATE INDEX "patients_primary_staff_user_id_idx" ON "patients"("primary_staff_user_id");
-
--- CreateIndex
 CREATE INDEX "patients_deleted_at_idx" ON "patients"("deleted_at");
 
 -- CreateIndex
@@ -219,9 +215,6 @@ ALTER TABLE "users" ADD CONSTRAINT "users_deleted_by_fkey" FOREIGN KEY ("deleted
 
 -- AddForeignKey
 ALTER TABLE "patients" ADD CONSTRAINT "patients_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "patients" ADD CONSTRAINT "patients_primary_staff_user_id_fkey" FOREIGN KEY ("primary_staff_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "patients" ADD CONSTRAINT "patients_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
