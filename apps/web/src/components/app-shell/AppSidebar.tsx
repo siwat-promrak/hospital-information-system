@@ -1,11 +1,15 @@
 "use client";
 
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
 import PeopleIcon from "@mui/icons-material/People";
 import Box from "@mui/material/Box";
+import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
+import IconButton from "@mui/material/IconButton";
 import List from "@mui/material/List";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
@@ -33,6 +37,7 @@ interface AppSidebarProps {
   mobileOpen: boolean;
   desktopCollapsed: boolean;
   onMobileClose: () => void;
+  onDesktopToggle: () => void;
 }
 
 /**
@@ -42,18 +47,18 @@ interface AppSidebarProps {
  *     expanded + collapsed mini-rail via `desktopCollapsed`).
  *
  * The HIS brand sits in a `Toolbar`-sized header matching the AppBar so
- * the persistent drawer aligns visually with the header bar.
+ * the persistent drawer aligns visually with the header bar. The
+ * collapse/expand chevron sits in a sibling footer at the bottom — only
+ * rendered inside the permanent drawer because the temporary mobile
+ * drawer has no "collapsed" form.
  */
 export default function AppSidebar({
   items,
   mobileOpen,
   desktopCollapsed,
   onMobileClose,
+  onDesktopToggle,
 }: AppSidebarProps) {
-  const sharedDrawer = (collapsed: boolean) => (
-    <SidebarContents items={items} collapsed={collapsed} />
-  );
-
   const drawerWidth = desktopCollapsed
     ? SIDEBAR_WIDTH_COLLAPSED_PX
     : SIDEBAR_WIDTH_EXPANDED_PX;
@@ -80,7 +85,7 @@ export default function AppSidebar({
           },
         }}
       >
-        {sharedDrawer(false)}
+        <SidebarContents items={items} collapsed={false} />
       </Drawer>
       <Drawer
         variant="permanent"
@@ -99,7 +104,14 @@ export default function AppSidebar({
           },
         }}
       >
-        {sharedDrawer(desktopCollapsed)}
+        <SidebarContents
+          items={items}
+          collapsed={desktopCollapsed}
+          collapseToggle={{
+            collapsed: desktopCollapsed,
+            onToggle: onDesktopToggle,
+          }}
+        />
       </Drawer>
     </Box>
   );
@@ -108,15 +120,28 @@ export default function AppSidebar({
 interface SidebarContentsProps {
   items: readonly NavItem[];
   collapsed: boolean;
+  /**
+   * When set, renders a footer at the bottom of the drawer with a
+   * chevron that toggles the mini-rail mode. Only the permanent drawer
+   * passes this — the temporary mobile drawer has no "collapsed" form.
+   */
+  collapseToggle?: {
+    collapsed: boolean;
+    onToggle: () => void;
+  };
 }
 
-function SidebarContents({ items, collapsed }: SidebarContentsProps) {
+function SidebarContents({
+  items,
+  collapsed,
+  collapseToggle,
+}: SidebarContentsProps) {
   const tNav = useTranslations(NS.Nav);
   const tNavItems = useTranslations(NS.NavItems);
   const pathname = usePathname();
 
   return (
-    <>
+    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <Toolbar
         disableGutters
         sx={{
@@ -154,7 +179,7 @@ function SidebarContents({ items, collapsed }: SidebarContentsProps) {
           ) : null}
         </Stack>
       </Toolbar>
-      <List sx={{ py: 1 }}>
+      <List sx={{ py: 1, flexGrow: 1, overflowY: "auto" }}>
         {items.map((item) => {
           const Icon = ICON_FOR[item.iconName];
           const label = tNavItems(item.i18nKey);
@@ -212,7 +237,44 @@ function SidebarContents({ items, collapsed }: SidebarContentsProps) {
           return <Box key={item.id}>{button}</Box>;
         })}
       </List>
-    </>
+      {collapseToggle ? (
+        <>
+          <Divider />
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "center",
+              p: 1,
+            }}
+          >
+            <Tooltip
+              title={
+                collapseToggle.collapsed
+                  ? tNav(K.Nav.expand)
+                  : tNav(K.Nav.collapse)
+              }
+              placement="right"
+            >
+              <IconButton
+                onClick={collapseToggle.onToggle}
+                aria-label={
+                  collapseToggle.collapsed
+                    ? tNav(K.Nav.expand)
+                    : tNav(K.Nav.collapse)
+                }
+                size="small"
+              >
+                {collapseToggle.collapsed ? (
+                  <ChevronRightIcon />
+                ) : (
+                  <ChevronLeftIcon />
+                )}
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </>
+      ) : null}
+    </Box>
   );
 }
 

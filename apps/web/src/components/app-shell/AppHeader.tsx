@@ -1,7 +1,5 @@
 "use client";
 
-import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
-import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import MenuIcon from "@mui/icons-material/Menu";
 import AppBar from "@mui/material/AppBar";
 import Box from "@mui/material/Box";
@@ -28,7 +26,6 @@ interface AppHeaderProps {
   locale: AppLocale;
   desktopCollapsed: boolean;
   onMobileToggle: () => void;
-  onDesktopToggle: () => void;
   user: {
     name: string;
     email: string;
@@ -40,11 +37,13 @@ interface AppHeaderProps {
 /**
  * Top app bar. Lays out (left → right):
  *   - hamburger (xs–sm) to toggle the temporary drawer
- *   - collapse/expand chevron (md+) to toggle the persistent drawer's
- *     mini-rail mode
  *   - URL-derived breadcrumb
  *   - locale switcher
  *   - avatar + dropdown menu (sign out)
+ *
+ * The desktop collapse/expand chevron lives at the bottom of the sidebar
+ * itself (see `AppSidebar`), not here — keeps the toggle visually anchored
+ * to what it controls.
  *
  * The AppBar shifts/widens to leave space for the persistent drawer on
  * md+; on smaller screens it spans the full width and the drawer slides
@@ -54,7 +53,6 @@ export default function AppHeader({
   locale,
   desktopCollapsed,
   onMobileToggle,
-  onDesktopToggle,
   user,
   breadcrumbLabelOverrides,
 }: AppHeaderProps) {
@@ -63,10 +61,6 @@ export default function AppHeader({
   const desktopWidth = desktopCollapsed
     ? SIDEBAR_WIDTH_COLLAPSED_PX
     : SIDEBAR_WIDTH_EXPANDED_PX;
-
-  const collapseLabel = desktopCollapsed
-    ? tNav(K.Nav.expand)
-    : tNav(K.Nav.collapse);
 
   return (
     <AppBar
@@ -99,17 +93,6 @@ export default function AppHeader({
             sx={{ display: { xs: "inline-flex", md: "none" } }}
           >
             <MenuIcon />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title={collapseLabel}>
-          <IconButton
-            edge="start"
-            color="inherit"
-            onClick={onDesktopToggle}
-            aria-label={collapseLabel}
-            sx={{ display: { xs: "none", md: "inline-flex" } }}
-          >
-            {desktopCollapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
           </IconButton>
         </Tooltip>
         <Box sx={{ flex: 1, minWidth: 0 }}>

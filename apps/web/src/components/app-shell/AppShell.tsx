@@ -40,13 +40,15 @@ export default function AppShell({ locale, user, children }: AppShellProps) {
 
   const items = filterNavItems(NAV_ITEMS, user.roleCode, user.permissionCodes);
 
+  const toggleMobile = () => setMobileOpen((prev) => !prev);
+  const toggleDesktop = () => setDesktopCollapsed((prev) => !prev);
+
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
       <AppHeader
         locale={locale}
         desktopCollapsed={desktopCollapsed}
-        onMobileToggle={() => setMobileOpen((prev) => !prev)}
-        onDesktopToggle={() => setDesktopCollapsed((prev) => !prev)}
+        onMobileToggle={toggleMobile}
         user={{
           name: user.name,
           email: user.email,
@@ -58,6 +60,7 @@ export default function AppShell({ locale, user, children }: AppShellProps) {
         mobileOpen={mobileOpen}
         desktopCollapsed={desktopCollapsed}
         onMobileClose={() => setMobileOpen(false)}
+        onDesktopToggle={toggleDesktop}
       />
       <Box
         component="main"
