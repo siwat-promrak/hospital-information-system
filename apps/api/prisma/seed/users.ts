@@ -1,17 +1,24 @@
 /**
- * Seeds non-super-admin users: 2 ADMIN (clinic operators), 5 DOCTOR (1:1
- * with Doctor rows in doctors.ts), 10 PATIENT (1:1 with Patient rows in
- * patients.ts). Depends on the super-admin seeded in super-admin.ts so the
- * shared `createdBy` audit column has a valid referent.
+ * Seeds non-super-admin users for the post-RBAC schema:
+ *   - 2 ADMIN  (clinic managers)
+ *   - 2 STAFF  (front-desk operators — added back now that STAFF role exists)
+ *   - 5 DOCTOR (1:1 with Doctor rows in doctors.ts; data-only — do not sign in)
+ *
+ * No PATIENT-role users: patients are pure records in the post-RBAC model
+ * and never sign in (no patient portal in P0).
+ *
+ * Depends on super-admin.ts (for `createdBy`) AND roles.ts (for `roleId`).
  */
-import { PrismaClient, Role, type User } from '@prisma/client';
+import { PrismaClient, type User } from '@prisma/client';
 
 import { normalizeEmail } from '../../src/common/normalize-email';
 
+import type { SeededRoles } from './roles';
+
 export interface SeededUsers {
   admins: User[];
+  staff: User[];
   doctorUsers: User[];
-  patientUsers: User[];
 }
 
 interface UserSpec {
@@ -20,7 +27,6 @@ interface UserSpec {
   lastNameEn: string;
   firstNameTh: string | null;
   lastNameTh: string | null;
-  role: Role;
 }
 
 const ADMIN_SPECS: UserSpec[] = [
@@ -30,7 +36,6 @@ const ADMIN_SPECS: UserSpec[] = [
     lastNameEn: 'Smith',
     firstNameTh: null,
     lastNameTh: null,
-    role: Role.ADMIN,
   },
   {
     email: 'admin2@gmail.com',
@@ -38,7 +43,23 @@ const ADMIN_SPECS: UserSpec[] = [
     lastNameEn: 'Ratchaphon',
     firstNameTh: 'กัญญา',
     lastNameTh: 'ราชพล',
-    role: Role.ADMIN,
+  },
+];
+
+const STAFF_SPECS: UserSpec[] = [
+  {
+    email: 'staff1@gmail.com',
+    firstNameEn: 'Pim',
+    lastNameEn: 'Sukjai',
+    firstNameTh: 'พิม',
+    lastNameTh: 'สุขใจ',
+  },
+  {
+    email: 'staff2@gmail.com',
+    firstNameEn: 'Daniel',
+    lastNameEn: 'Park',
+    firstNameTh: null,
+    lastNameTh: null,
   },
 ];
 
@@ -49,7 +70,6 @@ const DOCTOR_SPECS: UserSpec[] = [
     lastNameEn: 'Wong',
     firstNameTh: 'สมชาย',
     lastNameTh: 'วงศ์',
-    role: Role.DOCTOR,
   },
   {
     email: 'doctor.alice@gmail.com',
@@ -57,7 +77,6 @@ const DOCTOR_SPECS: UserSpec[] = [
     lastNameEn: 'Adams',
     firstNameTh: null,
     lastNameTh: null,
-    role: Role.DOCTOR,
   },
   {
     email: 'doctor.nattapong@gmail.com',
@@ -65,7 +84,6 @@ const DOCTOR_SPECS: UserSpec[] = [
     lastNameEn: 'Srisuk',
     firstNameTh: 'ณัฐพงศ์',
     lastNameTh: 'ศรีสุข',
-    role: Role.DOCTOR,
   },
   {
     email: 'doctor.ben@gmail.com',
@@ -73,7 +91,6 @@ const DOCTOR_SPECS: UserSpec[] = [
     lastNameEn: 'Brown',
     firstNameTh: null,
     lastNameTh: null,
-    role: Role.DOCTOR,
   },
   {
     email: 'doctor.carla@gmail.com',
@@ -81,107 +98,30 @@ const DOCTOR_SPECS: UserSpec[] = [
     lastNameEn: 'Chen',
     firstNameTh: null,
     lastNameTh: null,
-    role: Role.DOCTOR,
-  },
-];
-
-const PATIENT_SPECS: UserSpec[] = [
-  {
-    email: 'patient.one@gmail.com',
-    firstNameEn: 'Patient',
-    lastNameEn: 'One',
-    firstNameTh: 'หนึ่ง',
-    lastNameTh: 'ใจดี',
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.two@gmail.com',
-    firstNameEn: 'Patient',
-    lastNameEn: 'Two',
-    firstNameTh: null,
-    lastNameTh: null,
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.three@gmail.com',
-    firstNameEn: 'Niran',
-    lastNameEn: 'Phongphan',
-    firstNameTh: 'นิรันดร์',
-    lastNameTh: 'พงษ์พันธ์',
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.four@gmail.com',
-    firstNameEn: 'Patient',
-    lastNameEn: 'Four',
-    firstNameTh: null,
-    lastNameTh: null,
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.five@gmail.com',
-    firstNameEn: 'Apirak',
-    lastNameEn: 'Charoen',
-    firstNameTh: 'อภิรักษ์',
-    lastNameTh: 'เจริญ',
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.six@gmail.com',
-    firstNameEn: 'Patient',
-    lastNameEn: 'Six',
-    firstNameTh: null,
-    lastNameTh: null,
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.seven@gmail.com',
-    firstNameEn: 'Patient',
-    lastNameEn: 'Seven',
-    firstNameTh: null,
-    lastNameTh: null,
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.eight@gmail.com',
-    firstNameEn: 'Suchada',
-    lastNameEn: 'Boonmee',
-    firstNameTh: 'สุชาดา',
-    lastNameTh: 'บุญมี',
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.nine@gmail.com',
-    firstNameEn: 'Patient',
-    lastNameEn: 'Nine',
-    firstNameTh: null,
-    lastNameTh: null,
-    role: Role.PATIENT,
-  },
-  {
-    email: 'patient.ten@gmail.com',
-    firstNameEn: 'Patient',
-    lastNameEn: 'Ten',
-    firstNameTh: null,
-    lastNameTh: null,
-    role: Role.PATIENT,
   },
 ];
 
 export async function seedUsers(
   prisma: PrismaClient,
+  roles: SeededRoles,
   superAdmin: User,
 ): Promise<SeededUsers> {
-  const admins = await upsertUserSpecs(prisma, ADMIN_SPECS, superAdmin);
-  const doctorUsers = await upsertUserSpecs(prisma, DOCTOR_SPECS, superAdmin);
-  const patientUsers = await upsertUserSpecs(prisma, PATIENT_SPECS, superAdmin);
+  const admins = await upsertUserSpecs(prisma, ADMIN_SPECS, roles.admin.id, superAdmin);
+  const staff = await upsertUserSpecs(prisma, STAFF_SPECS, roles.staff.id, superAdmin);
+  const doctorUsers = await upsertUserSpecs(
+    prisma,
+    DOCTOR_SPECS,
+    roles.doctor.id,
+    superAdmin,
+  );
 
-  return { admins, doctorUsers, patientUsers };
+  return { admins, staff, doctorUsers };
 }
 
 async function upsertUserSpecs(
   prisma: PrismaClient,
   specs: UserSpec[],
+  roleId: string,
   superAdmin: User,
 ): Promise<User[]> {
   const created: User[] = [];
@@ -195,7 +135,7 @@ async function upsertUserSpecs(
         lastNameEn: spec.lastNameEn,
         firstNameTh: spec.firstNameTh,
         lastNameTh: spec.lastNameTh,
-        role: spec.role,
+        roleId,
       },
       create: {
         email,
@@ -203,7 +143,7 @@ async function upsertUserSpecs(
         lastNameEn: spec.lastNameEn,
         firstNameTh: spec.firstNameTh,
         lastNameTh: spec.lastNameTh,
-        role: spec.role,
+        roleId,
         createdBy: superAdmin.id,
       },
     });

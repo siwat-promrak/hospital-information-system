@@ -2,8 +2,9 @@
  * Seeds 10 BOOKED appointments — 2 per doctor — distributed across tomorrow
  * morning and the day-after-tomorrow afternoon. Type mix: 8 FOLLOW_UP, 1
  * CONSULTATION, 1 PROCEDURE (which carries `reason`). `createdByUserId`
- * alternates between admin1 and admin2. Depends on doctors.ts, patients.ts,
- * and users.ts (ADMIN users) — appointments need real ids from all three.
+ * rotates across admin1 → admin2 → staff1 → staff2 so the seed exercises
+ * both ADMIN and STAFF as appointment creators. Depends on doctors.ts,
+ * patients.ts, and users.ts (ADMIN + STAFF users).
  */
 import {
   AppointmentType,
@@ -37,14 +38,24 @@ export async function seedAppointments(
   doctors: Doctor[],
   patients: Patient[],
   admins: User[],
+  staff: User[],
 ): Promise<number> {
   const adminsByEmail = new Map(admins.map((u) => [u.email, u]));
+  const staffByEmail = new Map(staff.map((u) => [u.email, u]));
   const admin1 = adminsByEmail.get(normalizeEmail('admin1@gmail.com'));
   const admin2 = adminsByEmail.get(normalizeEmail('admin2@gmail.com'));
+  const staff1 = staffByEmail.get(normalizeEmail('staff1@gmail.com'));
+  const staff2 = staffByEmail.get(normalizeEmail('staff2@gmail.com'));
 
-  if (!admin1 || !admin2) {
-    throw new Error('Seed expected admin1 and admin2 ADMIN users to be present');
+  if (!admin1 || !admin2 || !staff1 || !staff2) {
+    throw new Error(
+      'Seed expected admin1, admin2, staff1, and staff2 users to be present',
+    );
   }
+
+  // Rotate `createdBy` across the four operator accounts so the seed exercises
+  // both roles. Ordering: admin1, admin2, staff1, staff2, repeat.
+  const creatorRotation: string[] = [admin1.id, admin2.id, staff1.id, staff2.id];
 
   // Two future BOOKED appointments per doctor: tomorrow 09:00 and the day
   // after tomorrow 14:00. Both fall inside every doctor's MON-FRI 09:00-17:00
@@ -86,8 +97,8 @@ export async function seedAppointments(
     const patient1Hn = patientHns[(i * 2) % patientHns.length];
     const patient2Hn = patientHns[(i * 2 + 1) % patientHns.length];
 
-    const createdBy1 = i % 2 === 0 ? admin1.id : admin2.id;
-    const createdBy2 = i % 2 === 0 ? admin2.id : admin1.id;
+    const createdBy1 = creatorRotation[(i * 2) % creatorRotation.length];
+    const createdBy2 = creatorRotation[(i * 2 + 1) % creatorRotation.length];
 
     specs.push({
       patientHn: patient1Hn,
