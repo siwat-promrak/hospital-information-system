@@ -475,11 +475,11 @@ model Appointment {
   endAt           DateTime          @map("end_at") @db.Timestamptz(3)
   reason          String?           @db.Text
 
-  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
 
   cancelledAt        DateTime? @map("cancelled_at") @db.Timestamptz(3)
   cancellationReason String?   @map("cancellation_reason") @db.Text
-  cancelledByUserId  String?   @map("cancelled_by_user_id") @db.Uuid
+  cancelledBy        String?   @map("cancelled_by") @db.Uuid
 
   completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
 
@@ -490,9 +490,9 @@ model Appointment {
   patient         Patient    @relation(fields: [patientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   doctor          Doctor     @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   department      Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  createdByUser   User       @relation("AppointmentsCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser   User       @relation("AppointmentsCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   updatedByUser   User?      @relation("AppointmentsUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  cancelledByUser User?      @relation("AppointmentsCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cancelledByUser User?      @relation("AppointmentsCancelledBy", fields: [cancelledBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([doctorId, startAt])
   @@index([patientId, startAt])
