@@ -19,23 +19,20 @@
  *
  * Totals (after seed):
  *   - 3 roles (ADMIN, STAFF, DOCTOR)
- *   - 15 permissions
- *   - 26 policies (15 ADMIN + 11 STAFF + 0 DOCTOR)
- *   - 10 users — 1 super-admin + 2 ADMIN + 2 STAFF + 5 DOCTOR
+ *   - 16 permissions
+ *   - 16 policies (5 ADMIN + 11 STAFF + 0 DOCTOR)
+ *   - 5 users — 1 super-admin + 2 ADMIN + 2 STAFF
  *   - 10 departments
  *   - ~34 department_appointment_types (per-department allowed types)
- *   - 5 doctors (2 / 2 / 1 across departments)
- *   - 25 doctor schedules (MON-FRI per doctor)
  *   - 10 patients (5 MALE + 5 FEMALE)
- *   - 10 appointments — `createdBy` rotates admin1 → admin2 → staff1 → staff2
+ *
+ * Doctor / DoctorSchedule / Appointment rows are NOT seeded — they are
+ * created via application workflows in later features.
  */
 import { PrismaClient } from '@prisma/client';
 
-import { seedAppointments } from './appointments';
 import { seedDepartmentAppointmentTypes } from './department-appointment-types';
 import { seedDepartments } from './departments';
-import { seedDoctorSchedules } from './doctor-schedules';
-import { seedDoctors } from './doctors';
 import { seedPatients } from './patients';
 import { seedPermissions } from './permissions';
 import { seedPolicies } from './policies';
@@ -59,35 +56,17 @@ async function main(): Promise<void> {
     departments,
     superAdmin,
   );
-  const doctors = await seedDoctors(
-    prisma,
-    users.doctorUsers,
-    departments,
-    superAdmin,
-  );
-  await seedDoctorSchedules(prisma, doctors, superAdmin);
   const patients = await seedPatients(prisma, superAdmin);
-  const appointmentCount = await seedAppointments(
-    prisma,
-    doctors,
-    patients,
-    users.admins,
-    users.staff,
-  );
 
   // eslint-disable-next-line no-console
   console.log('Seed complete.', {
     roles: 3,
-    permissions: 15,
+    permissions: 16,
     policies: policyCount,
-    users:
-      1 + users.admins.length + users.staff.length + users.doctorUsers.length,
+    users: 1 + users.admins.length + users.staff.length,
     departments: departments.length,
     departmentAppointmentTypes: departmentAppointmentTypeCount,
-    doctors: doctors.length,
-    doctorSchedules: doctors.length * 5,
     patients: patients.length,
-    appointments: appointmentCount,
   });
 }
 
