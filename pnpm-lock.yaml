@@ -132,6 +132,9 @@ importers:
       '@mui/material-nextjs':
         specifier: 6.5.0
         version: 6.5.0(@emotion/cache@11.14.0)(@emotion/react@11.14.0(@types/react@19.2.15)(react@19.2.6))(@types/react@19.2.15)(next@15.5.18(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6)
+      jose:
+        specifier: 5.9.6
+        version: 5.9.6
       next:
         specifier: 15.5.18
         version: 15.5.18(react-dom@19.2.6(react@19.2.6))(react@19.2.6)

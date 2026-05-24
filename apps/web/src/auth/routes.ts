@@ -19,13 +19,34 @@ export const FE_PATH = {
   ADMIN: "/admin",
   STAFF: "/staff",
   DOCTOR_SCHEDULE: "/me/schedule",
+  DEPARTMENTS: "/departments",
+  DOCTORS: "/doctors",
 } as const;
 
 export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];
 
+/**
+ * Builder for parameterised FE routes. Keeps the literal segment in one
+ * place even when the URL includes a runtime id.
+ */
+export const FE_PATH_BUILDER = {
+  doctorDetail: (id: string) => `${FE_PATH.DOCTORS}/${id}`,
+} as const;
+
 export const BE_PATH = {
   AUTH_RESOLVE: "/auth/resolve",
   AUTH_SIGN_OUT: "/auth/signout",
+  DEPARTMENTS: "/departments",
+  DOCTORS: "/doctors",
 } as const;
 
 export type BePath = (typeof BE_PATH)[keyof typeof BE_PATH];
+
+/**
+ * Builder for parameterised BE routes consumed via the `/api/be/*` rewrite.
+ */
+export const BE_PATH_BUILDER = {
+  departmentDoctors: (departmentId: string) =>
+    `${BE_PATH.DEPARTMENTS}/${departmentId}/doctors`,
+  doctorDetail: (doctorId: string) => `${BE_PATH.DOCTORS}/${doctorId}`,
+} as const;

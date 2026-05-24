@@ -32,5 +32,65 @@
     "comingSoonStaff": "แดชบอร์ดเจ้าหน้าที่ — การลงทะเบียนคนไข้, การจอง, และนัดหมายจะมาใน F08",
     "comingSoonDoctor": "แดชบอร์ดแพทย์ — ตัวจัดการตารางของตนเองจะมาใน F06",
     "noPermissions": "ยังไม่ได้รับสิทธิ์ใด ๆ"
+  },
+  "Nav": {
+    "brand": "HIS",
+    "brandFull": "ระบบสารสนเทศโรงพยาบาล",
+    "expand": "ขยายเมนูด้านข้าง",
+    "collapse": "ย่อเมนูด้านข้าง",
+    "openMenu": "เปิดเมนูนำทาง",
+    "closeMenu": "ปิดเมนูนำทาง",
+    "items": {
+      "dashboard": "แดชบอร์ด",
+      "departments": "แผนก",
+      "doctors": "แพทย์",
+      "mySchedule": "ตารางของฉัน"
+    }
+  },
+  "Breadcrumb": {
+    "home": "หน้าแรก",
+    "admin": "ผู้ดูแลระบบ",
+    "staff": "เจ้าหน้าที่",
+    "me": "ฉัน",
+    "schedule": "ตาราง",
+    "departments": "แผนก",
+    "doctors": "แพทย์"
+  },
+  "UserMenu": {
+    "openMenu": "เปิดเมนูผู้ใช้",
+    "signedInAs": "เข้าสู่ระบบในชื่อ",
+    "language": "ภาษา"
+  },
+  "Directory": {
+    "Departments": {
+      "title": "แผนก",
+      "subtitle": "แผนกทางคลินิกทั้งหมดที่โรงพยาบาลให้บริการ",
+      "doctorsCount": "{count, plural, =0 {ไม่มีแพทย์} other {# คน}}",
+      "empty": "ยังไม่มีแผนก"
+    },
+    "Doctors": {
+      "title": "แพทย์",
+      "subtitle": "ดูรายชื่อบุคลากรทางการแพทย์",
+      "filterByDepartment": "กรองตามแผนก",
+      "allDepartments": "ทุกแผนก",
+      "empty": "ยังไม่มีแพทย์ในระบบ แพทย์จะปรากฏที่นี่เมื่อได้รับเชิญผ่าน ผู้ดูแลระบบ → ผู้ใช้ (F11)",
+      "primary": "หลัก",
+      "viewDetail": "ดู"
+    },
+    "DoctorDetail": {
+      "back": "ย้อนกลับไปยังรายชื่อแพทย์",
+      "departmentsLabel": "แผนก",
+      "scheduleSummary": "ตารางประจำสัปดาห์",
+      "scheduleEmpty": "ยังไม่มีตารางที่ตั้งไว้ การจัดการตารางจะมาใน F06",
+      "contact": "ข้อมูลติดต่อ",
+      "phone": "โทรศัพท์",
+      "licenseNo": "เลขใบประกอบวิชาชีพ",
+      "doctorCode": "รหัสแพทย์",
+      "notFound": "ไม่พบข้อมูลแพทย์"
+    },
+    "Errors": {
+      "forbidden": "คุณไม่มีสิทธิ์เข้าถึงหน้านี้",
+      "loadFailed": "โหลดข้อมูลไม่สำเร็จ"
+    }
   }
 }

@@ -1,6 +1,6 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
-import RoleDashboard from "@/components/RoleDashboard";
+import RoleDashboard from "@/components/shared/RoleDashboard";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { requireSession } from "@/lib/server/session";
@@ -25,7 +25,6 @@ export default async function AdminDashboardPage({ params }: AdminDashboardPageP
 
   return (
     <RoleDashboard
-      locale={locale}
       name={session.user.name ?? session.user.email ?? ""}
       roleCode={session.user.roleCode}
       permissionCodes={session.user.permissionCodes}

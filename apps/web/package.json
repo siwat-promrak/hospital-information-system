@@ -19,6 +19,7 @@
     "@mui/icons-material": "6.5.0",
     "@mui/material": "6.5.0",
     "@mui/material-nextjs": "6.5.0",
+    "jose": "5.9.6",
     "next": "15.5.18",
     "next-auth": "5.0.0-beta.27",
     "next-intl": "4.12.0",

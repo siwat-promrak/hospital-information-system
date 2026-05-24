@@ -32,5 +32,65 @@
     "comingSoonStaff": "Staff dashboard — patient registration, booking, and appointments ship in F08.",
     "comingSoonDoctor": "Doctor dashboard — own-schedule editor ships in F06.",
     "noPermissions": "No permissions granted yet."
+  },
+  "Nav": {
+    "brand": "HIS",
+    "brandFull": "Hospital Information System",
+    "expand": "Expand sidebar",
+    "collapse": "Collapse sidebar",
+    "openMenu": "Open navigation menu",
+    "closeMenu": "Close navigation menu",
+    "items": {
+      "dashboard": "Dashboard",
+      "departments": "Departments",
+      "doctors": "Doctors",
+      "mySchedule": "My schedule"
+    }
+  },
+  "Breadcrumb": {
+    "home": "Home",
+    "admin": "Admin",
+    "staff": "Staff",
+    "me": "Me",
+    "schedule": "Schedule",
+    "departments": "Departments",
+    "doctors": "Doctors"
+  },
+  "UserMenu": {
+    "openMenu": "Open user menu",
+    "signedInAs": "Signed in as",
+    "language": "Language"
+  },
+  "Directory": {
+    "Departments": {
+      "title": "Departments",
+      "subtitle": "All clinical departments offered by the hospital.",
+      "doctorsCount": "{count, plural, =0 {No doctors} =1 {# doctor} other {# doctors}}",
+      "empty": "No departments yet."
+    },
+    "Doctors": {
+      "title": "Doctors",
+      "subtitle": "Browse the clinical staff directory.",
+      "filterByDepartment": "Filter by department",
+      "allDepartments": "All departments",
+      "empty": "No doctors yet. Doctors appear here once they're invited via Admin → Users (F11).",
+      "primary": "Primary",
+      "viewDetail": "View"
+    },
+    "DoctorDetail": {
+      "back": "Back to doctors",
+      "departmentsLabel": "Departments",
+      "scheduleSummary": "Weekly schedule",
+      "scheduleEmpty": "No schedule configured yet. Schedule CRUD ships in F06.",
+      "contact": "Contact",
+      "phone": "Phone",
+      "licenseNo": "Medical license no.",
+      "doctorCode": "Doctor code",
+      "notFound": "Doctor not found."
+    },
+    "Errors": {
+      "forbidden": "You don't have permission to view this page.",
+      "loadFailed": "Failed to load directory data."
+    }
   }
 }

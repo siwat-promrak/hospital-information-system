@@ -7,7 +7,7 @@ import Typography from "@mui/material/Typography";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { isSignInErrorKey } from "@/auth/sign-in-errors";
-import SignInButton from "@/components/SignInButton";
+import SignInButton from "@/components/shared/SignInButton";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { redirect } from "@/i18n/navigation";

@@ -3,6 +3,15 @@
 // DO NOT EDIT BY HAND. Run `pnpm --filter @hospital/web gen:i18n` to regenerate.
 
 export const K = {
+  Breadcrumb: {
+    admin: "admin",
+    departments: "departments",
+    doctors: "doctors",
+    home: "home",
+    me: "me",
+    schedule: "schedule",
+    staff: "staff",
+  },
   Dashboard: {
     comingSoonAdmin: "comingSoonAdmin",
     comingSoonDoctor: "comingSoonDoctor",
@@ -12,11 +21,57 @@ export const K = {
     roleLabel: "roleLabel",
     welcome: "welcome",
   },
+  Directory: {
+    Departments: {
+      doctorsCount: "doctorsCount",
+      empty: "empty",
+      subtitle: "subtitle",
+      title: "title",
+    },
+    DoctorDetail: {
+      back: "back",
+      contact: "contact",
+      departmentsLabel: "departmentsLabel",
+      doctorCode: "doctorCode",
+      licenseNo: "licenseNo",
+      notFound: "notFound",
+      phone: "phone",
+      scheduleEmpty: "scheduleEmpty",
+      scheduleSummary: "scheduleSummary",
+    },
+    Doctors: {
+      allDepartments: "allDepartments",
+      empty: "empty",
+      filterByDepartment: "filterByDepartment",
+      primary: "primary",
+      subtitle: "subtitle",
+      title: "title",
+      viewDetail: "viewDetail",
+    },
+    Errors: {
+      forbidden: "forbidden",
+      loadFailed: "loadFailed",
+    },
+  },
   Home: {
     primaryAction: "primaryAction",
     secondaryAction: "secondaryAction",
     subtitle: "subtitle",
     title: "title",
+  },
+  Nav: {
+    brand: "brand",
+    brandFull: "brandFull",
+    closeMenu: "closeMenu",
+    collapse: "collapse",
+    expand: "expand",
+    items: {
+      dashboard: "dashboard",
+      departments: "departments",
+      doctors: "doctors",
+      mySchedule: "mySchedule",
+    },
+    openMenu: "openMenu",
   },
   NotFound: {
     description: "description",
@@ -37,6 +92,11 @@ export const K = {
   SignOut: {
     label: "label",
   },
+  UserMenu: {
+    language: "language",
+    openMenu: "openMenu",
+    signedInAs: "signedInAs",
+  },
 } as const;
 
 /**
@@ -45,10 +105,19 @@ export const K = {
  * (e.g. `SignIn.errors` → `NS.SignInErrors`).
  */
 export const NS = {
+  Breadcrumb: "Breadcrumb",
   Dashboard: "Dashboard",
+  Directory: "Directory",
+  DirectoryDepartments: "Directory.Departments",
+  DirectoryDoctorDetail: "Directory.DoctorDetail",
+  DirectoryDoctors: "Directory.Doctors",
+  DirectoryErrors: "Directory.Errors",
   Home: "Home",
+  Nav: "Nav",
+  NavItems: "Nav.items",
   NotFound: "NotFound",
   SignIn: "SignIn",
   SignInErrors: "SignIn.errors",
   SignOut: "SignOut",
+  UserMenu: "UserMenu",
 } as const;

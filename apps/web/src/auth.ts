@@ -1,3 +1,4 @@
+import { SignJWT, jwtVerify } from "jose";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 
@@ -5,15 +6,36 @@ import {
   SESSION_MAX_AGE_SECONDS,
   SESSION_UPDATE_AGE_SECONDS,
 } from "@/auth/auth.const";
-import type { ResolveSuccess } from "@/auth/auth.types";
 import { OAUTH_PROVIDER } from "@/auth/oauth";
-import { BE_PATH, FE_PATH } from "@/auth/routes";
+import { FE_PATH } from "@/auth/routes";
 import {
   SIGN_IN_ERROR,
   signInErrorFromBackendCode,
   type SignInErrorKey,
 } from "@/auth/sign-in-errors";
-import { internalFetch, readErrorEnvelope } from "@/lib/server/api-internal";
+import { resolveOnBackend as resolveOnBackendApi } from "@/lib/api/auth.api";
+import type {
+  ResolveRequest,
+  ResolveSuccess,
+} from "@/types/auth.types";
+import { isApiError } from "@/lib/api/errors";
+
+const JWT_ALG = "HS256";
+
+/**
+ * Coerce NextAuth's `secret` parameter (`string | string[]`) into the bytes
+ * jose expects. The first element wins on rotation so encode + decode pick
+ * the same key.
+ */
+function encodeSecret(secret: string | string[] | undefined): Uint8Array {
+  const raw = Array.isArray(secret) ? secret[0] : secret;
+
+  if (!raw) {
+    throw new Error("NEXTAUTH_SECRET is not configured.");
+  }
+
+  return new TextEncoder().encode(raw);
+}
 
 /**
  * NextAuth v5 configuration.
@@ -35,6 +57,50 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     strategy: "jwt",
     maxAge: SESSION_MAX_AGE_SECONDS,
     updateAge: SESSION_UPDATE_AGE_SECONDS,
+  },
+  /**
+   * Override Auth.js v5's default JWE (encrypted) session token with a
+   * standard HS256-signed JWT. The Nest API's `JwtGuard` verifies the
+   * cookie with `jose.jwtVerify(..., { algorithms: ['HS256'] })` — it has
+   * always been built for signed tokens. Keeping NextAuth on its JWE
+   * default produced `AUTH_INVALID_TOKEN` the first time a real cookie
+   * reached the BE (F05 directory endpoints).
+   *
+   * The `secret` here is whatever NextAuth passes in — accept the broader
+   * `string | string[]` shape (rotation list) and pick the first key.
+   *
+   * TODO(FU-01, see docs/follow-ups.md): drop this override and migrate
+   * the BE to decrypt JWE so cookie claims are no longer plaintext.
+   */
+  jwt: {
+    async encode({ token, secret, maxAge }) {
+      const key = encodeSecret(secret);
+      const now = Math.floor(Date.now() / 1000);
+      const ttl = maxAge ?? SESSION_MAX_AGE_SECONDS;
+
+      return await new SignJWT({ ...(token ?? {}) })
+        .setProtectedHeader({ alg: JWT_ALG })
+        .setIssuedAt(now)
+        .setExpirationTime(now + ttl)
+        .sign(key);
+    },
+    async decode({ token, secret }) {
+      if (!token) {
+        return null;
+      }
+
+      const key = encodeSecret(secret);
+
+      try {
+        const { payload } = await jwtVerify(token, key, {
+          algorithms: [JWT_ALG],
+        });
+
+        return payload;
+      } catch {
+        return null;
+      }
+    },
   },
   pages: {
     // NextAuth uses this for built-in redirects (e.g. when no session is
@@ -142,38 +208,26 @@ function errorRedirect(key: SignInErrorKey): string {
   return `${FE_PATH.SIGNIN}?error=${key}`;
 }
 
-interface ResolveRequest {
-  email: string;
-  googleSub: string;
-  emailVerified: boolean;
-  name: string;
-  picture: string | null;
-}
-
 type ResolveResult =
   | { kind: "ok"; payload: ResolveSuccess }
   | { kind: "error"; errorKey: SignInErrorKey };
 
+/**
+ * Thin wrapper around `resolveOnBackend` that converts `ApiError` (thrown
+ * by the shared `userFetch` / `internalFetch` helpers) into a tagged
+ * union the `signIn` callback can branch on. Network / non-API errors
+ * fall through to `INTERNAL` so the user sees the generic sign-in error.
+ */
 async function resolveOnBackend(request: ResolveRequest): Promise<ResolveResult> {
   try {
-    const response = await internalFetch(BE_PATH.AUTH_RESOLVE, {
-      method: "POST",
-      body: JSON.stringify(request),
-    });
+    const payload = await resolveOnBackendApi(request);
 
-    if (response.ok) {
-      const payload = (await response.json()) as ResolveSuccess;
-
-      return { kind: "ok", payload };
+    return { kind: "ok", payload };
+  } catch (err) {
+    if (isApiError(err)) {
+      return { kind: "error", errorKey: signInErrorFromBackendCode(err.code) };
     }
 
-    const envelope = await readErrorEnvelope(response);
-
-    return {
-      kind: "error",
-      errorKey: signInErrorFromBackendCode(envelope?.code),
-    };
-  } catch {
     return { kind: "error", errorKey: SIGN_IN_ERROR.INTERNAL };
   }
 }

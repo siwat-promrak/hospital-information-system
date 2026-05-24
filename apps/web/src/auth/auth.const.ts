@@ -2,29 +2,12 @@
  * Static auth-layer constants for the FE. NextAuth config + middleware read
  * these so renames propagate from one place.
  */
+import { parsePositiveInt } from "@/lib/utils/parse";
+
 import { FE_PATH } from "./routes";
 
 const DEFAULT_SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const DEFAULT_SESSION_UPDATE_AGE_SECONDS = 60 * 60;
-
-/**
- * Parse a positive integer from an env var. Returns `null` for missing,
- * empty, non-numeric, or non-positive values so the caller can fall back
- * to its default.
- */
-function parsePositiveIntEnv(raw: string | undefined): number | null {
-  if (!raw) {
-    return null;
-  }
-
-  const parsed = Number.parseInt(raw, 10);
-
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null;
-  }
-
-  return parsed;
-}
 
 /**
  * Hard ceiling on the session JWT cookie. The cookie is invalid after this
@@ -36,7 +19,7 @@ function parsePositiveIntEnv(raw: string | undefined): number | null {
  * lifetimes are visible in the JWT `exp` claim.
  */
 export const SESSION_MAX_AGE_SECONDS =
-  parsePositiveIntEnv(process.env.SESSION_MAX_AGE_SECONDS) ??
+  parsePositiveInt(process.env.SESSION_MAX_AGE_SECONDS) ??
   DEFAULT_SESSION_MAX_AGE_SECONDS;
 
 /**
@@ -51,7 +34,7 @@ export const SESSION_MAX_AGE_SECONDS =
  * module load.
  */
 export const SESSION_UPDATE_AGE_SECONDS =
-  parsePositiveIntEnv(process.env.SESSION_UPDATE_AGE_SECONDS) ??
+  parsePositiveInt(process.env.SESSION_UPDATE_AGE_SECONDS) ??
   DEFAULT_SESSION_UPDATE_AGE_SECONDS;
 
 if (SESSION_UPDATE_AGE_SECONDS >= SESSION_MAX_AGE_SECONDS) {
