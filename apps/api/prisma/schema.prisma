@@ -34,6 +34,21 @@ enum AppointmentStatus {
   COMPLETED
 }
 
+// `DayOfWeek` mirrors the seven calendar days. Stored as an enum rather than
+// an Int so the schema documents the domain and Postgres rejects out-of-range
+// values without a check constraint. Application-layer mapping to the
+// JavaScript `Date.getDay()` integer (0 = Sunday … 6 = Saturday) is handled by
+// helper functions in code.
+enum DayOfWeek {
+  SUN
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+}
+
 // ─── Auth principal ──────────────────────────────────────────────────────────
 // Every signed-in identity. PATIENT users link to a `Patient` row (1-1) once
 // onboarding completes. STAFF / ADMIN do not require a patient record.
@@ -112,10 +127,11 @@ model Doctor {
 }
 
 // ─── Schedule ────────────────────────────────────────────────────────────────
-// A doctor's recurring weekly working window. `dayOfWeek` follows the
-// JavaScript convention (0 = Sunday … 6 = Saturday). `startMinute` /
-// `endMinute` are minutes since midnight clinic-local (0–1440). Effective
-// dates let staff change schedules without losing history.
+// A doctor's recurring weekly working window. `dayOfWeek` is the `DayOfWeek`
+// enum (SUN…SAT); application code maps to the JavaScript `Date.getDay()`
+// integer when needed. `startMinute` / `endMinute` are minutes since midnight
+// clinic-local (0–1440). Effective dates let staff change schedules without
+// losing history.
 
 model DoctorSchedule {
   id           String     @id @default(cuid())
@@ -124,7 +140,7 @@ model DoctorSchedule {
   departmentId String
   department   Department @relation(fields: [departmentId], references: [id])
 
-  dayOfWeek   Int // 0 = Sunday … 6 = Saturday
+  dayOfWeek   DayOfWeek
   startMinute Int // minutes since midnight, clinic-local
   endMinute   Int // minutes since midnight, clinic-local
 
