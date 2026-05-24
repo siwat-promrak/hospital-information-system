@@ -34,7 +34,6 @@ datasource db {
 
 enum Role {
   ADMIN
-  STAFF
   DOCTOR
   PATIENT
 }
