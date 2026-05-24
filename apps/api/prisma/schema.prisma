@@ -240,9 +240,6 @@ model User {
   createdDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleCreatedBy")
   updatedDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleUpdatedBy")
   deletedDoctorSchedules DoctorSchedule[] @relation("DoctorScheduleDeletedBy")
-  createdStaffDomains    StaffDomain[]    @relation("StaffDomainCreatedBy")
-  updatedStaffDomains    StaffDomain[]    @relation("StaffDomainUpdatedBy")
-  deletedStaffDomains    StaffDomain[]    @relation("StaffDomainDeletedBy")
   createdRoles           Role[]           @relation("RoleCreatedBy")
   updatedRoles           Role[]           @relation("RoleUpdatedBy")
   deletedRoles           Role[]           @relation("RoleDeletedBy")
@@ -433,26 +430,4 @@ model Appointment {
   @@index([patientId, startAt])
   @@index([status])
   @@map("appointments")
-}
-
-// ─── Staff allowlist (future DB-driven flow; unused in P0) ───────────────────
-// In P0 the staff allowlist is sourced from `STAFF_ALLOWED_DOMAINS` (env var).
-// This model exists so a later migration to DB-driven config requires no
-// schema change. `domain` is the natural primary key.
-
-model StaffDomain {
-  domain String @id // stored lowercased
-
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  createdBy String    @map("created_by") @db.Uuid
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
-  updatedBy String?   @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
-  deletedBy String?   @map("deleted_by") @db.Uuid
-
-  createdByUser User  @relation("StaffDomainCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  updatedByUser User? @relation("StaffDomainUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  deletedByUser User? @relation("StaffDomainDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@map("staff_domains")
 }
