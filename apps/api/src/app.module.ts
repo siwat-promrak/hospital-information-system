@@ -8,6 +8,8 @@ import { InternalSecretGuard } from './auth/guards/internal-secret.guard';
 import { JwtGuard } from './auth/guards/jwt.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { DepartmentsModule } from './departments/departments.module';
+import { DoctorsModule } from './doctors/doctors.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
@@ -23,6 +25,8 @@ import { UsersModule } from './users/users.module';
     AuthLogModule,
     UsersModule,
     AuthModule,
+    DepartmentsModule,
+    DoctorsModule,
     HealthModule,
   ],
   providers: [
