@@ -77,8 +77,6 @@ enum DayOfWeek {
 enum Gender {
   MALE
   FEMALE
-  OTHER
-  PREFER_NOT_TO_SAY
 }
 
 // `BloodGroup` covers the eight ABO/Rh combinations plus an explicit
