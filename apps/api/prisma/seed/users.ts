@@ -1,10 +1,8 @@
 /**
- * Seeds non-super-admin users: 1 additional ADMIN, 2 STAFF-equivalent
- * ADMIN operators (staff1 / staff2 — kept under the legacy emails for now
- * and renamed in a follow-up commit), 5 DOCTOR (1:1 with Doctor rows in
- * doctors.ts), 10 PATIENT (1:1 with Patient rows in patients.ts). Depends
- * on the super-admin seeded in super-admin.ts so the shared `createdBy`
- * audit column has a valid referent.
+ * Seeds non-super-admin users: 2 ADMIN (clinic operators), 5 DOCTOR (1:1
+ * with Doctor rows in doctors.ts), 10 PATIENT (1:1 with Patient rows in
+ * patients.ts). Depends on the super-admin seeded in super-admin.ts so the
+ * shared `createdBy` audit column has a valid referent.
  */
 import { PrismaClient, Role, type User } from '@prisma/client';
 
@@ -27,15 +25,7 @@ interface UserSpec {
 
 const ADMIN_SPECS: UserSpec[] = [
   {
-    email: 'admin@gmail.com',
-    firstNameEn: 'Hospital',
-    lastNameEn: 'Admin',
-    firstNameTh: null,
-    lastNameTh: null,
-    role: Role.ADMIN,
-  },
-  {
-    email: 'staff1@gmail.com',
+    email: 'admin1@gmail.com',
     firstNameEn: 'Sarah',
     lastNameEn: 'Smith',
     firstNameTh: null,
@@ -43,7 +33,7 @@ const ADMIN_SPECS: UserSpec[] = [
     role: Role.ADMIN,
   },
   {
-    email: 'staff2@gmail.com',
+    email: 'admin2@gmail.com',
     firstNameEn: 'Kanya',
     lastNameEn: 'Ratchaphon',
     firstNameTh: 'กัญญา',

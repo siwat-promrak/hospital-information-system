@@ -2,10 +2,8 @@
  * Seeds 10 BOOKED appointments — 2 per doctor — distributed across tomorrow
  * morning and the day-after-tomorrow afternoon. Type mix: 8 FOLLOW_UP, 1
  * CONSULTATION, 1 PROCEDURE (which carries `reason`). `createdByUserId`
- * alternates between the two clinic-operator admins (legacy staff1 / staff2
- * emails — renamed in a follow-up commit). Depends on doctors.ts,
- * patients.ts, and users.ts (ADMIN users) — appointments need real ids from
- * all three.
+ * alternates between admin1 and admin2. Depends on doctors.ts, patients.ts,
+ * and users.ts (ADMIN users) — appointments need real ids from all three.
  */
 import {
   AppointmentType,
@@ -41,11 +39,11 @@ export async function seedAppointments(
   admins: User[],
 ): Promise<number> {
   const adminsByEmail = new Map(admins.map((u) => [u.email, u]));
-  const admin1 = adminsByEmail.get(normalizeEmail('staff1@gmail.com'));
-  const admin2 = adminsByEmail.get(normalizeEmail('staff2@gmail.com'));
+  const admin1 = adminsByEmail.get(normalizeEmail('admin1@gmail.com'));
+  const admin2 = adminsByEmail.get(normalizeEmail('admin2@gmail.com'));
 
   if (!admin1 || !admin2) {
-    throw new Error('Seed expected the two clinic-operator admins (staff1, staff2) to be present');
+    throw new Error('Seed expected admin1 and admin2 ADMIN users to be present');
   }
 
   // Two future BOOKED appointments per doctor: tomorrow 09:00 and the day
