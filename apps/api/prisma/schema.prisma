@@ -1,0 +1,193 @@
+// Hospital Information System — Appointment Booking module
+// P0 schema. See docs/feature-roadmap.md (F01) and docs/user-stories.md (E1)
+// for design rationale.
+//
+// Conventions
+// - `email` columns are stored lowercased via the shared `normalizeEmail()`
+//   helper (apps/api/src/common/normalize-email.ts). Prisma cannot express a
+//   case-insensitive unique constraint without a Postgres extension, so the
+//   normalization is enforced at the application layer on every write/lookup.
+// - All timestamps are `timestamptz` (UTC). Times-of-day on a doctor schedule
+//   are stored as minutes-since-midnight (`Int`) so slot math is pure
+//   arithmetic.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  STAFF
+  PATIENT
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CANCELLED
+  COMPLETED
+}
+
+// ─── Auth principal ──────────────────────────────────────────────────────────
+// Every signed-in identity. PATIENT users link to a `Patient` row (1-1) once
+// onboarding completes. STAFF / ADMIN do not require a patient record.
+
+model User {
+  id         String    @id @default(cuid())
+  email      String    @unique // stored lowercased via normalizeEmail()
+  googleSub  String?   @unique
+  name       String?
+  picture    String?
+  role       Role      @default(PATIENT)
+  patientId  String?   @unique
+  patient    Patient?  @relation("UserPatient", fields: [patientId], references: [id])
+  disabledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Inverse: patients this STAFF/ADMIN owns as the primary care contact.
+  ownedPatients         Patient[]     @relation("PatientPrimaryStaff")
+  appointmentsCreated   Appointment[] @relation("AppointmentCreatedBy")
+  appointmentsCancelled Appointment[] @relation("AppointmentCancelledBy")
+}
+
+// ─── Clinical entities ───────────────────────────────────────────────────────
+
+model Patient {
+  id          String    @id @default(cuid())
+  hn          String    @unique // Hospital Number — externally-facing patient ID
+  fullName    String
+  email       String?   @unique // stored lowercased via normalizeEmail()
+  phone       String?
+  dateOfBirth DateTime? @db.Date
+
+  // Optional FK to the STAFF/ADMIN User that owns this patient. NULL means
+  // self-service patient pending admin assignment. Enforced as STAFF/ADMIN at
+  // the application layer.
+  primaryStaffUserId String?
+  primaryStaffUser   User?   @relation("PatientPrimaryStaff", fields: [primaryStaffUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User?         @relation("UserPatient")
+  appointments Appointment[]
+
+  @@index([primaryStaffUserId])
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  doctors      Doctor[]
+  schedules    DoctorSchedule[]
+  appointments Appointment[]
+}
+
+model Doctor {
+  id           String     @id @default(cuid())
+  fullName     String
+  specialty    String?
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  schedules    DoctorSchedule[]
+  appointments Appointment[]
+
+  @@index([departmentId])
+}
+
+// ─── Schedule ────────────────────────────────────────────────────────────────
+// A doctor's recurring weekly working window. `dayOfWeek` follows the
+// JavaScript convention (0 = Sunday … 6 = Saturday). `startMinute` /
+// `endMinute` are minutes since midnight clinic-local (0–1440). Effective
+// dates let staff change schedules without losing history.
+
+model DoctorSchedule {
+  id           String     @id @default(cuid())
+  doctorId     String
+  doctor       Doctor     @relation(fields: [doctorId], references: [id])
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+
+  dayOfWeek   Int // 0 = Sunday … 6 = Saturday
+  startMinute Int // minutes since midnight, clinic-local
+  endMinute   Int // minutes since midnight, clinic-local
+
+  acceptsBooking Boolean @default(true)
+
+  effectiveFrom  DateTime  @db.Date
+  effectiveUntil DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([doctorId, dayOfWeek])
+  @@index([effectiveFrom, effectiveUntil])
+}
+
+// ─── Appointment ─────────────────────────────────────────────────────────────
+// `startAt` / `endAt` (UTC) are the source of truth for slot math. The
+// `appointmentType` enum is hardcoded application-side (see
+// `AppointmentType` const map in code) — no separate table in P0.
+//
+// `reason` is Postgres TEXT (no length cap, per spec).
+
+model Appointment {
+  id           String     @id @default(cuid())
+  patientId    String
+  patient      Patient    @relation(fields: [patientId], references: [id])
+  doctorId     String
+  doctor       Doctor     @relation(fields: [doctorId], references: [id])
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+
+  appointmentType String // NEW_PATIENT_VISIT | FOLLOW_UP | CONSULTATION | PROCEDURE
+  status          AppointmentStatus @default(BOOKED)
+
+  startAt DateTime // UTC
+  endAt   DateTime // UTC
+
+  reason String? @db.Text
+
+  createdByUserId String
+  createdByUser   User   @relation("AppointmentCreatedBy", fields: [createdByUserId], references: [id])
+
+  cancelledAt        DateTime?
+  cancellationReason String?   @db.Text
+  cancelledByUserId  String?
+  cancelledByUser    User?     @relation("AppointmentCancelledBy", fields: [cancelledByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([doctorId, startAt])
+  @@index([patientId, startAt])
+  @@index([status])
+}
+
+// ─── Staff allowlist (future DB-driven flow; unused in P0) ───────────────────
+// In P0 the staff allowlist is sourced from `STAFF_ALLOWED_DOMAINS` (env var).
+// This model exists so a later migration to DB-driven config requires no
+// schema change.
+
+model StaffDomain {
+  id        String   @id @default(cuid())
+  domain    String   @unique // stored lowercased
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
