@@ -420,6 +420,12 @@ model DoctorDepartment {
 // Since a doctor can span multiple departments (see `DoctorDepartment`), each
 // schedule pins which department the working window is for; the booking flow
 // inherits `departmentId` on the new `Appointment` from the chosen schedule.
+//
+// Time-range invariants enforced via raw-SQL CHECK constraints in the init
+// migration (Prisma 5 cannot express CHECK constraints natively):
+//   - start_minute < end_minute, both in [0, 1440]
+//   - if break_*_minute set, both must be set and the window must lie inside
+//     (start, end)
 
 model DoctorSchedule {
   id               String    @id @default(uuid()) @db.Uuid
@@ -463,6 +469,9 @@ model DoctorSchedule {
 // Appointments deliberately omit `deleted_at` / `deleted_by`: the
 // `status=CANCELLED` transition replaces soft-delete and admin purge is out
 // of scope.
+//
+// `end_at > start_at` enforced via raw-SQL CHECK constraint in the init
+// migration (Prisma 5 cannot express CHECK constraints natively).
 
 model Appointment {
   id              String            @id @default(uuid()) @db.Uuid

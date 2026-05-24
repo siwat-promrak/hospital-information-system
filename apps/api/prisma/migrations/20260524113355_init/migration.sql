@@ -142,9 +142,9 @@ CREATE TABLE "department_appointment_types" (
 CREATE TABLE "doctors" (
     "id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
-    "department_id" UUID NOT NULL,
     "doctor_code" TEXT NOT NULL,
     "gender" "Gender",
+    "identification_no" TEXT NOT NULL,
     "medical_license_no" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
     "address" TEXT,
@@ -159,9 +159,26 @@ CREATE TABLE "doctors" (
 );
 
 -- CreateTable
+CREATE TABLE "doctor_departments" (
+    "id" UUID NOT NULL,
+    "doctor_id" UUID NOT NULL,
+    "department_id" UUID NOT NULL,
+    "is_primary" BOOLEAN NOT NULL DEFAULT false,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID NOT NULL,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMPTZ(3),
+    "deleted_by" UUID,
+
+    CONSTRAINT "doctor_departments_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "doctor_schedules" (
     "id" UUID NOT NULL,
     "doctor_id" UUID NOT NULL,
+    "department_id" UUID NOT NULL,
     "day_of_week" "DayOfWeek" NOT NULL,
     "start_minute" INTEGER NOT NULL,
     "end_minute" INTEGER NOT NULL,
@@ -191,10 +208,10 @@ CREATE TABLE "appointments" (
     "start_at" TIMESTAMPTZ(3) NOT NULL,
     "end_at" TIMESTAMPTZ(3) NOT NULL,
     "reason" TEXT,
-    "created_by_user_id" UUID NOT NULL,
+    "created_by" UUID NOT NULL,
     "cancelled_at" TIMESTAMPTZ(3),
     "cancellation_reason" TEXT,
-    "cancelled_by_user_id" UUID,
+    "cancelled_by" UUID,
     "completed_at" TIMESTAMPTZ(3),
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
@@ -243,10 +260,16 @@ CREATE UNIQUE INDEX "doctors_doctor_code_key" ON "doctors"("doctor_code");
 CREATE UNIQUE INDEX "doctors_medical_license_no_key" ON "doctors"("medical_license_no");
 
 -- CreateIndex
-CREATE INDEX "doctors_department_id_idx" ON "doctors"("department_id");
+CREATE INDEX "doctor_departments_department_id_idx" ON "doctor_departments"("department_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "doctor_departments_doctor_id_department_id_key" ON "doctor_departments"("doctor_id", "department_id");
 
 -- CreateIndex
 CREATE INDEX "doctor_schedules_doctor_id_day_of_week_effective_from_idx" ON "doctor_schedules"("doctor_id", "day_of_week", "effective_from");
+
+-- CreateIndex
+CREATE INDEX "doctor_schedules_doctor_id_department_id_idx" ON "doctor_schedules"("doctor_id", "department_id");
 
 -- CreateIndex
 CREATE INDEX "appointments_doctor_id_start_at_idx" ON "appointments"("doctor_id", "start_at");
@@ -336,9 +359,6 @@ ALTER TABLE "department_appointment_types" ADD CONSTRAINT "department_appointmen
 ALTER TABLE "doctors" ADD CONSTRAINT "doctors_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "doctors" ADD CONSTRAINT "doctors_department_id_fkey" FOREIGN KEY ("department_id") REFERENCES "departments"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
-
--- AddForeignKey
 ALTER TABLE "doctors" ADD CONSTRAINT "doctors_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
@@ -348,7 +368,25 @@ ALTER TABLE "doctors" ADD CONSTRAINT "doctors_updated_by_fkey" FOREIGN KEY ("upd
 ALTER TABLE "doctors" ADD CONSTRAINT "doctors_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
+ALTER TABLE "doctor_departments" ADD CONSTRAINT "doctor_departments_doctor_id_fkey" FOREIGN KEY ("doctor_id") REFERENCES "doctors"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "doctor_departments" ADD CONSTRAINT "doctor_departments_department_id_fkey" FOREIGN KEY ("department_id") REFERENCES "departments"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "doctor_departments" ADD CONSTRAINT "doctor_departments_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "doctor_departments" ADD CONSTRAINT "doctor_departments_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "doctor_departments" ADD CONSTRAINT "doctor_departments_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
 ALTER TABLE "doctor_schedules" ADD CONSTRAINT "doctor_schedules_doctor_id_fkey" FOREIGN KEY ("doctor_id") REFERENCES "doctors"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "doctor_schedules" ADD CONSTRAINT "doctor_schedules_department_id_fkey" FOREIGN KEY ("department_id") REFERENCES "departments"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "doctor_schedules" ADD CONSTRAINT "doctor_schedules_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
@@ -369,13 +407,37 @@ ALTER TABLE "appointments" ADD CONSTRAINT "appointments_doctor_id_fkey" FOREIGN 
 ALTER TABLE "appointments" ADD CONSTRAINT "appointments_department_id_fkey" FOREIGN KEY ("department_id") REFERENCES "departments"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "appointments" ADD CONSTRAINT "appointments_created_by_user_id_fkey" FOREIGN KEY ("created_by_user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+ALTER TABLE "appointments" ADD CONSTRAINT "appointments_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "appointments" ADD CONSTRAINT "appointments_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "appointments" ADD CONSTRAINT "appointments_cancelled_by_user_id_fkey" FOREIGN KEY ("cancelled_by_user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+ALTER TABLE "appointments" ADD CONSTRAINT "appointments_cancelled_by_fkey" FOREIGN KEY ("cancelled_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- HN format constraint (numeric 7-9 digits) — Prisma 5 cannot express CHECK natively.
 ALTER TABLE "patients" ADD CONSTRAINT "patients_hn_format" CHECK ("hn" ~ '^[0-9]{7,9}$');
+
+-- DoctorSchedule: working window must be valid and within a day.
+ALTER TABLE "doctor_schedules"
+  ADD CONSTRAINT "doctor_schedules_window_valid"
+  CHECK ("start_minute" >= 0 AND "end_minute" <= 1440 AND "start_minute" < "end_minute");
+
+-- DoctorSchedule: break window (if set) must be fully inside the working window.
+ALTER TABLE "doctor_schedules"
+  ADD CONSTRAINT "doctor_schedules_break_valid"
+  CHECK (
+    ("break_start_minute" IS NULL AND "break_end_minute" IS NULL)
+    OR (
+      "break_start_minute" IS NOT NULL
+      AND "break_end_minute" IS NOT NULL
+      AND "break_start_minute" >= "start_minute"
+      AND "break_end_minute" <= "end_minute"
+      AND "break_start_minute" < "break_end_minute"
+    )
+  );
+
+-- Appointment: end_at must be after start_at.
+ALTER TABLE "appointments"
+  ADD CONSTRAINT "appointments_end_after_start"
+  CHECK ("end_at" > "start_at");
