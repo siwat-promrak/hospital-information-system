@@ -87,11 +87,11 @@ below live in `docs/user-stories.md`.
 | F01 | Database foundation                       | `feat/db-foundation`            | Docker Compose Postgres + Prisma schema (12 tables incl. RBAC + `doctor_departments` M:N) + first migration with 4 raw-SQL CHECK constraints + per-table seed split (no doctor/schedule/appointment seed) + shared `PrismaService`. | E1 (data model)                                       | —             | `pnpm db:up && pnpm prisma migrate dev && pnpm db:seed` succeeds; Prisma Studio shows populated tables; `pnpm type-check && pnpm build` green.                                                                              | M      | P0       |
 | F02 | Backend auth core + auth log              | `feat/auth-backend`             | NestJS `auth/` module: JWT verify (jose), guards, error filter, `POST /auth/resolve`, `POST /auth/signout`. Loads `user.role.policies` per request and exposes `permissionCodes[]` on the request context for `PermissionsGuard` / `@RequirePermission()`. Resolves ADMIN, STAFF, and DOCTOR (DOCTOR carries `schedule.manage`). Adds the append-only `auth_logs` table (forward migration `add_auth_log`) and an `AuthLogService` that records `SIGN_IN_SUCCESS` / `SIGN_IN_FAILED` / `PERMISSION_DENIED` / `SIGN_OUT` events with optional IP + User-Agent forensic columns. | US-2.3, US-2.4, US-2.5, US-2.6, US-2.7, US-3.1        | F01           | New auth unit + e2e specs pass; `/auth/resolve` + `/auth/signout` covered by Swagger; protected stub returns `401` without cookie, `200` with valid JWT minted via test helper, `403 INSUFFICIENT_PERMISSION` when permission missing; every sign-in success / failure / permission-denial / sign-out writes exactly one row to `auth_logs`. | M      | P0       |
 | F03 | Frontend NextAuth wiring + sign-in        | `feat/auth-frontend`            | Install NextAuth v5, Google provider, `/signin` page, role-aware home dispatcher, sign-out (calls F02's `POST /auth/signout` then clears the cookie). Configures NextAuth `session.maxAge` + `session.updateAge` for sliding-window renewal — no custom refresh-token model. No patient sign-in. | US-2.1, US-2.2, US-3.4                                | F02           | Manual: Google sign-in lands on `/[locale]`, role dispatcher routes ADMIN to the admin dashboard, STAFF to the clinic dashboard, and DOCTOR to the schedule editor; sign-out calls the BE audit endpoint then clears cookie; `/signin?error=email_unverified` renders localized error. | M      | P0       |
-| F05 | Doctors & departments directory           | `feat/directory`                | Read-only BE endpoints + minimal FE list/detail pages for departments and doctors. Doctor lists include the doctor's department affiliations (via `doctor_departments`); a doctor may appear under multiple departments. | US-4.1, US-4.2, US-4.3                                | F02, F03      | Manual: `/departments` and `/doctors` list seeded data; doctor detail page renders affiliations with the `isPrimary` flag; STAFF can view (gated on `doctor.list` / `doctor.read`); ADMIN and DOCTOR receive `403 INSUFFICIENT_PERMISSION` unless granted.                  | M      | P0       |
+| F05 ✅ | Doctors & departments directory           | `feat/directory`                | Read-only BE endpoints + minimal FE list/detail pages for departments and doctors. Doctor lists include the doctor's department affiliations (via `doctor_departments`); a doctor may appear under multiple departments. **Shipped:** also delivered the app shell (sidebar + header + breadcrumb), the `lib/api` transport foundation, paginated list endpoints (`Paginated<T>` envelope), and the HS256 session-JWT workaround tracked as FU-01. | US-4.1, US-4.2, US-4.3                                | F02, F03      | Manual: `/departments` and `/doctors` list seeded data; doctor detail page renders affiliations with the `isPrimary` flag; STAFF can view (gated on `doctor.list` / `doctor.read`); ADMIN and DOCTOR receive `403 INSUFFICIENT_PERMISSION` unless granted; pagination + filter survive page navigation.                  | M      | P0       |
 | F06 | Doctor schedule CRUD                      | `feat/schedules`                | BE `/doctors/:id/schedules` CRUD + UI for users with `schedule.manage` (STAFF unrestricted; DOCTOR limited to own schedules via service-layer scope). Each schedule carries `departmentId`; the doctor must be affiliated with that department. Three DB CHECK constraints back-stop window/break validity. | US-5.1, US-5.2, US-5.3, US-5.4                        | F05           | Manual: a STAFF user creates a schedule with `departmentId`; overlap returns `409`; mismatched department returns `409 DOCTOR_NOT_IN_DEPARTMENT`; edit & delete work; a DOCTOR can manage only their own schedules (else `403 INSUFFICIENT_PERMISSION_SCOPE`); a user without `schedule.manage` (e.g. ADMIN by default) returns `403 INSUFFICIENT_PERMISSION`. | L      | P0       |
 | F07 | Appointment types + slot finder           | `feat/slots`                    | BE-only: `/appointment-types` and `/doctors/:id/slots` (requires `departmentId`). No UI. Gated on `appointment.create`. | US-6.1, US-6.2                                        | F06           | Unit tests cover slot grid arithmetic, break-window exclusion, and exclusion of past/booked slots; manual `curl` against seed data returns expected slots; mismatched `(departmentId, type)` returns `400 DEPARTMENT_TYPE_NOT_ALLOWED`.                                                                                          | M      | P0       |
 | F08 | Staff booking + lifecycle                 | `feat/staff-booking`            | BE `POST /patients` (walk-in), `GET /patients?q=`, `POST /appointments` (inherits `departmentId` from the chosen schedule; validates `(departmentId, appointmentType)` against `department_appointment_types`), `GET /appointments`, `GET /appointments/:id`, `POST /appointments/:id/cancel` + booking & list UI. **STAFF-only by default** — ADMIN does not hold `appointment.*` in the seeded baseline; grant via `permission.assign`. **No ownership filter** — every STAFF can act on every patient. | US-7.1, US-7.2, US-7.3, US-7.4, US-8.1, US-8.2, US-8.3 | F07           | Manual: STAFF books for any patient; conflicting double-book returns `409 SLOT_TAKEN`; mismatched `(departmentId, type)` returns `400 DEPARTMENT_TYPE_NOT_ALLOWED`; cancel frees slot; the `appointments_end_after_start` DB CHECK back-stops `endAt > startAt`.                                                                                | L      | P0       |
-| F11 | Admin user + role/permission management   | `feat/admin-users`              | BE `/admin/users` (list, invite, disable, enable — invite path supports DOCTOR by creating the User + Doctor + `doctor_departments` rows transactionally), `/admin/roles/:id/policies` (grant/revoke), optional `/admin/roles` (create custom role, P2 — requires `role.manage`) + minimal `(admin)/admin/users` & `(admin)/admin/roles` UI. ADMIN starts narrow (5 permissions) and may grant additional capabilities to themselves or others via `permission.assign`. **Single feature — no API/UI split.** | US-11.1, US-11.2, US-11.3, US-11.5 (+ US-11.6 P2)     | F03, F08      | Manual: ADMIN invites a new STAFF email; new staff signs in successfully; ADMIN disables them; subsequent sign-in returns `USER_DISABLED`; self-disable is blocked; ADMIN grants `appointment.cancel` to STAFF and observes the new permission on next request; ADMIN cannot revoke `permission.assign` from the ADMIN role. | L      | P1       |
+| F11 | Admin user + role/permission management   | `feat/admin-users`              | BE `/admin/users` (list, invite, disable, enable — invite path supports DOCTOR by creating the User + Doctor + `doctor_departments` rows transactionally), `/admin/roles/:id/policies` (grant/revoke), optional `/admin/roles` (create custom role, P2 — requires `role.manage`) + minimal `(app)/admin/users` & `(app)/admin/roles` UI. ADMIN starts narrow (5 permissions) and may grant additional capabilities to themselves or others via `permission.assign`. **Single feature — no API/UI split.** | US-11.1, US-11.2, US-11.3, US-11.5 (+ US-11.6 P2)     | F03, F08      | Manual: ADMIN invites a new STAFF email; new staff signs in successfully; ADMIN disables them; subsequent sign-in returns `USER_DISABLED`; self-disable is blocked; ADMIN grants `appointment.cancel` to STAFF and observes the new permission on next request; ADMIN cannot revoke `permission.assign` from the ADMIN role. | L      | P1       |
 | F12 | i18n parity + README                      | `chore/i18n-readme`             | Audit all strings to `messages/*.json`, add `Roles.*` / `Permissions.*` namespaces, regenerate keys, write project `README.md`. | US-12.1, US-12.2                                      | F11           | `pnpm type-check` green; manual lang switch shows no raw English on TH; README walkthrough takes a fresh clone to a running app in <15 min.                                                                                | M      | P1       |
 
 > **F04, F09, F10 were removed when patient sign-in / self-service was scoped out (2026-05-24).** The feature IDs are intentionally left as gaps — IDs stay stable so commit and PR references continue to resolve.
@@ -462,7 +462,15 @@ same-origin proxying.
 
 ---
 
-### F05 — Doctors & departments directory (P0, M)
+### F05 — Doctors & departments directory (P0, M) ✅ shipped
+
+**Status:** shipped on `feat/directory`. Commit chain:
+- `feat(api): add departments + doctors directory endpoints (F05)`
+- `feat(web): app shell + F05 directory pages + lib/api foundation`
+- `docs: add follow-ups with FU-01 JWE migration plan`
+- `feat(api): paginate F05 list endpoints with shared envelope`
+- `feat(web): paginate F05 directory pages with shared PaginationControl`
+- `refactor(web): move sidebar collapse toggle from header to sidebar footer`
 
 **Why a standalone feature**
 
@@ -470,49 +478,98 @@ The directory is consumed by every booking flow. Landing it
 read-only-first lets the reviewer validate listings without yet
 worrying about mutation flows.
 
-**Files expected to change**
+**What actually shipped (delta from the original brief)**
 
-- `apps/api/src/departments/` — module, controller, service, DTOs,
-  `swagger/`. `GET /departments` declares
-  `@RequirePermission('doctor.list')`. `GET /departments/:id/doctors`
-  also requires `doctor.list` and lists doctors affiliated with a single
-  department (via `doctor_departments`).
-- `apps/api/src/doctors/` — module, controller, service, DTOs,
-  `swagger/`. `GET /doctors` (requires `doctor.list`) returns the
-  Doctor + the doctor's `doctor_departments` rows (joined to
-  `departments` for `name`) with the `isPrimary` flag, so a doctor may
-  appear under multiple departments in the response. `GET /doctors/:id`
-  (requires `doctor.read`) returns the same affiliations plus the thin
-  schedule summary.
-- `apps/web/src/app/[locale]/(staff)/departments/page.tsx`,
-  `(staff)/doctors/page.tsx`, `(staff)/doctors/[id]/page.tsx` — single
-  staff shell (no separate patient route group; patients don't sign in).
-- `apps/web/src/lib/api/directory.ts` — typed fetch client using the
-  `/api/be/*` rewrite.
-- `apps/web/messages/*.json` — directory strings; regenerate
-  `keys.generated.ts`.
+- **App shell co-shipped.** F05 was the first feature with multi-page UI,
+  so the protected layout chrome landed here:
+  `apps/web/src/components/app-shell/` (sidebar with permission-aware
+  nav catalog, header with URL-derived breadcrumb + locale switcher +
+  user-menu dropdown) + `apps/web/src/app-shell/` (catalogs + config).
+  Wraps every authed route via `apps/web/src/app/[locale]/(app)/layout.tsx`.
+  Pre-existing role landing pages (`/admin`, `/staff`, `/me/schedule`)
+  moved into the `(app)` route group. Sidebar is collapsible to a
+  64px mini-rail on md+ and a temporary drawer on xs/sm; the collapse
+  chevron sits at the bottom of the sidebar itself.
+- **lib/api foundation.** Introduced `apps/web/src/lib/api/` as the FE
+  transport layer (`server-fetch.ts` exposing `internalFetch` +
+  `userFetch`, `errors.ts` with `ApiError` + `readErrorEnvelope`,
+  per-entity `<entity>.api.ts`). All later features (F06/F07/F08/F11)
+  build on top of these helpers — see CLAUDE.md §5a/§5b.
+- **Pagination on every list endpoint.** Out of scope in the original
+  F05 brief, but the directory would have returned every active
+  doctor/department on one call otherwise. Now wired with the shared
+  `Paginated<T>` envelope and the `PaginationControl` component — see
+  CLAUDE.md §8.
+- **HS256 session JWT workaround.** F05 was the first time a real
+  NextAuth cookie reached the BE `JwtGuard`, surfacing that Auth.js v5
+  defaults to JWE encryption while the BE verifier expects HS256-signed
+  JWS. Worked around on the FE by overriding `jwt.encode` / `jwt.decode`
+  in `apps/web/src/auth.ts`. Proper alignment tracked in
+  `docs/follow-ups.md` as **FU-01**.
+- **Route group renamed.** The original brief used `(staff)` for the
+  directory pages; landed as `(app)` because the same shell wraps
+  ADMIN, STAFF, and DOCTOR landing pages — no per-role groups.
+
+**Files shipped**
+
+Backend (`apps/api/src/`):
+- `departments/{module,controller,service,types,swagger}.ts` +
+  `departments/dto/department.dto.ts`. `GET /departments` (paginated,
+  `doctor.list`); `GET /departments/:id/doctors` (paginated,
+  `doctor.list`, returns `isPrimary` from the join).
+- `doctors/{module,controller,service,types,swagger}.ts` +
+  `doctors/dto/doctor.dto.ts`. `GET /doctors` (paginated + optional
+  `?departmentId`, `doctor.list`); `GET /doctors/:id` (`doctor.read`,
+  affiliations + schedule count).
+- `common/pagination/` — `PaginationQueryDto`, `Paginated<T>`,
+  `PaginatedDto(ItemDto)` Swagger factory, helpers.
+
+Frontend (`apps/web/src/`):
+- `components/app-shell/` (5 chrome components) +
+  `app-shell/` (catalogs: `nav-items.*`, `breadcrumb-labels.ts`,
+  `layout.const.ts`).
+- `components/department/{DepartmentCardLink,DepartmentChipLink}.tsx`,
+  `components/doctor/{DoctorListFilter,DoctorListRow}.tsx`,
+  `components/shared/PaginationControl.tsx`.
+- `app/[locale]/(app)/{departments,doctors,doctors/[id]}/page.tsx`.
+- `lib/api/{server-fetch,errors,auth.api,department.api,doctor.api,doctor.const,pagination,pagination.const}.ts`.
+- `lib/utils/{parse,initials}.ts` — generic helpers extracted from
+  duplicated inline copies.
+- `types/{auth,department,doctor,pagination}.types.ts`.
+- `messages/{en,th}.json` — new `Nav`, `Breadcrumb`, `UserMenu`,
+  `Directory.*`, `Pagination` namespaces; regenerated
+  `i18n/keys.generated.ts`.
 
 **Migration / breaking-change notes**
 
 - None — read-only against existing schema. Reads from
   `doctor_departments` rather than a `Doctor.departmentId` column
   (which doesn't exist).
+- Frontend: `apps/web` gained `jose@5.9.6` for the HS256 override (see
+  FU-01).
 
 **Manual smoke test**
 
-1. Sign in as a seeded STAFF user. Sees `/departments` and `/doctors`
-   populated from F01 seed (doctors are created later via admin invite,
-   so the initial list may be empty until F11's invite path is
-   exercised).
-2. `/doctors?departmentId=<id>` filters to doctors with a
-   `doctor_departments` row for that department.
-3. `/doctors/<id>` renders detail incl. all affiliations with the
+1. Sign in as a seeded STAFF user. Lands on `/staff` (placeholder
+   dashboard) inside the shell. Sidebar shows Dashboard / Departments /
+   Doctors. The doctors list is empty until F11 invites land — the
+   empty state explains this.
+2. `/departments` lists the seeded departments (paginated 20/page).
+   Clicking a card jumps to `/doctors?page=1&departmentId=<id>`.
+3. `/doctors?departmentId=<id>` filters to doctors with a
+   `doctor_departments` row for that department. Filter dropdown +
+   pagination preserve each other across navigation.
+4. `/doctors/<id>` renders detail incl. all affiliations with the
    `isPrimary` flag.
-4. Sign in as a seeded ADMIN — `/api/be/doctors` returns `403
-   INSUFFICIENT_PERMISSION` because `doctor.list` is not in the ADMIN
-   baseline.
-5. Once a DOCTOR is invited (via F11), signing in routes them to the
-   schedule editor (not the directory).
+5. Sign in as a seeded ADMIN — `/api/be/v1/doctors` returns
+   `403 INSUFFICIENT_PERMISSION` because `doctor.list` is not in the
+   ADMIN baseline. The sidebar hides the Doctors / Departments items
+   for ADMIN.
+6. Sidebar collapse chevron (bottom of sidebar, md+) toggles the
+   mini-rail. Mobile (xs/sm) uses the header hamburger to open a
+   temporary drawer.
+7. Once a DOCTOR is invited (via F11), signing in routes them to
+   `/me/schedule` (still placeholder until F06).
 
 ---
 
@@ -561,12 +618,12 @@ gets the unrestricted form of the same permission.
   + department-affiliation check, covered by unit tests.
 - `apps/api/src/schedules/schedule.scope.ts` — helper that enforces
   the DOCTOR own-doctor scope rule for every mutation/read.
-- `apps/web/src/app/[locale]/(staff)/doctors/[id]/schedule/page.tsx` —
+- `apps/web/src/app/[locale]/(app)/doctors/[id]/schedule/page.tsx` —
   list grouped by weekday (and per-department within a day).
-- `apps/web/src/app/[locale]/(doctor)/me/schedule/page.tsx` — the
+- `apps/web/src/app/[locale]/(app)/me/schedule/page.tsx` — the
   DOCTOR own-schedule view (uses the same component, but the route
   resolves `:id` from `session.doctor.id`).
-- `apps/web/src/app/[locale]/(staff)/doctors/[id]/schedule/_components/`
+- `apps/web/src/app/[locale]/(app)/doctors/[id]/schedule/_components/`
   — add/edit dialog (with department selector populated from the
   doctor's affiliations), delete confirm dialog.
 - `apps/web/src/lib/api/schedules.ts` — typed client.
@@ -684,11 +741,11 @@ book or manage patients must first grant the relevant permission(s) via
   department/type (`400 DEPARTMENT_TYPE_NOT_ALLOWED`), mismatched
   doctor/department (`409 DOCTOR_NOT_IN_DEPARTMENT`), cancel frees slot,
   permission denial for a caller missing the required code.
-- `apps/web/src/app/[locale]/(staff)/appointments/page.tsx` — list with
+- `apps/web/src/app/[locale]/(app)/appointments/page.tsx` — list with
   filters (now includes `departmentId` filter).
-- `apps/web/src/app/[locale]/(staff)/appointments/[id]/page.tsx` —
+- `apps/web/src/app/[locale]/(app)/appointments/[id]/page.tsx` —
   detail + cancel (renders department).
-- `apps/web/src/app/[locale]/(staff)/appointments/new/page.tsx` —
+- `apps/web/src/app/[locale]/(app)/appointments/new/page.tsx` —
   booking wizard (patient search → department → doctor → type → date
   → slot). The wizard threads `departmentId` from step 2 through to
   the slot finder and booking call.
@@ -770,11 +827,11 @@ polish; the API is the cuttable contract.
 - `apps/api/test/admin-policies.e2e-spec.ts` — grant + revoke,
   duplicate-grant idempotency, lockout guard, ADMIN-self-grant flow
   (e.g. ADMIN grants `appointment.create` to ADMIN, then can book).
-- `apps/web/src/app/[locale]/(admin)/admin/users/page.tsx` — list +
+- `apps/web/src/app/[locale]/(app)/admin/users/page.tsx` — list +
   invite + disable controls (with DOCTOR-specific sub-form for
   `doctorCode` / `medicalLicenseNo` / `identificationNo` /
   `departmentIds` / `primaryDepartmentId`).
-- `apps/web/src/app/[locale]/(admin)/admin/roles/page.tsx` — list roles,
+- `apps/web/src/app/[locale]/(app)/admin/roles/page.tsx` — list roles,
   show permission grid (16 columns), toggle grants (only visible to
   users with `permission.assign`).
 

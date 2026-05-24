@@ -285,6 +285,39 @@ Every PR description MUST include these two sections, in this order, using `##` 
 - Adding a new MUI component override: create `components/Mui<Name>.ts` exporting a typed `mui<Name>` const, then register it in `components/index.ts`.
 - For CSS-side color references (plain CSS, SCSS, `sx` string values), **prefer `var(--mui-palette-primary-main)`** etc. over hardcoded hex values. MUI v6 emits these at runtime because `cssVariables: true` is enabled on the theme. This keeps `palette.ts` as the single source of truth.
 
+### 5a. Frontend app layout — one role per top-level folder
+
+The four FE top-level concerns are physically separated. The rule is enforceable with `find`:
+
+| Folder under `apps/web/src/` | Holds | Anti-rule |
+| --- | --- | --- |
+| `components/` | **Only `.tsx` files.** No types, no constants, no helpers. | `find apps/web/src/components -type f ! -name '*.tsx'` MUST be empty. |
+| `types/` | Cross-cutting domain shapes (BE response mirrors). One `<entity>.types.ts` per entity, mirroring the BE module split. | No `.const.ts` files here. |
+| `lib/api/` | Transport layer. `server-fetch.ts` (`internalFetch` + `userFetch`), `errors.ts` (`ApiError` + `readErrorEnvelope`), `pagination.ts` (shared `buildPaginationQuery`), per-entity `<entity>.api.ts` + `<entity>.const.ts` for URL contract. | No `.tsx` files. |
+| `lib/utils/` | Generic helpers with NO domain knowledge (`parse.ts`, `initials.ts`). If it imports from `auth/` or `types/<entity>`, it doesn't belong here. | — |
+
+`components/` is further organised:
+- `components/shared/` — cross-feature UI consumed by multiple pages (e.g. `RoleDashboard.tsx`, `SignInButton.tsx`, `PaginationControl.tsx`).
+- `components/<entity>/` — entity-scoped UI (e.g. `components/doctor/DoctorListRow.tsx`, `components/department/DepartmentCardLink.tsx`). Match the BE module name (singular) so the BE/FE split is mirrored.
+- `components/app-shell/` — protected-layout chrome (sidebar, header, breadcrumb, user menu).
+
+Feature config folders sibling to `auth/` hold the non-UI side of a tightly-coupled module:
+- `auth/` — auth catalogs + config (`auth.const.ts`, `permissions.ts`, `roles.ts`, `routes.ts`, `oauth.ts`, `sign-in-errors.ts`).
+- `app-shell/` — shell catalogs + helpers (`layout.const.ts`, `nav-items.ts` + `.const.ts` + `.types.ts`, `breadcrumb-labels.ts`).
+
+The `(app)` route group at `apps/web/src/app/[locale]/(app)/` wraps every authenticated page through `(app)/layout.tsx` which mounts `<AppShell>`. The role dispatcher (`[locale]/page.tsx`) and `/signin` stay OUTSIDE that group so they don't render the chrome.
+
+A page that needs interactive UI (clickable cards, chip links, filter selects) MUST extract it to a `"use client"` component under `components/<entity>/` rather than using `component={Link}` on a server-rendered MUI component — React 19 RSC rejects passing a React component as a prop across the server → client boundary.
+
+### 5b. Server-side API fetch — `internalFetch` vs `userFetch`
+
+The two helpers in `apps/web/src/lib/api/server-fetch.ts` are the ONLY way to call the Nest API from server components and the NextAuth `signIn` callback. Pick by the route's authorization model:
+
+- `internalFetch(path, init?)` — server-to-server, attaches the shared `X-Internal-Secret` header, does NOT forward any cookie. Use for routes decorated with `@InternalRoute()` (currently only `POST /auth/resolve`).
+- `userFetch(path, init?)` — server-to-server on behalf of the signed-in user, forwards the incoming request's `cookie` + `authorization` headers via `next/headers`. Use for every cookie-authenticated endpoint.
+
+Both throw the typed `ApiError` (with `status`, `code`, `details`, `body`) from `lib/api/errors.ts` on any non-2xx, so callers can write flat promise chains and narrow with `isApiError(err)` / `hasCode(err, code)`. Do NOT call `fetch` directly from a feature module — the cookie-forwarding + envelope-parsing must stay in one place.
+
 ## Backend (apps/api)
 
 ### 6. Swagger decorator organization
@@ -340,3 +373,35 @@ Never re-declare permission/role codes in `prisma/seed/*.ts` — those files alr
 - The root `.npmrc` sets `save-exact=true` so `pnpm add <pkg>` writes exact versions automatically. Do NOT remove or override this.
 - The root `package.json` pins `packageManager: pnpm@<version>` (Corepack-compatible) and `engines.node: ">=20"`. Do NOT downgrade or remove these without discussion.
 - To upgrade a dep, run `pnpm add <pkg>@<exact-version>` (or edit the version in `package.json` then `pnpm install`). Do NOT hand-edit `pnpm-lock.yaml`.
+
+## Cross-tier conventions
+
+### 8. Pagination — every list endpoint uses the shared `Paginated<T>` envelope
+
+Every BE list endpoint that can grow past a handful of rows (`GET /departments`, `GET /doctors`, `GET /patients`, `GET /appointments`, …) MUST be paginated with the same contract. Detail endpoints (`GET /doctors/:id`) are exempt.
+
+**Wire contract** — request: `?page=N&pageSize=M` (1-indexed `page` ≥ 1, `pageSize` ≥ 1 ≤ 100, both optional). Response:
+
+```ts
+interface Paginated<T> {
+  data: T[];
+  total: number;        // post-filter row count
+  page: number;         // echoed request value (or default)
+  pageSize: number;     // echoed request value (or default)
+  totalPages: number;   // Math.max(1, Math.ceil(total / pageSize))
+}
+```
+
+Defaults / limits: `DEFAULT_PAGE = 1`, `DEFAULT_PAGE_SIZE = 20`, `MAX_PAGE_SIZE = 100`. Mirrored verbatim between BE and FE so a rename surfaces on both sides.
+
+**Backend** — shared infra at `apps/api/src/common/pagination/`:
+- `PaginationQueryDto` — class-validator `@IsInt @Min(1) @Max(100)` with `@Type(() => Number)` for query coercion. Compose it via `extends` for endpoints that add filter params (e.g. `class ListDoctorsQueryDto extends PaginationQueryDto { departmentId?: string }`).
+- `PaginatedDto(ItemDto)` — Swagger factory; returns a typed `Paginated<ItemDto>` class so each endpoint's OpenAPI schema shows the right item shape. Register with `@ApiExtraModels(ItemDto, PaginatedItemDto)`.
+- `resolvePagination(query)` + `buildPaginatedResponse(data, total, page, pageSize)` — service helpers. Run `Promise.all([prisma.X.findMany({ skip, take, ... }), prisma.X.count({ where })])` so the row fetch + count happen in one round-trip.
+
+**Frontend** — shared infra at `apps/web/src/lib/api/`:
+- `pagination.ts` — `buildPaginationQuery(params, extraParams?)` produces the `?page=…&pageSize=…&filter=…` suffix. Pass per-endpoint filter params via the `extraParams` slot (skips `undefined` / `""`).
+- `pagination.const.ts` — `DEFAULT_PAGE`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE`, `PAGINATION_QUERY_PARAM` (FE-side mirror of the BE constants).
+- API client returns `Promise<Paginated<T>>`.
+- Pages read `page` from `searchParams`, parse with `parsePositiveInt(value) ?? DEFAULT_PAGE`, and render `<PaginationControl>` (`components/shared/PaginationControl.tsx`) which preserves any other query params (e.g. `departmentId`) on navigation and hides itself when `totalPages <= 1`.
+- Filter changes (e.g. switching department in `DoctorListFilter`) MUST reset `page=1` so the user doesn't land on an empty page that no longer exists in the new result set.

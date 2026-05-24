@@ -427,7 +427,15 @@ right workspace, so that I don't have to remember role-specific URLs.
 
 ---
 
-## E4 — Doctor & Department directory
+## E4 — Doctor & Department directory ✅ shipped (F05, `feat/directory`)
+
+> **Delta from the original AC, captured during F05 implementation:**
+> Every list endpoint now returns the shared `Paginated<T>` envelope
+> rather than a flat array — accepts `?page=&pageSize=` (default 1/20,
+> max 100). See CLAUDE.md §8 for the contract. The doctor detail
+> endpoint's 404 envelope uses the generic `NOT_FOUND` code (rather
+> than the originally drafted `DOCTOR_NOT_FOUND`) — code catalog only
+> defines `NOT_FOUND` today.
 
 ### US-4.1 — List departments
 
@@ -436,13 +444,15 @@ filter doctors by specialty.
 
 **Acceptance criteria:**
 
-- `GET /departments` returns `[{ id, name, description? }]` ordered by
-  `name`.
+- `GET /departments?page=&pageSize=` returns
+  `{ data: [{ id, name, description? }], total, page, pageSize, totalPages }`
+  ordered by `name`.
 - Endpoint requires the `doctor.list` permission. **STAFF holds it by
   default; ADMIN does not** (clinic operations are not in ADMIN's seeded
   baseline). DOCTOR also lacks it; callers without the permission receive
   `403 INSUFFICIENT_PERMISSION`.
-- Department list page renders the result with localized labels.
+- Department list page renders the result with localized labels and a
+  `<PaginationControl>` at the bottom (hidden when `totalPages <= 1`).
 
 ### US-4.2 — List doctors (optionally filtered by department)
 
@@ -451,18 +461,22 @@ one to book with.
 
 **Acceptance criteria:**
 
-- `GET /doctors?departmentId=:id?` returns
-  `[{ id, firstNameEn, lastNameEn, firstNameTh?, lastNameTh?, doctorCode, departments: [{ id, name, isPrimary }] }]`.
+- `GET /doctors?departmentId=:id?&page=&pageSize=` returns
+  `{ data: [{ id, firstNameEn, lastNameEn, doctorCode, gender?, departments: [{ departmentId, departmentName, isPrimary }] }], total, page, pageSize, totalPages }`.
   Doctors may appear with multiple departments since `doctor_departments`
   is M:N.
-- Without the query param, returns all doctors ordered by primary
-  department then surname. With `departmentId`, returns doctors who have
-  any `doctor_departments` row for that department (regardless of
+- Without `departmentId`, returns every active doctor ordered by
+  `doctorCode asc`. With `departmentId`, returns doctors who have any
+  `doctor_departments` row for that department (regardless of
   `isPrimary`).
 - Endpoint requires the `doctor.list` permission (STAFF only by default).
-- A `/doctors` page shows the list with a department filter dropdown.
-- A companion `GET /departments/:id/doctors` returns the doctors
-  affiliated with a single department.
+- A `/doctors` page shows the list with a department filter dropdown +
+  pagination control. Changing the filter resets `page=1` so the user
+  doesn't land on an empty page beyond the filtered result set; the
+  filter value is preserved as `?departmentId=` across page navigation.
+- A companion `GET /departments/:id/doctors?page=&pageSize=` returns the
+  doctors affiliated with a single department in the same paginated
+  envelope.
 
 ### US-4.3 — View doctor detail
 
@@ -472,14 +486,15 @@ can see their department affiliations and upcoming availability summary.
 **Acceptance criteria:**
 
 - `GET /doctors/:id` returns the doctor record (incl. `doctorCode`,
-  `medicalLicenseNo`, `identificationNo`, `gender?`, `phone`,
-  `address?`), the list of `doctor_departments` affiliations with
-  `isPrimary` flags, and a thin schedule summary (e.g. days of the week
-  per department where the doctor has any schedule).
+  `medicalLicenseNo`, `gender?`, `phone`, `address?`), the list of
+  `doctor_departments` affiliations with `isPrimary` flags, and a thin
+  schedule count (`scheduleCount`) — the full schedule grid lands in F06.
 - Endpoint requires the `doctor.read` permission (STAFF only by default).
-- `404` with `code=DOCTOR_NOT_FOUND` if the doctor does not exist.
-- A `/doctors/:id` page renders the detail and offers a "Book appointment"
-  CTA (gated on the caller also holding `appointment.create`).
+- `404` with `code=NOT_FOUND` if the doctor does not exist or has been
+  soft-deleted.
+- A `/doctors/:id` page renders the detail. A "Book appointment" CTA
+  (gated on the caller also holding `appointment.create`) is deferred to
+  F08 when the booking flow lands.
 
 ---
 
