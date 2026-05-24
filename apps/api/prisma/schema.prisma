@@ -357,6 +357,7 @@ model Doctor {
   userId           String  @unique @map("user_id") @db.Uuid
   doctorCode       String  @unique @map("doctor_code") // e.g. "MD-0001"
   gender           Gender?
+  identificationNo String  @map("identification_no") // Thai national ID or passport — freeform
   medicalLicenseNo String  @unique @map("medical_license_no")
   phone            String
   address          String? @db.Text
