@@ -144,10 +144,11 @@ Exception: don't add a blank line if `return` is the only statement in the block
 - `NEXT_PUBLIC_SITE_URL` is the canonical base URL used for hreflang/canonical/robots/sitemap. Default in code with `?? "http://localhost:3000"`. Document it in `apps/web/.env.example`.
 - `apps/web/src/app/robots.ts` and `apps/web/src/app/sitemap.ts` are the source of truth — sitemap lists every locale variant with `alternates.languages`. Keep them in sync as routes are added.
 
-#### 4c. 404 pages — locale-scoped + root fallback
+#### 4c. 404 pages — locale-scoped only + catch-all trigger
 
-- `apps/web/src/app/[locale]/not-found.tsx` is the **primary** 404 — inside the i18n + theme providers, uses `K.NotFound.*` for copy.
-- `apps/web/src/app/not-found.tsx` is the **fallback** for paths the middleware doesn't match (rare). Minimal, no i18n provider available there.
+- `apps/web/src/app/[locale]/not-found.tsx` is the **only** 404 — inside the i18n + theme providers, uses `K.NotFound.*` for copy.
+- `apps/web/src/app/[locale]/[...rest]/page.tsx` is a tiny catch-all that just calls `notFound()`. **It is required**: without it, unmatched paths under `[locale]` (e.g. `/en/some-typo`) render Next.js's default unstyled 404 instead of our `[locale]/not-found.tsx`, because nested `not-found.tsx` files only fire when `notFound()` is explicitly thrown.
+- Do NOT add `apps/web/src/app/not-found.tsx`. With `[locale]/layout.tsx` rendering `<html>` / `<body>`, a root `not-found.tsx` would require a sibling `app/layout.tsx`, and you can't have two layouts rendering the HTML shell. Paths the middleware excludes (`/api/...`, static files) never reach the App Router, so the root fallback isn't doing real work anyway.
 
 #### 4d. Locale switcher must preserve query + hash
 
