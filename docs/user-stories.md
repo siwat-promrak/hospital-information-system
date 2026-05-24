@@ -1,0 +1,647 @@
+# Hospital Information System — User Stories
+
+Appointment Booking module, P0 + P1 scope.
+
+This document groups stories by epic (E1–E12). Each epic maps to one or more
+features in `feature-roadmap.md`. Story IDs are stable: when a story is
+implemented, reference its ID in commit messages and PR descriptions.
+
+Roles used in this document:
+
+- **PATIENT** — end user who books appointments for themselves.
+- **STAFF** — clinic employee who manages schedules and books on behalf of any
+  patient.
+- **ADMIN** — superset of STAFF; can additionally manage staff accounts.
+
+Conventions:
+
+- "Slot" = a discrete bookable time window on a doctor's schedule, computed
+  from `(DoctorSchedule, AppointmentType.durationMinutes)`.
+- Slot grid step equals the chosen appointment type's duration (e.g. a 20-min
+  consultation yields 09:00, 09:20, 09:40, …).
+- All schedule times are stored as `startMinute: Int` (minutes since midnight,
+  clinic-local).
+- `BOOKED` and `COMPLETED` block a slot; `CANCELLED` frees it for immediate
+  reuse.
+- `COMPLETED` transition is **deferred** in P0 (enum value exists, no
+  endpoint/UI).
+- **Email normalization** — every `email` column is stored as **lowercased**
+  via a shared `normalizeEmail()` helper used on every write/upsert. All
+  lookups compare against the normalized form. The Google profile email is
+  lowercased before resolution.
+- **Patient ownership** — `Patient.primaryStaffUserId?` is an optional FK to
+  a `User` with role `STAFF` or `ADMIN`. STAFF can only see / search / book
+  for patients they own. ADMIN bypasses the filter. Self-service patients
+  (created via Google sign-in) start with `primaryStaffUserId = null` until
+  an ADMIN assigns one. Walk-in patients created by staff via the staff UI
+  default `primaryStaffUserId` to the creating staff. (**Assumption** — flag
+  if a different ownership model is intended, e.g. doctor-based or
+  multi-owner.)
+- **`Appointment.reason`** is `text` (no length cap).
+
+---
+
+## E1 — Database foundation
+
+Purely infrastructural epic. No user-facing stories, but the data model is
+documented here so all downstream stories are grounded.
+
+### Data model (P0)
+
+| Model              | Purpose                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| `User`             | Auth principal. Fields incl. `email`, `googleSub?`, `role`, `patientId?`, `disabledAt?`.      |
+| `Patient`          | Demographic record. Inverse `user` relation. Created at onboarding or by staff walk-in. Owned by an optional `primaryStaffUserId` (FK to User; null = unassigned self-service). |
+| `Department`       | Clinic department (e.g. Cardiology). Grouping for doctors.                                    |
+| `Doctor`           | Practitioner. Belongs to one `Department`.                                                    |
+| `DoctorSchedule`   | Weekly recurring availability with `dayOfWeek`, `startMinute`, `endMinute`, `effectiveFrom`, `effectiveUntil?`. |
+| `AppointmentType`  | `NEW_PATIENT_VISIT` (30), `FOLLOW_UP` (15), `CONSULTATION` (20), `PROCEDURE` (60). Hardcoded const map; not a table in P0. |
+| `Appointment`      | `patientId`, `doctorId`, `appointmentType`, `startAt`, `endAt`, `status`, `reason?` (Postgres `text`, no length cap), `createdBy`, `cancelledBy?`, `cancelledAt?`. |
+| `StaffDomain`      | Model defined for future DB-driven allowlist; **unused in P0** (env-driven via `STAFF_ALLOWED_DOMAINS`). |
+
+Status enum: `BOOKED`, `CANCELLED`, `COMPLETED`.
+Role enum: `ADMIN`, `STAFF`, `PATIENT`.
+
+### Notes / assumptions
+
+- Soft-delete is used only for `User` (via `disabledAt`) to preserve FK
+  integrity from `Appointment.createdBy` / `cancelledBy`.
+- `Patient` is never soft-deleted in P0 (no requirement to "forget" patients).
+- All timestamps stored as `timestamptz` (UTC), rendered clinic-local in UI.
+
+---
+
+## E2 — Authentication & session
+
+### US-2.1 — Google sign-in
+
+**US-2.1** — As any user, I want to sign in with my Google account, so that
+I can access the system without managing another password.
+
+**Acceptance criteria:**
+
+- `/signin` page shows a single "Continue with Google" button.
+- Clicking the button initiates Google OAuth via NextAuth v5.
+- On successful Google callback, an httpOnly session cookie is set
+  containing an HS256-signed JWT keyed by `NEXTAUTH_SECRET`.
+- JWT payload includes at minimum: `sub` (Google sub), `email`,
+  `email_verified`, `name`, `picture`.
+- The session cookie is `SameSite=Lax`, `Secure` in production, `Path=/`.
+- After sign-in, the user is redirected to `/[locale]` (role dispatcher).
+
+**Notes / assumptions:** Only Google provider is supported. No
+password/magic-link fallback.
+
+### US-2.2 — Sign-out
+
+**US-2.2** — As a signed-in user, I want to sign out, so that my session
+ends on this device.
+
+**Acceptance criteria:**
+
+- A "Sign out" action is reachable from the app header for any signed-in
+  user.
+- Triggering sign-out clears the session cookie and redirects to `/signin`.
+- After sign-out, accessing a protected route redirects back to `/signin`.
+
+### US-2.3 — Unverified Google email is rejected
+
+**US-2.3** — As the system, I want to reject Google accounts whose email is
+not verified, so that I can trust the email claim for role resolution.
+
+**Acceptance criteria:**
+
+- If Google returns `email_verified=false`, sign-in fails.
+- The user is redirected to `/signin?error=email_unverified` with a
+  localized message.
+- No `User` row is created.
+
+### US-2.4 — Backend rejects invalid / expired tokens
+
+**US-2.4** — As the backend, I want to reject requests bearing a missing,
+invalid, or expired session token, so that protected endpoints stay safe.
+
+**Acceptance criteria:**
+
+- Requests without a session cookie to a protected endpoint return `401`.
+- Requests with a tampered JWT signature return `401`.
+- Requests with an expired JWT (`exp` past) return `401`.
+- All `401` responses use the shared error envelope (see E2.5).
+
+### US-2.5 — Consistent error envelope
+
+**US-2.5** — As a frontend developer, I want all backend errors in a single
+shape, so that I can render and log them uniformly.
+
+**Acceptance criteria:**
+
+- All `4xx`/`5xx` responses from the backend return
+  `{ statusCode, code, message, details? }`.
+- A global Nest exception filter maps known errors (validation, auth, not
+  found, conflict) to stable `code` strings (e.g. `AUTH_INVALID_TOKEN`,
+  `VALIDATION_FAILED`).
+
+---
+
+## E3 — Role resolution & onboarding
+
+### US-3.1 — Staff resolution on first sign-in
+
+**US-3.1** — As a staff member whose account was pre-created by an ADMIN, I
+want my Google sign-in to resolve to my existing staff `User` record, so
+that I land in the staff workspace immediately.
+
+**Acceptance criteria:**
+
+- NextAuth `signIn` callback calls backend `POST /auth/resolve` with the
+  Google profile (email, sub, name, picture), guarded by the
+  `INTERNAL_API_SECRET` header.
+- Backend **lowercases** the incoming email via `normalizeEmail()` before
+  any lookup.
+- Backend matches an existing `User` by the normalized `email` whose
+  `role IN (STAFF, ADMIN)` and whose `disabledAt IS NULL`.
+- On match, backend sets `googleSub` if previously null and returns
+  `{ userId, role, patientId: null }`.
+- Resolved role is encoded in the JWT and used by the home dispatcher.
+
+**Notes / assumptions:** Staff are created via E11; this story assumes the
+row exists.
+
+### US-3.2 — Patient auto-creation on first sign-in
+
+**US-3.2** — As a new patient signing in with Google, I want a `User` row
+auto-created, so that I can proceed to onboarding without paperwork.
+
+**Acceptance criteria:**
+
+- `POST /auth/resolve` with a normalized email NOT matching any
+  staff/admin user creates (or finds by email) a `User` with
+  `role=PATIENT`.
+- If an existing `Patient` row matches by normalized email, the new
+  `User.patientId` is linked to it (auto-link; no onboarding) and the
+  response carries `{ userId, role: PATIENT, patientId }`. The Patient's
+  `primaryStaffUserId` is preserved unchanged.
+- If no `Patient` exists, response carries
+  `{ userId, role: PATIENT, patientId: null }` and the user is routed to
+  the onboarding flow.
+- The staff email-domain allowlist (`STAFF_ALLOWED_DOMAINS`) is **not**
+  consulted here — anyone signing in is a patient by default.
+
+### US-3.3 — Patient onboarding form
+
+**US-3.3** — As a newly-created patient without a `Patient` profile, I want
+to fill in my demographics, so that staff can identify me for booking.
+
+**Acceptance criteria:**
+
+- `/onboarding` collects: full name (prefilled from Google), date of birth,
+  phone, gender, address.
+- Form uses react-hook-form + zod; all fields except address are required.
+- Submitting calls `POST /me/patient`; on success, backend creates a
+  `Patient` row with `primaryStaffUserId=null` (self-service, unassigned)
+  and links `User.patientId`.
+- After success, user is redirected to `/[locale]` (patient home).
+- Accessing any patient-area route without a linked patient redirects to
+  `/onboarding`.
+
+### US-3.4 — Home dispatcher routes by role
+
+**US-3.4** — As a signed-in user, I want the root path to take me to the
+right workspace, so that I don't have to remember role-specific URLs.
+
+**Acceptance criteria:**
+
+- `GET /[locale]` reads the session role:
+  - `ADMIN` or `STAFF` → renders staff dashboard.
+  - `PATIENT` with linked `patientId` → renders patient dashboard.
+  - `PATIENT` without `patientId` → server-side redirect to `/onboarding`.
+  - Unauthenticated → server-side redirect to `/signin`.
+
+---
+
+## E4 — Doctor & Department directory
+
+### US-4.1 — List departments
+
+**US-4.1** — As staff or a patient, I want to see all departments, so that
+I can filter doctors by specialty.
+
+**Acceptance criteria:**
+
+- `GET /departments` returns `[{ id, name, description? }]` ordered by
+  `name`.
+- Endpoint requires a valid session (any role).
+- Department list page renders the result with localized labels.
+
+### US-4.2 — List doctors (optionally filtered by department)
+
+**US-4.2** — As staff or a patient, I want to browse doctors, so that I can
+pick one to book with.
+
+**Acceptance criteria:**
+
+- `GET /doctors?departmentId=:id?` returns
+  `[{ id, fullName, departmentId, departmentName, bio? }]`.
+- Without the query param, returns all doctors ordered by `fullName`.
+- A `/doctors` page shows the list with a department filter dropdown.
+
+### US-4.3 — View doctor detail
+
+**US-4.3** — As staff or a patient, I want to view a doctor's profile, so
+that I can see their department, bio, and upcoming availability summary.
+
+**Acceptance criteria:**
+
+- `GET /doctors/:id` returns the doctor record plus a thin schedule summary
+  (e.g. days of the week they have any schedule).
+- `404` with `code=DOCTOR_NOT_FOUND` if the doctor does not exist.
+- A `/doctors/:id` page renders the detail and offers a "Book appointment"
+  CTA (only enabled for signed-in patients in E10, staff in E7).
+
+---
+
+## E5 — Doctor Schedule management
+
+### US-5.1 — Staff lists schedules for a doctor
+
+**US-5.1** — As staff, I want to view all schedule rows for a chosen
+doctor, so that I can see and manage their weekly availability.
+
+**Acceptance criteria:**
+
+- `GET /doctors/:id/schedules` returns
+  `[{ id, dayOfWeek, startMinute, endMinute, effectiveFrom, effectiveUntil? }]`
+  ordered by `(effectiveFrom DESC, dayOfWeek ASC, startMinute ASC)`.
+- Endpoint requires STAFF or ADMIN role; PATIENT receives `403`.
+- A staff UI page lists schedules grouped by day-of-week with localized
+  weekday labels.
+
+### US-5.2 — Staff creates a schedule
+
+**US-5.2** — As staff, I want to add a new weekly recurring schedule for a
+doctor, so that the slot finder can offer their availability.
+
+**Acceptance criteria:**
+
+- `POST /doctors/:id/schedules` accepts
+  `{ dayOfWeek (0–6), startMinute, endMinute, effectiveFrom, effectiveUntil? }`.
+- Validation: `0 <= startMinute < endMinute <= 1440`,
+  `effectiveFrom <= effectiveUntil` when both set.
+- Backend rejects schedules that overlap an existing active schedule for
+  the same `(doctor, dayOfWeek)` within their effective windows
+  (`code=SCHEDULE_OVERLAP`).
+- Staff UI exposes a "Add schedule" dialog using MUI date pickers and a
+  weekday selector.
+
+### US-5.3 — Staff edits a schedule
+
+**US-5.3** — As staff, I want to edit an existing schedule, so that I can
+correct mistakes or change hours.
+
+**Acceptance criteria:**
+
+- `PATCH /doctors/:doctorId/schedules/:scheduleId` accepts a partial of
+  the create payload.
+- Same overlap validation as US-5.2.
+- Editing a schedule does **not** retroactively cancel appointments
+  already booked outside the new window — those are flagged in the UI but
+  remain `BOOKED`.
+
+### US-5.4 — Staff deletes a schedule
+
+**US-5.4** — As staff, I want to remove a schedule, so that the doctor
+stops being offered for new bookings on that day/time.
+
+**Acceptance criteria:**
+
+- `DELETE /doctors/:doctorId/schedules/:scheduleId` removes the row.
+- Deleting a schedule does NOT cancel existing future appointments inside
+  that window; the UI surfaces a count of affected future appointments
+  before confirming.
+
+---
+
+## E6 — Appointment Types & Slot Finder
+
+### US-6.1 — List appointment types
+
+**US-6.1** — As staff or a patient, I want to see the available
+appointment types and their durations, so that I can pick the right one
+when booking.
+
+**Acceptance criteria:**
+
+- `GET /appointment-types` returns the hardcoded list
+  `[{ code, label, durationMinutes }]` for `NEW_PATIENT_VISIT`,
+  `FOLLOW_UP`, `CONSULTATION`, `PROCEDURE`.
+- Endpoint requires a valid session.
+
+### US-6.2 — Find available slots
+
+**US-6.2** — As a booker (staff or patient), I want to query open slots
+for a `(doctor, date, appointmentType)`, so that I can pick a time.
+
+**Acceptance criteria:**
+
+- `GET /doctors/:id/slots?date=YYYY-MM-DD&type=APPOINTMENT_TYPE` returns
+  `[{ startAt, endAt }]` in chronological order.
+- Slots are computed from active `DoctorSchedule` rows for the requested
+  weekday and stepped by `AppointmentType.durationMinutes`.
+- Slots overlapping a `BOOKED` or `COMPLETED` appointment for that doctor
+  on that day are excluded.
+- Slots that start in the past (relative to clinic-local "now") are
+  excluded.
+- Returns empty array (not `404`) when no slots are available, **including
+  the case of a fully-past `date` parameter** — never `400`.
+
+**Notes / assumptions:** The slot finder is the single source of truth for
+"is this time bookable?"; the booking endpoints re-validate inside a
+transaction to defend against races.
+
+---
+
+## E7 — Staff-on-behalf booking
+
+### US-7.1 — Staff searches for a patient they own
+
+**US-7.1** — As staff, I want to search for an existing patient (from the
+ones I own) by name, email, or phone, so that I can book on their behalf.
+
+**Acceptance criteria:**
+
+- `GET /patients?q=:term` returns up to 20 matches with
+  `[{ id, fullName, email?, phone?, primaryStaffUserId }]`.
+- Search is case-insensitive partial match across name/email/phone (email
+  comparison uses the normalized lowercase form).
+- **Ownership filter:** for STAFF callers, results are restricted to
+  patients where `primaryStaffUserId = session.userId`. ADMIN callers
+  bypass the filter (they see all patients including unassigned
+  self-service ones).
+- Endpoint requires STAFF or ADMIN role; PATIENT receives `403`.
+
+### US-7.2 — Staff books an appointment for any patient
+
+**US-7.2** — As staff, I want to book an appointment for a patient on a
+selected doctor, type, and slot, so that the patient is scheduled.
+
+**Acceptance criteria:**
+
+- `POST /appointments` accepts
+  `{ patientId, doctorId, appointmentType, startAt, reason? }`.
+- `reason` is required iff `appointmentType=PROCEDURE` (conditional zod
+  schema and class-validator DTO). Stored as Postgres `text` (no length
+  cap).
+- **Ownership guard:** for STAFF callers, the target patient's
+  `primaryStaffUserId` must equal `session.userId`; otherwise return
+  `403` with `code=PATIENT_NOT_OWNED`. ADMIN bypasses this check.
+- Backend runs inside a `$transaction` with isolation `Serializable`,
+  retrying once on Postgres error `40001`.
+- Transaction verifies the slot is still available against the active
+  schedule and existing appointments; conflicts return `409` with
+  `code=SLOT_TAKEN`.
+- On success, persists `Appointment` with `status=BOOKED`,
+  `createdBy=<staffUserId>`, `endAt = startAt + duration`.
+- Returns the created appointment payload.
+
+### US-7.3 — Staff sees confirmation
+
+**US-7.3** — As staff, I want a clear confirmation after booking, so that
+I know it succeeded and can share details with the patient.
+
+**Acceptance criteria:**
+
+- After a successful `POST /appointments`, the UI navigates to a detail
+  page showing the patient, doctor, type, date/time, and reason.
+- A toast/snackbar confirms creation with a localized message.
+
+### US-7.4 — Staff registers a walk-in patient (auto-owns)
+
+**US-7.4** — As staff, I want to quickly register a walk-in patient who
+doesn't yet exist in the system, so that I can book them without leaving
+the booking flow.
+
+**Acceptance criteria:**
+
+- `POST /patients` accepts `{ fullName, email?, phone?, dateOfBirth }`.
+- The new `Patient.primaryStaffUserId` is set to `session.userId`
+  automatically (the creating staff becomes the primary owner).
+- Email (if provided) is normalized to lowercase before insertion.
+- Endpoint requires STAFF or ADMIN role; PATIENT receives `403`.
+- Returns the created patient; staff UI then uses it in the booking
+  wizard.
+
+---
+
+## E8 — Appointment lifecycle for staff
+
+### US-8.1 — Staff lists appointments
+
+**US-8.1** — As staff, I want a filterable list of appointments, so that I
+can find a specific one to manage.
+
+**Acceptance criteria:**
+
+- `GET /appointments?doctorId=&patientId=&from=&to=&status=` returns a
+  paginated list (default 20 per page, max 100).
+- Default sort: `startAt ASC` for future, `startAt DESC` for past
+  (controlled by `order` query param `asc|desc`).
+- Endpoint requires STAFF or ADMIN role.
+
+### US-8.2 — Staff views appointment detail
+
+**US-8.2** — As staff, I want to view the full detail of one appointment,
+so that I can confirm fields before any change.
+
+**Acceptance criteria:**
+
+- `GET /appointments/:id` returns the appointment with embedded patient
+  and doctor (name + department).
+- `404` with `code=APPOINTMENT_NOT_FOUND` for missing IDs.
+
+### US-8.3 — Staff cancels an appointment
+
+**US-8.3** — As staff, I want to cancel any appointment, so that the slot
+becomes free for reuse.
+
+**Acceptance criteria:**
+
+- `POST /appointments/:id/cancel` sets `status=CANCELLED`,
+  `cancelledBy=<staffUserId>`, `cancelledAt=now`.
+- Cancelling an already-cancelled appointment returns `409` with
+  `code=APPOINTMENT_ALREADY_CANCELLED`.
+- After cancellation, the slot is immediately available to other bookings
+  (verified by re-running US-6.2).
+- UI shows a confirm dialog before calling the endpoint.
+
+---
+
+## E9 — Patient self-service: view & cancel own appointments
+
+### US-9.1 — Patient lists their own appointments
+
+**US-9.1** — As a patient, I want to see my upcoming and past
+appointments, so that I can plan around them.
+
+**Acceptance criteria:**
+
+- `GET /me/appointments?status=&from=&to=` returns appointments where
+  `patientId = session.patientId`.
+- Default split in UI: "Upcoming" (status `BOOKED`, `startAt >= now`) and
+  "Past" (`status IN (COMPLETED, CANCELLED)` or `startAt < now`).
+- A patient can never see another patient's appointments — backend
+  enforces filter by session, ignoring any `patientId` query param.
+
+### US-9.2 — Patient cancels their own appointment
+
+**US-9.2** — As a patient, I want to cancel my own upcoming appointment,
+so that I don't waste the doctor's time if I can't make it.
+
+**Acceptance criteria:**
+
+- `POST /me/appointments/:id/cancel` cancels only if the appointment
+  belongs to the session's patient and is currently `BOOKED`.
+- Cancelling an appointment owned by another patient returns `404`
+  (not `403`, to avoid existence leak).
+- Cancellation rules from US-8.3 apply (sets `cancelledBy=<patient.userId>`,
+  `cancelledAt`, frees slot).
+- A UI guard hides the "Cancel" button for past or non-`BOOKED`
+  appointments.
+
+---
+
+## E10 — Patient self-service: book own appointment
+
+### US-10.1 — Patient picks doctor and slot
+
+**US-10.1** — As a patient, I want to choose a doctor, a date, an
+appointment type, and an open slot, so that I can book myself in.
+
+**Acceptance criteria:**
+
+- A wizard or single-page form walks through:
+  1. Department (optional filter) → Doctor.
+  2. Appointment type.
+  3. Date (MUI date picker, no past dates).
+  4. Slot (chips populated from US-6.2).
+- "Continue" is disabled until each step is valid.
+- Form uses react-hook-form + zod.
+
+### US-10.2 — Patient submits booking
+
+**US-10.2** — As a patient, I want to submit the booking, so that the
+appointment is created in my name.
+
+**Acceptance criteria:**
+
+- `POST /me/appointments` accepts
+  `{ doctorId, appointmentType, startAt, reason? }`.
+- Backend sets `patientId = session.patientId` (ignores any value in body).
+- Backend sets `createdBy = session.userId`.
+- Same conditional `reason` rule and concurrency model as US-7.2.
+- On `409 SLOT_TAKEN`, UI re-fetches the slot list and shows an inline
+  error.
+- On success, UI navigates to the patient's appointment detail.
+
+---
+
+## E11 — Admin user management (P1)
+
+### US-11.1 — Admin invites a staff member
+
+**US-11.1** — As an ADMIN, I want to pre-create a staff `User` by email
+and role, so that they can sign in via Google immediately.
+
+**Acceptance criteria:**
+
+- `POST /admin/users` accepts `{ email, role (STAFF|ADMIN), fullName }`.
+- Endpoint requires ADMIN role; STAFF and PATIENT get `403`.
+- Backend rejects emails whose domain is not in
+  `STAFF_ALLOWED_DOMAINS` with `code=STAFF_DOMAIN_NOT_ALLOWED`.
+- Backend rejects duplicate emails with `code=USER_EMAIL_EXISTS`.
+- `googleSub` is left null; it gets filled when the user first signs in.
+
+### US-11.2 — Admin lists and filters staff
+
+**US-11.2** — As an ADMIN, I want to see all staff and admin users with
+their status, so that I can audit access.
+
+**Acceptance criteria:**
+
+- `GET /admin/users?role=&disabled=` returns
+  `[{ id, email, fullName, role, disabledAt, createdAt }]`.
+- Default returns active users only; pass `disabled=true` to include
+  soft-deleted.
+- ADMIN-only.
+
+### US-11.3 — Admin soft-revokes a staff member
+
+**US-11.3** — As an ADMIN, I want to disable a staff/admin account, so
+that they can no longer sign in while preserving their audit trail.
+
+**Acceptance criteria:**
+
+- `POST /admin/users/:id/disable` sets `disabledAt = now`.
+- Disabled users fail `/auth/resolve` (returns
+  `code=USER_DISABLED`); their existing `Appointment.createdBy` /
+  `cancelledBy` references remain intact.
+- ADMIN cannot disable their own account (`code=CANNOT_DISABLE_SELF`).
+- A reactivation endpoint `POST /admin/users/:id/enable` clears
+  `disabledAt`.
+
+**Notes / assumptions:** P1 ships with both API and a simple
+`/admin/users` UI in ONE feature (F11) — no API/UI split.
+
+### US-11.4 — Admin assigns or reassigns patient ownership
+
+**US-11.4** — As an ADMIN, I want to assign (or reassign) a patient's
+`primaryStaffUserId`, so that I can onboard self-service patients to a
+staff member and rebalance ownership.
+
+**Acceptance criteria:**
+
+- `PATCH /admin/patients/:id` accepts `{ primaryStaffUserId: string | null }`.
+- The new owner (if not null) must be a User with role `STAFF` or
+  `ADMIN` and `disabledAt IS NULL`; otherwise return `400`
+  `code=INVALID_OWNER`.
+- Endpoint requires ADMIN role; STAFF and PATIENT receive `403`.
+- After reassignment, the previous owner can no longer see the patient in
+  `GET /patients?q=...`; the new owner can.
+- Staff UI (if shipped in F11) exposes an "Assign owner" affordance from
+  the patient detail under `(staff)/admin/`. If time-pressed, admins use
+  the API directly + Prisma Studio.
+
+---
+
+## E12 — i18n parity & README (P1)
+
+### US-12.1 — All user-facing strings localized to en + th
+
+**US-12.1** — As a user reading in English or Thai, I want every visible
+string to be in my locale, so that the app is fully usable in both
+languages.
+
+**Acceptance criteria:**
+
+- No raw English strings in JSX outside `messages/*.json`.
+- `keys.generated.ts` is regenerated and contains all keys used by the
+  app; CI / `pnpm type-check` fails on missing keys.
+- Date/time formatting respects locale (next-intl `useFormatter`).
+- Server-rendered error pages (404, error boundary) honor the locale
+  prefix.
+
+### US-12.2 — README walks a reviewer through local setup
+
+**US-12.2** — As a reviewer (or new contributor), I want a README that
+gets me to a running app in under 15 minutes, so that I can review the
+take-home end-to-end.
+
+**Acceptance criteria:**
+
+- Repo `README.md` covers: prerequisites (Node, pnpm, Docker), `.env`
+  files for `apps/web` and `apps/api`, `pnpm install`, `pnpm db:up`,
+  `pnpm prisma migrate dev`, `pnpm db:seed`, `pnpm dev`.
+- Documents the seeded admin email and how to sign in as one of the
+  seeded patients.
+- Links to Swagger at `/api/v1/docs` and to the feature roadmap.
+- Calls out known deferred items (`COMPLETED` transition, profile edit,
+  notifications).
