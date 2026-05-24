@@ -34,6 +34,17 @@ enum AppointmentStatus {
   COMPLETED
 }
 
+// `AppointmentType` is the schema-level enum for appointment categories. The
+// per-type duration map (NEW_PATIENT_VISIT=30, FOLLOW_UP=15, CONSULTATION=20,
+// PROCEDURE=60) still lives in application code — only the category is
+// persisted here.
+enum AppointmentType {
+  NEW_PATIENT_VISIT
+  FOLLOW_UP
+  CONSULTATION
+  PROCEDURE
+}
+
 // `DayOfWeek` mirrors the seven calendar days. Stored as an enum rather than
 // an Int so the schema documents the domain and Postgres rejects out-of-range
 // values without a check constraint. Application-layer mapping to the
@@ -158,8 +169,9 @@ model DoctorSchedule {
 
 // ─── Appointment ─────────────────────────────────────────────────────────────
 // `startAt` / `endAt` (UTC) are the source of truth for slot math. The
-// `appointmentType` enum is hardcoded application-side (see
-// `AppointmentType` const map in code) — no separate table in P0.
+// `appointmentType` column is the `AppointmentType` schema enum; the per-type
+// duration map (NEW_PATIENT_VISIT=30, FOLLOW_UP=15, CONSULTATION=20,
+// PROCEDURE=60) still lives in application code — no separate table in P0.
 //
 // `reason` is Postgres TEXT (no length cap, per spec).
 
@@ -172,7 +184,7 @@ model Appointment {
   departmentId String
   department   Department @relation(fields: [departmentId], references: [id])
 
-  appointmentType String // NEW_PATIENT_VISIT | FOLLOW_UP | CONSULTATION | PROCEDURE
+  appointmentType AppointmentType
   status          AppointmentStatus @default(BOOKED)
 
   startAt DateTime // UTC
