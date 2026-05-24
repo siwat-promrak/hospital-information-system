@@ -256,63 +256,76 @@ right workspace, so that I don't have to remember role-specific URLs.
 
 ### US-4.1 — List departments
 
-**US-4.1** — As staff or a patient, I want to see all departments, so that
-I can filter doctors by specialty.
+**US-4.1** — As a staff or admin user, I want to see all departments, so
+that I can filter doctors by specialty.
 
 **Acceptance criteria:**
 
 - `GET /departments` returns `[{ id, name, description? }]` ordered by
   `name`.
-- Endpoint requires a valid session (any role).
+- Endpoint requires the `doctor.list` permission. STAFF and ADMIN have it
+  by default; DOCTOR does not (data-only role; receives `403`
+  `INSUFFICIENT_PERMISSION`).
 - Department list page renders the result with localized labels.
 
 ### US-4.2 — List doctors (optionally filtered by department)
 
-**US-4.2** — As staff or a patient, I want to browse doctors, so that I can
-pick one to book with.
+**US-4.2** — As a staff or admin user, I want to browse doctors, so that I
+can pick one to book with.
 
 **Acceptance criteria:**
 
 - `GET /doctors?departmentId=:id?` returns
   `[{ id, fullName, departmentId, departmentName, bio? }]`.
 - Without the query param, returns all doctors ordered by `fullName`.
+- Endpoint requires the `doctor.list` permission (STAFF + ADMIN by
+  default).
 - A `/doctors` page shows the list with a department filter dropdown.
 
 ### US-4.3 — View doctor detail
 
-**US-4.3** — As staff or a patient, I want to view a doctor's profile, so
-that I can see their department, bio, and upcoming availability summary.
+**US-4.3** — As a staff or admin user, I want to view a doctor's profile,
+so that I can see their department, bio, and upcoming availability summary.
 
 **Acceptance criteria:**
 
 - `GET /doctors/:id` returns the doctor record plus a thin schedule summary
   (e.g. days of the week they have any schedule).
+- Endpoint requires the `doctor.read` permission (STAFF + ADMIN by
+  default).
 - `404` with `code=DOCTOR_NOT_FOUND` if the doctor does not exist.
 - A `/doctors/:id` page renders the detail and offers a "Book appointment"
-  CTA (only enabled for signed-in patients in E10, staff in E7).
+  CTA (gated on the caller also holding `appointment.create`).
 
 ---
 
 ## E5 — Doctor Schedule management
 
-### US-5.1 — Admin lists schedules for a doctor
+All endpoints in this epic require the `schedule.manage` permission.
+STAFF and ADMIN both hold it by default — schedule management is part of
+everyday clinic operations now that STAFF is back in scope.
 
-**US-5.1** — As an ADMIN, I want to view all schedule rows for a chosen
-doctor, so that I can see and manage their weekly availability.
+### US-5.1 — Staff/admin lists schedules for a doctor
+
+**US-5.1** — As a user with `schedule.manage`, I want to view all schedule
+rows for a chosen doctor, so that I can see and manage their weekly
+availability.
 
 **Acceptance criteria:**
 
 - `GET /doctors/:id/schedules` returns
   `[{ id, dayOfWeek, startMinute, endMinute, effectiveFrom, effectiveUntil? }]`
   ordered by `(effectiveFrom DESC, dayOfWeek ASC, startMinute ASC)`.
-- Endpoint requires ADMIN role; PATIENT receives `403`.
-- An admin UI page lists schedules grouped by day-of-week with localized
+- Endpoint requires the `schedule.manage` permission; callers without it
+  receive `403 INSUFFICIENT_PERMISSION`.
+- The UI page lists schedules grouped by day-of-week with localized
   weekday labels.
 
-### US-5.2 — Admin creates a schedule
+### US-5.2 — Staff/admin creates a schedule
 
-**US-5.2** — As an ADMIN, I want to add a new weekly recurring schedule for
-a doctor, so that the slot finder can offer their availability.
+**US-5.2** — As a user with `schedule.manage`, I want to add a new weekly
+recurring schedule for a doctor, so that the slot finder can offer their
+availability.
 
 **Acceptance criteria:**
 
@@ -323,31 +336,34 @@ a doctor, so that the slot finder can offer their availability.
 - Backend rejects schedules that overlap an existing active schedule for
   the same `(doctor, dayOfWeek)` within their effective windows
   (`code=SCHEDULE_OVERLAP`).
-- Admin UI exposes a "Add schedule" dialog using MUI date pickers and a
+- Endpoint requires the `schedule.manage` permission.
+- The UI exposes a "Add schedule" dialog using MUI date pickers and a
   weekday selector.
 
-### US-5.3 — Admin edits a schedule
+### US-5.3 — Staff/admin edits a schedule
 
-**US-5.3** — As an ADMIN, I want to edit an existing schedule, so that I
-can correct mistakes or change hours.
+**US-5.3** — As a user with `schedule.manage`, I want to edit an existing
+schedule, so that I can correct mistakes or change hours.
 
 **Acceptance criteria:**
 
 - `PATCH /doctors/:doctorId/schedules/:scheduleId` accepts a partial of
   the create payload.
 - Same overlap validation as US-5.2.
+- Endpoint requires the `schedule.manage` permission.
 - Editing a schedule does **not** retroactively cancel appointments
   already booked outside the new window — those are flagged in the UI but
   remain `BOOKED`.
 
-### US-5.4 — Admin deletes a schedule
+### US-5.4 — Staff/admin deletes a schedule
 
-**US-5.4** — As an ADMIN, I want to remove a schedule, so that the doctor
-stops being offered for new bookings on that day/time.
+**US-5.4** — As a user with `schedule.manage`, I want to remove a schedule,
+so that the doctor stops being offered for new bookings on that day/time.
 
 **Acceptance criteria:**
 
 - `DELETE /doctors/:doctorId/schedules/:scheduleId` removes the row.
+- Endpoint requires the `schedule.manage` permission.
 - Deleting a schedule does NOT cancel existing future appointments inside
   that window; the UI surfaces a count of affected future appointments
   before confirming.
@@ -358,7 +374,7 @@ stops being offered for new bookings on that day/time.
 
 ### US-6.1 — List appointment types
 
-**US-6.1** — As staff or a patient, I want to see the available
+**US-6.1** — As a staff or admin user, I want to see the available
 appointment types and their durations, so that I can pick the right one
 when booking.
 
@@ -367,11 +383,12 @@ when booking.
 - `GET /appointment-types` returns the hardcoded list
   `[{ code, label, durationMinutes }]` for `NEW_PATIENT_VISIT`,
   `FOLLOW_UP`, `CONSULTATION`, `PROCEDURE`.
-- Endpoint requires a valid session.
+- Endpoint requires the `appointment.create` permission (the caller is
+  about to book) — STAFF + ADMIN by default.
 
 ### US-6.2 — Find available slots
 
-**US-6.2** — As a booker (staff or patient), I want to query open slots
+**US-6.2** — As a booker (STAFF or ADMIN), I want to query open slots
 for a `(doctor, date, appointmentType)`, so that I can pick a time.
 
 **Acceptance criteria:**
@@ -386,6 +403,8 @@ for a `(doctor, date, appointmentType)`, so that I can pick a time.
   excluded.
 - Returns empty array (not `404`) when no slots are available, **including
   the case of a fully-past `date` parameter** — never `400`.
+- Endpoint requires the `appointment.create` permission (the slot finder
+  is adjacent to booking; anyone who can book may probe slots).
 
 **Notes / assumptions:** The slot finder is the single source of truth for
 "is this time bookable?"; the booking endpoints re-validate inside a
@@ -393,25 +412,34 @@ transaction to defend against races.
 
 ---
 
-## E7 — Admin-on-behalf booking
+## E7 — Staff & admin booking on behalf
 
-### US-7.1 — Admin searches for a patient
+STAFF is the primary booker; ADMIN inherits the same permissions and can
+do everything STAFF can. There is **no ownership filter** in P0 — every
+STAFF (and ADMIN) can act on every patient.
 
-**US-7.1** — As an ADMIN, I want to search for any existing patient by name,
-email, or phone, so that I can book on their behalf.
+### US-7.1 — Staff/admin searches for a patient
+
+**US-7.1** — As a user with `patient.list`, I want to search for any
+existing patient by name, identification number, or phone, so that I can
+book on their behalf.
 
 **Acceptance criteria:**
 
 - `GET /patients?q=:term` returns up to 20 matches with
-  `[{ id, fullName, email?, phone? }]`.
-- Search is case-insensitive partial match across name/email/phone (email
-  comparison uses the normalized lowercase form).
-- Endpoint requires ADMIN role; PATIENT receives `403`.
+  `[{ id, fullName, dateOfBirth, phone, hn }]`.
+- Search is case-insensitive partial match across name / phone /
+  identification number / HN.
+- Endpoint requires the `patient.list` permission (STAFF + ADMIN by
+  default).
+- **No ownership filter** — every match is visible to every authorised
+  caller.
 
-### US-7.2 — Admin books an appointment for any patient
+### US-7.2 — Staff/admin books an appointment for any patient
 
-**US-7.2** — As an ADMIN, I want to book an appointment for a patient on a
-selected doctor, type, and slot, so that the patient is scheduled.
+**US-7.2** — As a user with `appointment.create`, I want to book an
+appointment for a patient on a selected doctor, type, and slot, so that
+the patient is scheduled.
 
 **Acceptance criteria:**
 
@@ -420,20 +448,22 @@ selected doctor, type, and slot, so that the patient is scheduled.
 - `reason` is required iff `appointmentType=PROCEDURE` (conditional zod
   schema and class-validator DTO). Stored as Postgres `text` (no length
   cap).
-- Endpoint requires ADMIN role; PATIENT receives `403`.
+- Endpoint requires the `appointment.create` permission (STAFF + ADMIN by
+  default).
 - Backend runs inside a `$transaction` with isolation `Serializable`,
   retrying once on Postgres error `40001`.
 - Transaction verifies the slot is still available against the active
   schedule and existing appointments; conflicts return `409` with
   `code=SLOT_TAKEN`.
 - On success, persists `Appointment` with `status=BOOKED`,
-  `createdBy=<adminUserId>`, `endAt = startAt + duration`.
+  `createdByUserId=<session.userId>`, `endAt = startAt + duration`.
 - Returns the created appointment payload.
 
-### US-7.3 — Admin sees confirmation
+### US-7.3 — Staff/admin sees confirmation
 
-**US-7.3** — As an admin, I want a clear confirmation after booking, so
-that I know it succeeded and can share details with the patient.
+**US-7.3** — As a STAFF or ADMIN booker, I want a clear confirmation after
+booking, so that I know it succeeded and can share details with the
+patient.
 
 **Acceptance criteria:**
 
@@ -441,28 +471,30 @@ that I know it succeeded and can share details with the patient.
   page showing the patient, doctor, type, date/time, and reason.
 - A toast/snackbar confirms creation with a localized message.
 
-### US-7.4 — Admin registers a walk-in patient
+### US-7.4 — Staff/admin registers a walk-in patient
 
-**US-7.4** — As an ADMIN, I want to quickly register a walk-in patient who
-doesn't yet exist in the system, so that I can book them without leaving
-the booking flow.
+**US-7.4** — As a user with `patient.create`, I want to quickly register a
+walk-in patient who doesn't yet exist in the system, so that I can book
+them without leaving the booking flow.
 
 **Acceptance criteria:**
 
-- `POST /patients` accepts `{ fullName, email?, phone?, dateOfBirth }`.
-- Email (if provided) is normalized to lowercase before insertion.
-- Endpoint requires ADMIN role; PATIENT receives `403`.
-- Returns the created patient; admin UI then uses it in the booking
-  wizard.
+- `POST /patients` accepts the full demographic payload
+  (`{ fullName, dateOfBirth, gender, identificationNo, phone, address, ... }`).
+- Endpoint requires the `patient.create` permission (STAFF + ADMIN by
+  default).
+- The created patient row is accessible to every staff/admin caller — no
+  per-creator ownership relation is recorded (no `primary_staff_user_id`).
+- Returns the created patient; the UI then uses it in the booking wizard.
 
 ---
 
-## E8 — Appointment lifecycle for admins
+## E8 — Appointment lifecycle (staff & admin)
 
-### US-8.1 — Admin lists appointments
+### US-8.1 — Staff/admin lists appointments
 
-**US-8.1** — As an ADMIN, I want a filterable list of appointments, so that
-I can find a specific one to manage.
+**US-8.1** — As a user with `appointment.list`, I want a filterable list of
+appointments, so that I can find a specific one to manage.
 
 **Acceptance criteria:**
 
@@ -470,28 +502,33 @@ I can find a specific one to manage.
   paginated list (default 20 per page, max 100).
 - Default sort: `startAt ASC` for future, `startAt DESC` for past
   (controlled by `order` query param `asc|desc`).
-- Endpoint requires ADMIN role.
+- Endpoint requires the `appointment.list` permission (STAFF + ADMIN by
+  default).
 
-### US-8.2 — Admin views appointment detail
+### US-8.2 — Staff/admin views appointment detail
 
-**US-8.2** — As an ADMIN, I want to view the full detail of one
-appointment, so that I can confirm fields before any change.
+**US-8.2** — As a user with `appointment.read`, I want to view the full
+detail of one appointment, so that I can confirm fields before any change.
 
 **Acceptance criteria:**
 
 - `GET /appointments/:id` returns the appointment with embedded patient
   and doctor (name + department).
+- Endpoint requires the `appointment.read` permission (STAFF + ADMIN by
+  default).
 - `404` with `code=APPOINTMENT_NOT_FOUND` for missing IDs.
 
-### US-8.3 — Admin cancels an appointment
+### US-8.3 — Staff/admin cancels an appointment
 
-**US-8.3** — As an ADMIN, I want to cancel any appointment, so that the
-slot becomes free for reuse.
+**US-8.3** — As a user with `appointment.cancel`, I want to cancel any
+appointment, so that the slot becomes free for reuse.
 
 **Acceptance criteria:**
 
 - `POST /appointments/:id/cancel` sets `status=CANCELLED`,
-  `cancelledBy=<adminUserId>`, `cancelledAt=now`.
+  `cancelledByUserId=<session.userId>`, `cancelledAt=now`.
+- Endpoint requires the `appointment.cancel` permission (STAFF + ADMIN by
+  default).
 - Cancelling an already-cancelled appointment returns `409` with
   `code=APPOINTMENT_ALREADY_CANCELLED`.
 - After cancellation, the slot is immediately available to other bookings
@@ -502,50 +539,105 @@ slot becomes free for reuse.
 
 ## E11 — Admin user management (P1)
 
-### US-11.1 — Admin invites an ADMIN user
+ADMIN-only operations to invite, list, and disable other users, plus
+runtime role / permission management via the `permission.assign`
+capability.
 
-**US-11.1** — As an ADMIN, I want to pre-create an ADMIN (or DOCTOR) `User`
-by email and role, so that they can sign in via Google immediately.
+### US-11.1 — Admin invites a STAFF or ADMIN user
+
+**US-11.1** — As an ADMIN, I want to pre-create a STAFF or ADMIN `User` by
+email and role, so that they can sign in via Google immediately.
 
 **Acceptance criteria:**
 
-- `POST /admin/users` accepts `{ email, role (ADMIN|DOCTOR), fullName }`.
-- Endpoint requires ADMIN role; PATIENT gets `403`.
+- `POST /admin/users` accepts `{ email, roleCode ('ADMIN' | 'STAFF'), firstNameEn, lastNameEn, ... }`.
+- Endpoint requires the `user.invite` permission (ADMIN only by default).
+- DOCTOR is **not** a valid `roleCode` here — DOCTOR users are created
+  alongside their `Doctor` clinical record (User + Doctor pair), which the
+  take-home does not expose in a user-management UI (out of scope).
 - Backend rejects emails whose domain is not in
   `STAFF_ALLOWED_DOMAINS` with `code=STAFF_DOMAIN_NOT_ALLOWED`.
 - Backend rejects duplicate emails with `code=USER_EMAIL_EXISTS`.
 - `googleSub` is left null; it gets filled when the user first signs in.
 
-### US-11.2 — Admin lists and filters ADMIN users
+### US-11.2 — Admin lists and filters users
 
-**US-11.2** — As an ADMIN, I want to see all ADMIN users with their status,
-so that I can audit access.
+**US-11.2** — As an ADMIN, I want to see all users with their role and
+status, so that I can audit access.
 
 **Acceptance criteria:**
 
-- `GET /admin/users?role=&disabled=` returns
-  `[{ id, email, fullName, role, disabledAt, createdAt }]`.
+- `GET /admin/users?roleCode=&disabled=` returns
+  `[{ id, email, fullName, roleCode, disabledAt, createdAt }]`.
 - Default returns active users only; pass `disabled=true` to include
   soft-deleted.
-- ADMIN-only.
+- Endpoint requires the `user.list` permission (ADMIN only by default).
 
-### US-11.3 — Admin soft-revokes an ADMIN user
+### US-11.3 — Admin soft-revokes a user
 
-**US-11.3** — As an ADMIN, I want to disable another ADMIN account, so that
+**US-11.3** — As an ADMIN, I want to disable another user account, so that
 they can no longer sign in while preserving their audit trail.
 
 **Acceptance criteria:**
 
 - `POST /admin/users/:id/disable` sets `disabledAt = now`.
+- Endpoint requires the `user.disable` permission (ADMIN only by default).
 - Disabled users fail `/auth/resolve` (returns
-  `code=USER_DISABLED`); their existing `Appointment.createdBy` /
-  `cancelledBy` references remain intact.
+  `code=USER_DISABLED`); their existing `Appointment.createdByUserId` /
+  `cancelledByUserId` references remain intact.
 - ADMIN cannot disable their own account (`code=CANNOT_DISABLE_SELF`).
 - A reactivation endpoint `POST /admin/users/:id/enable` clears
   `disabledAt`.
 
-**Notes / assumptions:** P1 ships with both API and a simple
-`/admin/users` UI in ONE feature (F11) — no API/UI split.
+### US-11.5 — Admin assigns permissions to roles
+
+**US-11.5** — As an ADMIN, I want to grant or revoke specific permissions
+on a role, so that I can tune what STAFF (or future custom roles) can do
+without code changes.
+
+**Acceptance criteria:**
+
+- `POST /admin/roles/:id/policies` accepts `{ permissionId }` and creates a
+  new `Policy` row linking the role to the permission. Idempotent: a
+  duplicate grant returns the existing policy (or `409 POLICY_EXISTS` —
+  either is acceptable for v1).
+- `DELETE /admin/roles/:id/policies/:permissionId` removes the policy
+  (soft-delete via `deletedAt`).
+- Endpoint requires the `permission.assign` permission (ADMIN only by
+  default).
+- **Lockout guard:** revoking `permission.assign` from the ADMIN role is
+  rejected with `code=CANNOT_REMOVE_LAST_PERMISSION_ASSIGN` whenever doing
+  so would leave zero active users able to manage policies. (Simplest v1:
+  reject the revoke if the target role is ADMIN and the permission is
+  `permission.assign`.)
+- After a grant/revoke, the per-request permission cache is invalidated on
+  the next call from any affected user — practically this means the user's
+  permission set is re-read on each request anyway, so no explicit
+  invalidation is required.
+
+**Notes / assumptions:** The seeded baseline (ADMIN→15, STAFF→11,
+DOCTOR→0) is the starting point. Admins may grant additional permissions
+to STAFF or DOCTOR via this endpoint.
+
+### US-11.6 — Admin creates a custom role (P2)
+
+**US-11.6** — As an ADMIN, I want to create a new role (e.g. "Receptionist
+Lead") and assign permissions to it, so that I can introduce role
+variations without a schema change.
+
+**Acceptance criteria:**
+
+- `POST /admin/roles` accepts `{ code, name, description? }` and creates a
+  new `Role` row (`code` is unique and conventionally UPPER_SNAKE).
+- Endpoint requires the `permission.assign` permission (ADMIN only by
+  default).
+- Returns the new role; the admin then attaches policies via US-11.5.
+- **Priority: P2.** Cuttable for the take-home; may ship as data-only with
+  no dedicated UI.
+
+**Notes / assumptions:** P1 ships US-11.1 / 11.2 / 11.3 / 11.5 with both
+API and a simple `/admin/users` UI in ONE feature (F11) — no API/UI
+split. US-11.6 is P2 and may ship API-only.
 
 ---
 
@@ -562,6 +654,9 @@ languages.
 - No raw English strings in JSX outside `messages/*.json`.
 - `keys.generated.ts` is regenerated and contains all keys used by the
   app; CI / `pnpm type-check` fails on missing keys.
+- The admin UI in F11 adds `Roles.*` and `Permissions.*` message
+  namespaces (role display labels and permission code descriptions),
+  localized for en + th.
 - Date/time formatting respects locale (next-intl `useFormatter`).
 - Server-rendered error pages (404, error boundary) honor the locale
   prefix.
@@ -577,8 +672,10 @@ take-home end-to-end.
 - Repo `README.md` covers: prerequisites (Node, pnpm, Docker), `.env`
   files for `apps/web` and `apps/api`, `pnpm install`, `pnpm db:up`,
   `pnpm prisma migrate dev`, `pnpm db:seed`, `pnpm dev`.
-- Documents the seeded admin email and how to sign in as one of the
-  seeded patients.
+- Documents the seeded admin and staff emails for sign-in (patients do
+  not sign in).
+- Documents how to verify the RBAC baseline (seeded roles, permissions,
+  and policies — ADMIN→15, STAFF→11, DOCTOR→0).
 - Links to Swagger at `/api/v1/docs` and to the feature roadmap.
 - Calls out known deferred items (`COMPLETED` transition, profile edit,
-  notifications).
+  notifications, patient self-service).
