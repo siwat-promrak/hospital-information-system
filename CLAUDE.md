@@ -110,7 +110,7 @@ return result;
 
 Exception: don't add a blank line if `return` is the only statement in the block.
 
-## Commits
+## Commits & Pull Requests
 
 ### 3. Focused commits, describe what changed
 
@@ -121,6 +121,25 @@ Exception: don't add a blank line if `return` is the only statement in the block
   - bad: `update stuff`
   - bad: `frontend changes`
 - If a change touches multiple unrelated areas, split it into multiple commits.
+
+### 3a. Pull Request description format
+
+Every PR description MUST include these two sections, in this order, using `##` Markdown headings:
+
+```markdown
+## Summary
+<1-3 sentences explaining WHY this PR exists and the user-visible outcome>
+
+## What's changed
+- <concrete change 1 — file/area + what was done>
+- <concrete change 2>
+- ...
+```
+
+- **Summary** answers "why does this PR exist and what does it deliver?" — not a list of files.
+- **What's changed** is a bulleted list grouped by area (e.g. backend, frontend, tooling) when the PR spans multiple. Mirrors the commit messages but reads top-down.
+- Additional sections (e.g. `## Test plan`, `## Screenshots`, `## Migration notes`) are allowed and encouraged when relevant, but Summary + What's changed are REQUIRED.
+- A `.github/pull_request_template.md` is checked in to auto-populate this scaffold on every new PR.
 
 ## Frontend (apps/web)
 
