@@ -1,5 +1,5 @@
 /**
- * Seeds the 15 atomic permission rows from the canonical `PERMISSIONS`
+ * Seeds the 16 atomic permission rows from the canonical `PERMISSIONS`
  * const map. Permissions are CODE-DEFINED — adding a new one requires a
  * code change here AND a new policy seed in `policies.ts`. The DB table
  * exists so role↔permission mappings (policies) can be edited at runtime
@@ -39,6 +39,7 @@ export const PERMISSIONS: PermissionSpec[] = [
   },
   { code: 'user.disable', description: 'Soft-delete a User (block sign-in)' },
   { code: 'user.list', description: 'List all Users' },
+  { code: 'role.manage', description: 'Create / update / delete / list roles' },
   {
     code: 'permission.assign',
     description: 'Create / delete policies (assign permissions to roles)',

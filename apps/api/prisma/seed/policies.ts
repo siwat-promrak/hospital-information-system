@@ -1,12 +1,17 @@
 /**
  * Seeds the default role→permission grants:
  *
- *   - ADMIN : all 15 permissions.
- *   - STAFF : 11 permissions — everything EXCEPT `user.invite`,
- *             `user.disable`, `user.list`, `permission.assign`.
+ *   - ADMIN : 5 permissions — user/role/policy management only
+ *             (`user.invite`, `user.disable`, `user.list`, `role.manage`,
+ *             `permission.assign`). Clinic-operations permissions are
+ *             reserved for STAFF; ADMIN can grant them at runtime via
+ *             `permission.assign` if needed.
+ *   - STAFF : 11 permissions — appointment.* (4), schedule.manage (1),
+ *             patient.create/read/update/list (4), doctor.read,
+ *             doctor.list (2).
  *   - DOCTOR: none (data-only role; doctors do not sign in in P0).
  *
- * Total: 15 + 11 + 0 = 26 policy rows. Idempotent: upsert keyed by the
+ * Total: 5 + 11 + 0 = 16 policy rows. Idempotent: upsert keyed by the
  * `(roleId, permissionId)` unique pair.
  */
 import { PrismaClient, type User } from '@prisma/client';
@@ -15,20 +20,10 @@ import type { PermissionMap } from './permissions';
 import type { SeededRoles } from './roles';
 
 const ADMIN_GRANTS: string[] = [
-  'appointment.create',
-  'appointment.cancel',
-  'appointment.list',
-  'appointment.read',
-  'schedule.manage',
-  'patient.create',
-  'patient.read',
-  'patient.update',
-  'patient.list',
-  'doctor.read',
-  'doctor.list',
   'user.invite',
   'user.disable',
   'user.list',
+  'role.manage',
   'permission.assign',
 ];
 

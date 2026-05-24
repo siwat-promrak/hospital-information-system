@@ -26,7 +26,7 @@ const ROLE_SPECS: RoleSpec[] = [
   {
     code: 'ADMIN',
     name: 'Administrator',
-    description: 'Full clinic operator with user, role, and permission management.',
+    description: 'User, role, and permission management. Clinic-operations permissions can be granted to ADMIN at runtime via permission.assign if needed.',
   },
   {
     code: 'STAFF',

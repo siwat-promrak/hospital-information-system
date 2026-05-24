@@ -28,8 +28,8 @@
 // granted zero-or-more `Permission` rows through `Policy` join rows.
 // `Permission` codes are CODE-DEFINED (see `apps/api/prisma/seed/permissions.ts`)
 // — new permissions require a code change. `Role` rows are runtime-editable
-// by admins holding `permission.assign`, but the seeded ADMIN / STAFF /
-// DOCTOR roles are the canonical baseline.
+// by admins holding `role.manage`, but the seeded ADMIN / STAFF / DOCTOR
+// roles are the canonical baseline.
 
 generator client {
   provider = "prisma-client-js"
@@ -101,7 +101,7 @@ enum BloodGroup {
 // ─── RBAC ────────────────────────────────────────────────────────────────────
 
 /// Named role assigned to users. Seeded with ADMIN / STAFF / DOCTOR (`code`).
-/// Admins holding `permission.assign` may add custom roles at runtime.
+/// Admins holding `role.manage` may add custom roles at runtime.
 model Role {
   id          String  @id @default(uuid()) @db.Uuid
   code        String  @unique // 'ADMIN' | 'STAFF' | 'DOCTOR' | future custom
