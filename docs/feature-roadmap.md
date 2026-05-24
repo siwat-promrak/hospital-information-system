@@ -43,6 +43,11 @@ below live in `docs/user-stories.md`.
   stray files, verify the smoke-test steps in the feature breakdown still
   pass.
 
+### Role model
+
+The `Role` enum is `ADMIN | DOCTOR | PATIENT` (STAFF was removed and patient
+ownership filtering with it). Clinic operations live entirely under ADMIN.
+
 ### Effort & priority legend
 
 - **Effort:** S ≈ 0.5 day, M ≈ 1 day, L ≈ 1.5 days. Anything looking
@@ -61,16 +66,16 @@ below live in `docs/user-stories.md`.
 | ID  | Title                                     | Branch                          | Scope (one sentence)                                                                                | User stories                                          | Depends on    | Acceptance / verify                                                                                                                                                                                                       | Effort | Priority |
 | --- | ----------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | -------- |
 | F01 | Database foundation                       | `feat/db-foundation`            | Add Docker Compose Postgres, Prisma schema, first migration, seed, and a shared `PrismaService`.    | E1 (data model)                                       | —             | `pnpm db:up && pnpm prisma migrate dev && pnpm db:seed` succeeds; Prisma Studio shows populated tables; `pnpm type-check && pnpm build` green.                                                                              | M      | P0       |
-| F02 | Backend auth core                         | `feat/auth-backend`             | NestJS `auth/` module: JWT verify (jose), guards, error filter, `POST /auth/resolve`.               | US-2.3, US-2.4, US-2.5, US-3.1, US-3.2                | F01           | New auth e2e/unit specs pass; `/auth/resolve` covered by Swagger; protected stub endpoint returns `401` without cookie, `200` with valid JWT minted via test helper.                                                       | M      | P0       |
+| F02 | Backend auth core                         | `feat/auth-backend`             | NestJS `auth/` module: JWT verify (jose), guards, error filter, `POST /auth/resolve` (ADMIN match by email, else PATIENT).                    | US-2.3, US-2.4, US-2.5, US-3.1, US-3.2                | F01           | New auth e2e/unit specs pass; `/auth/resolve` covered by Swagger; protected stub endpoint returns `401` without cookie, `200` with valid JWT minted via test helper.                                                       | M      | P0       |
 | F03 | Frontend NextAuth wiring + sign-in        | `feat/auth-frontend`            | Install NextAuth v5, Google provider, `/signin` page, role-aware home dispatcher, sign-out.         | US-2.1, US-2.2, US-3.4                                | F02           | Manual: Google sign-in lands on `/[locale]`, role dispatcher routes correctly; sign-out clears cookie; `/signin?error=email_unverified` renders localized error.                                                          | M      | P0       |
 | F04 | Patient onboarding                        | `feat/onboarding`               | `/onboarding` form (FE) + `POST /me/patient` (BE) + onboarding guard.                               | US-3.3                                                | F03           | Manual: new patient signs in → redirected to `/onboarding`; submit creates `Patient`, links `User.patientId`; re-visiting `/onboarding` after link redirects home.                                                          | M      | P0       |
-| F05 | Doctors & departments directory           | `feat/directory`                | Read-only BE endpoints + minimal FE list/detail pages for departments and doctors.                  | US-4.1, US-4.2, US-4.3                                | F02, F03      | Manual: `/departments` and `/doctors` list seeded data; doctor detail page renders; PATIENT and STAFF can both view.                                                                                                       | M      | P0       |
-| F06 | Doctor schedule CRUD                      | `feat/schedules`                | BE `/doctors/:id/schedules` CRUD + staff UI under `(staff)`.                                        | US-5.1, US-5.2, US-5.3, US-5.4                        | F05           | Manual: staff creates a schedule; overlap returns `409`; edit & delete work; PATIENT call returns `403`.                                                                                                                    | L      | P0       |
+| F05 | Doctors & departments directory           | `feat/directory`                | Read-only BE endpoints + minimal FE list/detail pages for departments and doctors.                  | US-4.1, US-4.2, US-4.3                                | F02, F03      | Manual: `/departments` and `/doctors` list seeded data; doctor detail page renders; PATIENT and ADMIN can both view.                                                                                                       | M      | P0       |
+| F06 | Doctor schedule CRUD                      | `feat/schedules`                | BE `/doctors/:id/schedules` CRUD + admin UI under `(admin)`.                                        | US-5.1, US-5.2, US-5.3, US-5.4                        | F05           | Manual: admin creates a schedule; overlap returns `409`; edit & delete work; PATIENT call returns `403`.                                                                                                                    | L      | P0       |
 | F07 | Appointment types + slot finder           | `feat/slots`                    | BE-only: `/appointment-types` and `/doctors/:id/slots`. No UI.                                      | US-6.1, US-6.2                                        | F06           | Unit tests cover slot grid arithmetic and exclusion of past/booked slots; manual `curl` against seed data returns expected slots.                                                                                          | M      | P0       |
-| F08 | Staff booking + lifecycle                 | `feat/staff-booking`            | BE `POST /patients` (walk-in), `GET /patients?q=`, `POST /appointments`, `GET /appointments`, `GET /appointments/:id`, `POST /appointments/:id/cancel` + staff booking & list UI. Ownership filter applies. | US-7.1, US-7.2, US-7.3, US-7.4, US-8.1, US-8.2, US-8.3 | F07           | Manual: staff books for a patient THEY OWN; booking for a patient owned by another staff returns `403 PATIENT_NOT_OWNED` (verified with two-staff scenario); ADMIN bypasses; conflicting double-book returns `409 SLOT_TAKEN`; cancel frees slot. | L      | P0       |
+| F08 | Admin booking + lifecycle                 | `feat/admin-booking`            | BE `POST /patients` (walk-in), `GET /patients?q=`, `POST /appointments`, `GET /appointments`, `GET /appointments/:id`, `POST /appointments/:id/cancel` + admin booking & list UI. | US-7.1, US-7.2, US-7.3, US-7.4, US-8.1, US-8.2, US-8.3 | F07           | Manual: admin books for any patient; conflicting double-book returns `409 SLOT_TAKEN`; cancel frees slot.                                                                                                                  | L      | P0       |
 | F09 | Patient view + cancel own                 | `feat/patient-appointments`     | BE `GET /me/appointments`, `POST /me/appointments/:id/cancel` + patient list UI.                    | US-9.1, US-9.2                                        | F08           | Manual: patient sees only own appointments; cancel works; attempting to access another patient's appointment returns `404`.                                                                                                | M      | P0       |
 | F10 | Patient self-booking                      | `feat/patient-booking`          | BE `POST /me/appointments` + patient booking wizard UI.                                             | US-10.1, US-10.2                                      | F09           | Manual: patient completes the wizard, creates appointment under own `patientId`; body `patientId` overrides are ignored; `409` re-fetches slots.                                                                            | M      | P0       |
-| F11 | Admin user management                     | `feat/admin-users`              | BE `/admin/users` (list, invite, disable, enable) + `PATCH /admin/patients/:id` (reassign primary staff) + minimal `(staff)/admin/users` UI. **Single feature — no API/UI split.** | US-11.1, US-11.2, US-11.3, US-11.4                    | F03, F08      | Manual: ADMIN invites a staff email; new staff signs in successfully; ADMIN disables them; subsequent sign-in returns `USER_DISABLED`; self-disable is blocked; ADMIN reassigns a self-service patient to a staff → that staff now sees them in `GET /patients?q=`. | L      | P1       |
+| F11 | Admin user management                     | `feat/admin-users`              | BE `/admin/users` (list, invite, disable, enable) + minimal `(admin)/admin/users` UI. **Single feature — no API/UI split.**                                                                                                                                                  | US-11.1, US-11.2, US-11.3                             | F03, F08      | Manual: ADMIN invites a new ADMIN email; new admin signs in successfully; ADMIN disables them; subsequent sign-in returns `USER_DISABLED`; self-disable is blocked.                                                                                                          | L      | P1       |
 | F12 | i18n parity + README                      | `chore/i18n-readme`             | Audit all strings to `messages/*.json`, regenerate keys, write project `README.md`.                 | US-12.1, US-12.2                                      | F11           | `pnpm type-check` green; manual lang switch shows no raw English on TH; README walkthrough takes a fresh clone to a running app in <15 min.                                                                                | M      | P1       |
 
 ---
@@ -99,19 +104,16 @@ baseline to import from.
   - `User.email` is `@unique` and **stored lowercased** (enforced via
     application-layer `normalizeEmail()` helper, since Prisma can't
     express a citext column natively without a migration extension).
-  - `Patient.primaryStaffUserId` is an optional FK to `User`
-    (`onDelete: SetNull`). Used by §7 ownership filtering. Null for
-    self-service patients pending an admin assignment.
   - `Patient.email` is `@unique`, also lowercased on write.
   - `Appointment.reason` is `String?` mapped to Postgres `@db.Text` — no
     length cap (per decision: no max).
 - `apps/api/prisma/migrations/<timestamp>_init/migration.sql` — generated
   by `prisma migrate dev --name init`.
-- `apps/api/prisma/seed.ts` — seeds 1 admin, 2 staff, 3 patients
-  (with linked users; assign `primaryStaffUserId` for at least one
-  staff-owned patient and leave at least one self-service patient with
-  `primaryStaffUserId=null` to exercise both cases), 2 departments, 3
-  doctors, several schedules, optional sample appointments.
+- `apps/api/prisma/seed/` — per-table seeders (super-admin, users,
+  departments, doctors, doctor-schedules, patients, appointments) with
+  an `index.ts` orchestrator. Seeds 1 super-admin + 2 ADMIN + 5 DOCTOR +
+  10 PATIENT users, 3 departments, 5 doctors, 25 schedules, 10
+  patients, 10 appointments.
 - `apps/api/src/common/normalize-email.ts` — shared
   `normalizeEmail(input: string): string` helper (`input.trim().toLowerCase()`)
   used by every code path that writes or looks up an email.
@@ -167,7 +169,7 @@ resolution correctness.
 - `apps/api/src/app.module.ts` — register filter as APP_FILTER.
 - `apps/api/src/users/` — minimal `UsersService` (find by email, link
   googleSub) reused by auth.
-- `apps/api/test/auth.e2e-spec.ts` — happy path (staff resolves),
+- `apps/api/test/auth.e2e-spec.ts` — happy path (ADMIN resolves),
   patient auto-create, disabled user rejected, invalid JWT rejected.
 - `apps/api/package.json` — exact-pin add `jose@5.9.6`.
 
@@ -280,7 +282,7 @@ in one diff, and the surface is small (one form, one endpoint).
 
 **Manual smoke test**
 
-1. Sign in with a fresh Google account NOT in the staff allowlist.
+1. Sign in with a fresh Google account NOT pre-created as an ADMIN.
 2. Verify automatic redirect to `/en/onboarding`.
 3. Submit the form → redirect to `/en`.
 4. Re-visit `/en/onboarding` → redirect home (already linked).
@@ -301,8 +303,8 @@ worrying about mutation flows.
   `swagger/`.
 - `apps/api/src/doctors/` — module, controller, service, DTOs,
   `swagger/`.
-- `apps/web/src/app/[locale]/(staff)/departments/page.tsx`,
-  `(staff)/doctors/page.tsx`, `(staff)/doctors/[id]/page.tsx`.
+- `apps/web/src/app/[locale]/(admin)/departments/page.tsx`,
+  `(admin)/doctors/page.tsx`, `(admin)/doctors/[id]/page.tsx`.
 - `apps/web/src/app/[locale]/(patient)/doctors/page.tsx`,
   `(patient)/doctors/[id]/page.tsx` (or shared component reused across
   groups).
@@ -317,7 +319,7 @@ worrying about mutation flows.
 
 **Manual smoke test**
 
-1. Sign in as a seeded patient and staff in two browser profiles.
+1. Sign in as a seeded patient and admin in two browser profiles.
 2. Both can see `/departments` and `/doctors` populated from F01 seed.
 3. `/doctors?departmentId=<id>` filters.
 4. `/doctors/<id>` renders detail.
@@ -338,9 +340,9 @@ appointment domain.
   (`create-schedule.dto.ts`, `update-schedule.dto.ts`), `swagger/`.
 - `apps/api/src/schedules/schedule.validation.ts` — overlap detection
   helper covered by unit tests.
-- `apps/web/src/app/[locale]/(staff)/doctors/[id]/schedule/page.tsx` —
+- `apps/web/src/app/[locale]/(admin)/doctors/[id]/schedule/page.tsx` —
   list grouped by weekday.
-- `apps/web/src/app/[locale]/(staff)/doctors/[id]/schedule/_components/`
+- `apps/web/src/app/[locale]/(admin)/doctors/[id]/schedule/_components/`
   — add/edit dialog, delete confirm dialog.
 - `apps/web/src/lib/api/schedules.ts` — typed client.
 
@@ -350,7 +352,7 @@ appointment domain.
 
 **Manual smoke test**
 
-1. As staff, open a doctor's schedule page.
+1. As an ADMIN, open a doctor's schedule page.
 2. Add a Monday 09:00–12:00 schedule effective today → appears in list.
 3. Try to add an overlapping Monday 11:00–13:00 → `409 SCHEDULE_OVERLAP`.
 4. Edit start time to 08:30 → succeeds.
@@ -397,13 +399,13 @@ F08 to confirm exclusion.
 
 ---
 
-### F08 — Staff booking + lifecycle (P0, L)
+### F08 — Admin booking + lifecycle (P0, L)
 
 **Why a standalone feature**
 
 The booking write path is the highest-risk surface (transactional
 correctness, conditional `reason` for `PROCEDURE`, conflict detection).
-Bundling list/detail/cancel keeps the staff "lifecycle" surface in one
+Bundling list/detail/cancel keeps the admin "lifecycle" surface in one
 reviewable PR. If the diff grows too large, split into F08a (BE) and
 F08b (FE).
 
@@ -415,16 +417,15 @@ F08b (FE).
 - `apps/api/src/appointments/appointments.service.ts` — transactional
   create with `Prisma.TransactionIsolationLevel.Serializable`, single
   retry on `40001`.
-- `apps/api/src/patients/` — `POST /patients` (walk-in, auto-sets
-  `primaryStaffUserId = session.userId`), `GET /patients?q=` filtered to
-  owned patients for STAFF (ADMIN bypasses). Email normalized on write.
+- `apps/api/src/patients/` — `POST /patients` (walk-in), `GET /patients?q=`
+  (any patient match for ADMIN). Email normalized on write.
 - `apps/api/test/appointments.e2e-spec.ts` — happy path, slot conflict
   (`409 SLOT_TAKEN`), conditional reason rule, cancel frees slot.
-- `apps/web/src/app/[locale]/(staff)/appointments/page.tsx` — list with
+- `apps/web/src/app/[locale]/(admin)/appointments/page.tsx` — list with
   filters.
-- `apps/web/src/app/[locale]/(staff)/appointments/[id]/page.tsx` —
+- `apps/web/src/app/[locale]/(admin)/appointments/[id]/page.tsx` —
   detail + cancel.
-- `apps/web/src/app/[locale]/(staff)/appointments/new/page.tsx` — booking
+- `apps/web/src/app/[locale]/(admin)/appointments/new/page.tsx` — booking
   wizard (patient search → doctor → type → date → slot).
 - `apps/web/src/lib/api/appointments.ts`,
   `apps/web/src/lib/api/patients.ts`.
@@ -435,16 +436,13 @@ F08b (FE).
 
 **Manual smoke test**
 
-1. As Staff A, open `/appointments/new`, search → results show only
-   patients owned by Staff A; pick one, pick a doctor + `CONSULTATION` +
-   tomorrow + first slot, submit.
+1. As an ADMIN, open `/appointments/new`, search → results show any
+   patient; pick one, pick a doctor + `CONSULTATION` + tomorrow + first
+   slot, submit.
 2. In a second tab repeat with the same slot → `409 SLOT_TAKEN` shown.
 3. Open the new appointment detail → cancel → toast confirms.
 4. Re-run step 2's request → `200` (slot freed).
 5. Try `PROCEDURE` without `reason` → validation error.
-6. As Staff A, attempt `POST /appointments` with a `patientId` owned by
-   Staff B → `403 PATIENT_NOT_OWNED`.
-7. As ADMIN, repeat step 6 → succeeds (ADMIN bypasses).
 
 ---
 
@@ -532,14 +530,12 @@ is the cuttable contract.
 - `apps/api/src/admin/` — module, controller, service, DTOs, `swagger/`.
 - `apps/api/src/admin/admin.controller.ts` — `POST /admin/users`,
   `GET /admin/users`, `POST /admin/users/:id/disable`,
-  `POST /admin/users/:id/enable`, `PATCH /admin/patients/:id` (sets
-  `primaryStaffUserId` per US-11.4; validates that the new owner has role
-  STAFF/ADMIN and `disabledAt IS NULL`).
+  `POST /admin/users/:id/enable`.
 - `apps/api/src/auth/` — extend resolver to reject `disabledAt != null`
   with `code=USER_DISABLED`.
 - `apps/api/test/admin-users.e2e-spec.ts` — invite, disable, self-disable
   guard, domain rejection.
-- `apps/web/src/app/[locale]/(staff)/admin/users/page.tsx` — list +
+- `apps/web/src/app/[locale]/(admin)/admin/users/page.tsx` — list +
   invite + disable controls (ADMIN only via session check).
 
 **Migration / breaking-change notes**
@@ -550,18 +546,13 @@ is the cuttable contract.
 
 **Manual smoke test**
 
-1. As ADMIN, invite `colleague@gmail.com` with role STAFF → row appears
+1. As ADMIN, invite `colleague@gmail.com` with role ADMIN → row appears
    in the list.
-2. Sign in as that account (Google) → succeeds, lands on staff home.
+2. Sign in as that account (Google) → succeeds, lands on admin home.
 3. Back as ADMIN, disable that user.
 4. The disabled user signs out and tries to sign in again → blocked
    with `USER_DISABLED` error on `/signin?error=user_disabled`.
 5. ADMIN attempts to disable self → `400 CANNOT_DISABLE_SELF`.
-6. ADMIN `PATCH /admin/patients/<self-service-patient-id>` setting
-   `primaryStaffUserId` to a STAFF user → that STAFF now sees the
-   patient in their `GET /patients?q=`; other STAFF do not.
-7. ADMIN `PATCH` setting `primaryStaffUserId` to a disabled user →
-   `400 INVALID_OWNER`.
 
 ---
 
@@ -610,7 +601,7 @@ need a final pass after all features have shipped.
   exist; otherwise the directory PR can't be smoke-tested as a patient.
 - **F05 → F06 → F07** climbs the booking dependency tree:
   doctors/departments → schedules → slots.
-- **F08 (staff) before F09 (patient view) before F10 (patient book)**
+- **F08 (admin) before F09 (patient view) before F10 (patient book)**
   lets the reviewer see write logic land first, then read isolation,
   then a write path that simply re-applies the session filter.
 - **F11 and F12 are P1**: ship them if time allows; if not, document
