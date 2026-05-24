@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: his_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: his
+      POSTGRES_PASSWORD: his
+      POSTGRES_DB: his
+    ports:
+      - '5434:5432'
+    volumes:
+      - his-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U his -d his']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  his-pgdata:
+    name: hospital-information-system_his-pgdata
