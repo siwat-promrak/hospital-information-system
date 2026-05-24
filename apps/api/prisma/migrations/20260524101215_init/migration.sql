@@ -1,7 +1,4 @@
 -- CreateEnum
-CREATE TYPE "Role" AS ENUM ('ADMIN', 'DOCTOR', 'PATIENT');
-
--- CreateEnum
 CREATE TYPE "AppointmentStatus" AS ENUM ('BOOKED', 'CANCELLED', 'COMPLETED');
 
 -- CreateEnum
@@ -17,6 +14,49 @@ CREATE TYPE "Gender" AS ENUM ('MALE', 'FEMALE');
 CREATE TYPE "BloodGroup" AS ENUM ('A_POSITIVE', 'A_NEGATIVE', 'B_POSITIVE', 'B_NEGATIVE', 'AB_POSITIVE', 'AB_NEGATIVE', 'O_POSITIVE', 'O_NEGATIVE', 'UNKNOWN');
 
 -- CreateTable
+CREATE TABLE "roles" (
+    "id" UUID NOT NULL,
+    "code" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID NOT NULL,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "deleted_at" TIMESTAMPTZ(3),
+    "deleted_by" UUID,
+
+    CONSTRAINT "roles_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "permissions" (
+    "id" UUID NOT NULL,
+    "code" TEXT NOT NULL,
+    "description" TEXT,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID NOT NULL,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "deleted_at" TIMESTAMPTZ(3),
+    "deleted_by" UUID,
+
+    CONSTRAINT "permissions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "policies" (
+    "id" UUID NOT NULL,
+    "role_id" UUID NOT NULL,
+    "permission_id" UUID NOT NULL,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID NOT NULL,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL,
+    "deleted_at" TIMESTAMPTZ(3),
+    "deleted_by" UUID,
+
+    CONSTRAINT "policies_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "users" (
     "id" UUID NOT NULL,
     "email" TEXT NOT NULL,
@@ -25,7 +65,7 @@ CREATE TABLE "users" (
     "last_name_en" TEXT NOT NULL,
     "first_name_th" TEXT,
     "last_name_th" TEXT,
-    "role" "Role" NOT NULL,
+    "role_id" UUID,
     "picture" TEXT,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
@@ -39,7 +79,6 @@ CREATE TABLE "users" (
 -- CreateTable
 CREATE TABLE "patients" (
     "id" UUID NOT NULL,
-    "user_id" UUID NOT NULL,
     "hn" TEXT NOT NULL,
     "date_of_birth" DATE NOT NULL,
     "gender" "Gender" NOT NULL,
@@ -148,19 +187,34 @@ CREATE TABLE "staff_domains" (
 );
 
 -- CreateIndex
+CREATE UNIQUE INDEX "roles_code_key" ON "roles"("code");
+
+-- CreateIndex
+CREATE INDEX "roles_deleted_at_idx" ON "roles"("deleted_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "permissions_code_key" ON "permissions"("code");
+
+-- CreateIndex
+CREATE INDEX "permissions_deleted_at_idx" ON "permissions"("deleted_at");
+
+-- CreateIndex
+CREATE INDEX "policies_deleted_at_idx" ON "policies"("deleted_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "policies_role_id_permission_id_key" ON "policies"("role_id", "permission_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "users_google_sub_key" ON "users"("google_sub");
 
 -- CreateIndex
-CREATE INDEX "users_role_idx" ON "users"("role");
+CREATE INDEX "users_role_id_idx" ON "users"("role_id");
 
 -- CreateIndex
 CREATE INDEX "users_deleted_at_idx" ON "users"("deleted_at");
-
--- CreateIndex
-CREATE UNIQUE INDEX "patients_user_id_key" ON "patients"("user_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "patients_hn_key" ON "patients"("hn");
@@ -208,13 +262,37 @@ CREATE INDEX "appointments_status_idx" ON "appointments"("status");
 CREATE INDEX "staff_domains_deleted_at_idx" ON "staff_domains"("deleted_at");
 
 -- AddForeignKey
+ALTER TABLE "roles" ADD CONSTRAINT "roles_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "roles" ADD CONSTRAINT "roles_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "permissions" ADD CONSTRAINT "permissions_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "permissions" ADD CONSTRAINT "permissions_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "policies" ADD CONSTRAINT "policies_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "policies" ADD CONSTRAINT "policies_permission_id_fkey" FOREIGN KEY ("permission_id") REFERENCES "permissions"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "policies" ADD CONSTRAINT "policies_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "policies" ADD CONSTRAINT "policies_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "users" ADD CONSTRAINT "users_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "patients" ADD CONSTRAINT "patients_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "patients" ADD CONSTRAINT "patients_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
