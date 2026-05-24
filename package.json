@@ -1,0 +1,32 @@
+{
+  "name": "hospital-information-system",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "type-check": "turbo run type-check",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "db:seed": "pnpm --filter @hospital/api db:seed",
+    "prisma": "pnpm --filter @hospital/api prisma"
+  },
+  "devDependencies": {
+    "turbo": "2.9.14",
+    "typescript": "5.9.3"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma"
+    ]
+  }
+}

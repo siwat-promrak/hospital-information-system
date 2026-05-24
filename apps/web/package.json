@@ -1,0 +1,38 @@
+{
+  "name": "@hospital/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "gen:i18n": "node scripts/gen-i18n-keys.mjs",
+    "predev": "pnpm gen:i18n",
+    "dev": "next dev -p 3000",
+    "prebuild": "pnpm gen:i18n",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@emotion/cache": "11.14.0",
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
+    "@mui/icons-material": "6.5.0",
+    "@mui/material": "6.5.0",
+    "@mui/material-nextjs": "6.5.0",
+    "jose": "5.9.6",
+    "next": "15.5.18",
+    "next-auth": "5.0.0-beta.27",
+    "next-intl": "4.12.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "use-intl": "4.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "15.5.18",
+    "typescript": "5.9.3"
+  }
+}

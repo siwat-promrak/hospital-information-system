@@ -1,0 +1,209 @@
+#!/usr/bin/env node
+// Generates two typed catalogs from src/messages/en.json so call sites
+// never spell namespace or key strings inline:
+//
+//   K  — deeply nested leaf-key map. `K.Home.title === "title"`, scoped
+//        per namespace as next-intl expects (`useTranslations("Home")`).
+//   NS — flat namespace catalog. Every internal node path becomes a
+//        single entry whose value is the dotted next-intl namespace
+//        string. Nested namespaces flatten via PascalCase concatenation
+//        so `NS.SignInErrors === "SignIn.errors"`.
+//
+// Together they remove every magic string from getTranslations() /
+// useTranslations() call sites — see CLAUDE.md rule 2b.
+
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const WEB_ROOT = resolve(__dirname, "..");
+const SOURCE_PATH = resolve(WEB_ROOT, "src/messages/en.json");
+const OUTPUT_PATH = resolve(WEB_ROOT, "src/i18n/keys.generated.ts");
+
+function isPlainObject(value) {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
+function sortedEntries(obj) {
+  return Object.entries(obj).sort(([a], [b]) => a.localeCompare(b));
+}
+
+function escapeStringLiteral(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function isValidIdent(value) {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value);
+}
+
+function capitalize(value) {
+  if (value.length === 0) {
+    return value;
+  }
+
+  return value[0].toUpperCase() + value.slice(1);
+}
+
+// Flatten a namespace path (["SignIn", "errors"]) into a single PascalCase
+// identifier ("SignInErrors") for use as the NS catalog key.
+function flatNamespaceKey(path) {
+  return path.map(capitalize).join("");
+}
+
+let leafCount = 0;
+
+function renderKNode(node, indentLevel) {
+  if (!isPlainObject(node)) {
+    throw new Error(
+      "Top-level messages must be a plain object of namespaces.",
+    );
+  }
+
+  const indent = "  ".repeat(indentLevel);
+  const innerIndent = "  ".repeat(indentLevel + 1);
+  const entries = sortedEntries(node);
+
+  if (entries.length === 0) {
+    return "{}";
+  }
+
+  const lines = ["{"];
+
+  for (const [key, value] of entries) {
+    const safeKey = isValidIdent(key)
+      ? key
+      : `"${escapeStringLiteral(key)}"`;
+
+    if (isPlainObject(value)) {
+      const child = renderKNode(value, indentLevel + 1);
+      lines.push(`${innerIndent}${safeKey}: ${child},`);
+    } else if (typeof value === "string") {
+      leafCount += 1;
+      lines.push(`${innerIndent}${safeKey}: "${escapeStringLiteral(key)}",`);
+    } else {
+      throw new Error(
+        `Unsupported message value at key "${key}": expected string or object, got ${typeof value}.`,
+      );
+    }
+  }
+
+  lines.push(`${indent}}`);
+
+  return lines.join("\n");
+}
+
+function collectNamespacePaths(node, prefix = []) {
+  const paths = [];
+
+  for (const [key, value] of Object.entries(node)) {
+    if (!isPlainObject(value)) {
+      continue;
+    }
+
+    const path = [...prefix, key];
+    paths.push(path);
+    paths.push(...collectNamespacePaths(value, path));
+  }
+
+  return paths;
+}
+
+function renderNS(messages) {
+  const paths = collectNamespacePaths(messages);
+
+  if (paths.length === 0) {
+    return "{}";
+  }
+
+  const entries = paths
+    .map((path) => {
+      const flatKey = flatNamespaceKey(path);
+
+      if (!isValidIdent(flatKey)) {
+        throw new Error(
+          `Generated NS key "${flatKey}" is not a valid JS identifier. Rename the namespace in en.json.`,
+        );
+      }
+
+      return { flatKey, value: path.join(".") };
+    })
+    .sort((a, b) => a.flatKey.localeCompare(b.flatKey));
+
+  const seen = new Set();
+  const lines = ["{"];
+
+  for (const { flatKey, value } of entries) {
+    if (seen.has(flatKey)) {
+      throw new Error(
+        `Duplicate NS key "${flatKey}" after flattening — rename one of the colliding namespaces in en.json.`,
+      );
+    }
+
+    seen.add(flatKey);
+    lines.push(`  ${flatKey}: "${escapeStringLiteral(value)}",`);
+  }
+
+  lines.push("}");
+
+  return lines.join("\n");
+}
+
+async function main() {
+  let raw;
+
+  try {
+    raw = await readFile(SOURCE_PATH, "utf8");
+  } catch (err) {
+    throw new Error(`Failed to read ${SOURCE_PATH}: ${err.message}`);
+  }
+
+  let messages;
+
+  try {
+    messages = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse ${SOURCE_PATH} as JSON: ${err.message}`);
+  }
+
+  leafCount = 0;
+  const kBody = renderKNode(messages, 0);
+  const nsBody = renderNS(messages);
+  const namespaceCount = collectNamespacePaths(messages).length;
+
+  const output =
+    [
+      "/* eslint-disable */",
+      "// AUTO-GENERATED by scripts/gen-i18n-keys.mjs from src/messages/en.json.",
+      "// DO NOT EDIT BY HAND. Run `pnpm --filter @hospital/web gen:i18n` to regenerate.",
+      "",
+      `export const K = ${kBody} as const;`,
+      "",
+      "/**",
+      " * Namespace catalog for use with next-intl's `useTranslations(NS.X)` /",
+      " * `getTranslations(NS.X)`. Flat keys are PascalCase-concatenated paths",
+      " * (e.g. `SignIn.errors` → `NS.SignInErrors`).",
+      " */",
+      `export const NS = ${nsBody} as const;`,
+      "",
+    ].join("\n");
+
+  await mkdir(dirname(OUTPUT_PATH), { recursive: true });
+  await writeFile(OUTPUT_PATH, output, "utf8");
+
+  console.log(
+    `Wrote apps/web/src/i18n/keys.generated.ts (${leafCount} leaf keys, ${namespaceCount} namespaces)`,
+  );
+}
+
+main().catch((err) => {
+  console.error(`gen-i18n-keys failed: ${err.message}`);
+  process.exit(1);
+});

@@ -1,0 +1,105 @@
+{
+  "Home": {
+    "title": "HIS — Web",
+    "primaryAction": "Primary (darkblue)",
+    "secondaryAction": "Secondary (white)",
+    "subtitle": "Hospital Information System"
+  },
+  "NotFound": {
+    "title": "Page not found",
+    "description": "The page you're looking for doesn't exist.",
+    "goHome": "Go to home"
+  },
+  "SignIn": {
+    "title": "Sign in",
+    "subtitle": "Continue to Hospital Information System",
+    "continueWithGoogle": "Continue with Google",
+    "errors": {
+      "email_unverified": "Your Google account's email is not verified. Please verify it with Google and try again.",
+      "not_invited": "No invitation exists for this email. Ask an administrator to add you to the system first.",
+      "user_disabled": "Your account has been disabled. Contact an administrator if you believe this is in error.",
+      "internal": "Something went wrong while signing you in. Please try again in a moment."
+    }
+  },
+  "SignOut": {
+    "label": "Sign out"
+  },
+  "Dashboard": {
+    "welcome": "Welcome, {name}",
+    "roleLabel": "Role",
+    "permissionsLabel": "Permissions",
+    "comingSoonAdmin": "Admin dashboard — user, role, and policy management ships in F11.",
+    "comingSoonStaff": "Staff dashboard — patient registration, booking, and appointments ship in F08.",
+    "comingSoonDoctor": "Doctor dashboard — own-schedule editor ships in F06.",
+    "noPermissions": "No permissions granted yet."
+  },
+  "Nav": {
+    "brand": "HIS",
+    "brandFull": "Hospital Information System",
+    "expand": "Expand sidebar",
+    "collapse": "Collapse sidebar",
+    "openMenu": "Open navigation menu",
+    "closeMenu": "Close navigation menu",
+    "items": {
+      "dashboard": "Dashboard",
+      "departments": "Departments",
+      "doctors": "Doctors",
+      "mySchedule": "My schedule"
+    }
+  },
+  "Breadcrumb": {
+    "home": "Home",
+    "admin": "Admin",
+    "staff": "Staff",
+    "me": "Me",
+    "schedule": "Schedule",
+    "departments": "Departments",
+    "doctors": "Doctors"
+  },
+  "UserMenu": {
+    "openMenu": "Open user menu",
+    "signedInAs": "Signed in as",
+    "language": "Language"
+  },
+  "Pagination": {
+    "ariaLabel": "Pagination navigation",
+    "previous": "Previous page",
+    "next": "Next page",
+    "first": "First page",
+    "last": "Last page",
+    "currentPage": "Page {page}, current page",
+    "gotoPage": "Go to page {page}"
+  },
+  "Directory": {
+    "Departments": {
+      "title": "Departments",
+      "subtitle": "All clinical departments offered by the hospital.",
+      "doctorsCount": "{count, plural, =0 {No doctors} =1 {# doctor} other {# doctors}}",
+      "empty": "No departments yet."
+    },
+    "Doctors": {
+      "title": "Doctors",
+      "subtitle": "Browse the clinical staff directory.",
+      "filterByDepartment": "Filter by department",
+      "allDepartments": "All departments",
+      "empty": "No doctors yet. Doctors appear here once they're invited via Admin → Users (F11).",
+      "primary": "Primary",
+      "viewDetail": "View"
+    },
+    "DoctorDetail": {
+      "back": "Back to doctors",
+      "departmentsLabel": "Departments",
+      "scheduleSummary": "Weekly schedule",
+      "scheduleEmpty": "No schedule configured yet. Schedule CRUD ships in F06.",
+      "contact": "Contact",
+      "phone": "Phone",
+      "licenseNo": "Medical license no.",
+      "doctorCode": "Doctor code",
+      "notFound": "Doctor not found."
+    },
+    "Errors": {
+      "forbidden": "You don't have permission to view this page.",
+      "loadFailed": "Failed to load directory data."
+    }
+  }
+}
