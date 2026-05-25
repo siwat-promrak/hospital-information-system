@@ -1,3 +1,5 @@
+import type { PageSizeAll } from "@/lib/api/pagination.const";
+
 /**
  * Generic pagination envelope returned by every BE list endpoint. Mirrors
  * `Paginated<T>` from `apps/api/src/common/pagination/pagination.types.ts`
@@ -23,8 +25,13 @@ export interface Paginated<T> {
  * Request-side pagination params accepted by every paginated API client
  * in `lib/api/`. Both fields are optional — `undefined` means "let the BE
  * apply its defaults" (see `pagination.const.ts`).
+ *
+ * `pageSize` accepts the `PAGE_SIZE_ALL` sentinel ("all") in addition to a
+ * positive integer. The sentinel asks the BE to return every matching row
+ * in one response — useful for date-bounded list calls (schedule calendar)
+ * where the filter already caps the row count.
  */
 export interface PaginationParams {
   page?: number;
-  pageSize?: number;
+  pageSize?: number | PageSizeAll;
 }

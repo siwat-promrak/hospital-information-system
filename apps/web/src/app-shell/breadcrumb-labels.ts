@@ -13,6 +13,7 @@ export const BREADCRUMB_SEGMENT_LABEL = {
   staff: K.Breadcrumb.staff,
   me: K.Breadcrumb.me,
   schedule: K.Breadcrumb.schedule,
+  schedules: K.Breadcrumb.schedules,
   departments: K.Breadcrumb.departments,
   doctors: K.Breadcrumb.doctors,
 } as const;

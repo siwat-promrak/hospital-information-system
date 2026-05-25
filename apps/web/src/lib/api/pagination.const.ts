@@ -7,7 +7,20 @@
 
 export const DEFAULT_PAGE = 1;
 export const DEFAULT_PAGE_SIZE = 20;
-export const MAX_PAGE_SIZE = 100;
+// 500 supports the schedule calendar's "fetch a date window" pattern —
+// see apps/api/src/common/pagination/pagination.const.ts for the why.
+export const MAX_PAGE_SIZE = 500;
+
+/**
+ * Sentinel value for `pageSize` that asks the BE to return every matching
+ * row in a single response, bypassing the `MAX_PAGE_SIZE` cap. Used by the
+ * schedule calendar so a month/week window always fits in one round-trip
+ * (the `from` / `to` filter already bounds the row count).
+ *
+ * Mirrors the BE constant of the same value — drift here means a 400.
+ */
+export const PAGE_SIZE_ALL = "all" as const;
+export type PageSizeAll = typeof PAGE_SIZE_ALL;
 
 /**
  * Canonical query-parameter names for paginated endpoints. Referenced by

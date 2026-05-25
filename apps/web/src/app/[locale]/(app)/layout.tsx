@@ -1,6 +1,7 @@
 import { setRequestLocale } from "next-intl/server";
 
 import AppShell from "@/components/app-shell/AppShell";
+import SnackbarProvider from "@/components/shared/SnackbarProvider";
 import type { AppLocale } from "@/i18n/routing";
 import { requireSession } from "@/lib/server/session";
 
@@ -33,17 +34,19 @@ export default async function AppShellLayout({
     "";
 
   return (
-    <AppShell
-      locale={locale}
-      user={{
-        name: displayName,
-        email: session.user.email ?? "",
-        picture: session.user.image ?? null,
-        roleCode: session.user.roleCode,
-        permissionCodes: session.user.permissionCodes,
-      }}
-    >
-      {children}
-    </AppShell>
+    <SnackbarProvider>
+      <AppShell
+        locale={locale}
+        user={{
+          name: displayName,
+          email: session.user.email ?? "",
+          picture: session.user.image ?? null,
+          roleCode: session.user.roleCode,
+          permissionCodes: session.user.permissionCodes,
+        }}
+      >
+        {children}
+      </AppShell>
+    </SnackbarProvider>
   );
 }

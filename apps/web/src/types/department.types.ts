@@ -10,14 +10,3 @@ export interface DepartmentRow {
   name: string;
   description: string | null;
 }
-
-/**
- * Returned by `GET /departments/:id/doctors`. Flat per-doctor row with
- * the `isPrimary` flag hoisted from the `doctor_departments` join.
- */
-export interface DepartmentDoctorRow {
-  id: string;
-  doctorCode: string;
-  fullName: string;
-  isPrimary: boolean;
-}

@@ -7,6 +7,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { FE_PATH } from "@/auth/routes";
 import { PERMISSION_CODE } from "@/auth/permissions";
 import ScheduleCalendar from "@/components/schedule/ScheduleCalendar";
+import ScheduleFilter from "@/components/schedule/ScheduleFilter";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { listDepartments } from "@/lib/api/department.api";
@@ -21,20 +22,23 @@ import { listSchedules } from "@/lib/api/schedule.api";
 import { SCHEDULE_VIEW, type ScheduleView } from "@/lib/api/schedule.const";
 import { hasPermission, requireSession } from "@/lib/server/session";
 import {
+  formatMonthParam,
   monthRangeISO,
   parseMonthParam,
 } from "@/schedule/month";
 import {
+  formatWeekStartParam,
   parseWeekStartParam,
   weekRangeISO,
 } from "@/schedule/week";
 
-interface DoctorScheduleEditorPageProps {
+interface SchedulesPageProps {
   params: Promise<{ locale: AppLocale }>;
   searchParams: Promise<{
     view?: string;
     month?: string;
     weekStart?: string;
+    departmentId?: string;
   }>;
 }
 
@@ -47,27 +51,40 @@ function resolveView(raw: string | undefined): ScheduleView {
 }
 
 /**
- * F06 own-schedule view for DOCTOR callers. Re-uses `ScheduleCalendar`
- * but pre-pins `lockedDoctorId` so the modal cannot create rows for
- * other doctors.
+ * F06 schedule calendar — STAFF / ADMIN view. Renders every dated
+ * schedule inside the focused range with two visualisations:
  *
- * Contract assumption: when a DOCTOR session lists `/schedules` without a
- * `doctorId` query param, the BE auto-scopes to the caller's own doctor
- * record (matching the documented service-layer own-doctor scope rule).
- * The first schedule's `doctorId` is therefore safe to treat as the
- * caller's id; if the list is empty, the calendar renders the
- * "no schedules yet" empty state and disables the create affordance until
- * an admin seeds the doctor's department affiliation.
+ *  - Month view (`?view=month&month=YYYY-MM`) — 6×7 grid, one cell per
+ *    calendar date, schedule chips inside each cell.
+ *  - Week view (`?view=week&weekStart=YYYY-MM-DD`) — 7-column pixel grid
+ *    with schedules positioned by start / end time.
+ *
+ * Click an empty cell / column area to create; click a chip / block to
+ * edit / delete via the dialog. Doctors + departments are fetched
+ * alongside the schedules so the modal can drive its doctor → department
+ * dependency without a client-side round-trip.
+ *
+ * Pagination: this page intentionally requests `pageSize=all` for the
+ * schedules call, bounded by `from` / `to` covering the focused range, so
+ * the calendar never silently truncates the tail of a busy month/week.
+ * The `from` / `to` filter already caps the row count to a small number,
+ * which is what makes the `all` sentinel safe here.
+ *
+ * Doctors are fetched with a small initial page so the SSR payload stays
+ * lean, and the dialog (`ScheduleFormDialog`) loads further pages
+ * on-demand as the user scrolls the doctor picker. See `doctor.const.ts`
+ * for the shared page-size constant.
  */
-export default async function DoctorScheduleEditorPage({
+export default async function SchedulesPage({
   params,
   searchParams,
-}: DoctorScheduleEditorPageProps) {
+}: SchedulesPageProps) {
   const { locale } = await params;
   const {
     view: rawView,
     month: monthParam,
     weekStart: weekStartParam,
+    departmentId,
   } = await searchParams;
 
   setRequestLocale(locale);
@@ -95,59 +112,54 @@ export default async function DoctorScheduleEditorPage({
       ? monthRangeISO(month)
       : weekRangeISO(weekStart);
 
-  // BE auto-scopes the listing to the caller's own doctor row when no
-  // `doctorId` filter is set (see `apps/api/src/schedules/schedule.scope.ts`).
-  // `PAGE_SIZE_ALL` bounded by `from`/`to` guarantees the calendar never
-  // silently truncates the tail of a busy month/week.
-  const schedulesResult = await listSchedules({
-    pageSize: PAGE_SIZE_ALL,
-    from,
-    to,
-  });
-
-  const lockedDoctorId = schedulesResult.data[0]?.doctorId;
-
-  // Doctors + departments fuel the modal even though only one doctor is
-  // editable (`lockedDoctorId` keeps the field disabled). Fetching them
-  // unconditionally keeps the create path one click away the first time
-  // the doctor lands on the page. Doctors are fetched with a small
-  // initial page; the modal pages through the rest on scroll via the
-  // `loadDoctorsPageAction` server action.
-  const [doctorsResult, departmentsResult] = await Promise.all([
+  const [departmentsResult, doctorsResult, schedulesResult] = await Promise.all([
+    listDepartments({ pageSize: MAX_PAGE_SIZE }),
     listDoctors({
       page: DEFAULT_PAGE,
       pageSize: DOCTOR_INFINITE_SCROLL_PAGE_SIZE,
+      departmentId,
     }),
-    listDepartments({ pageSize: MAX_PAGE_SIZE }),
+    listSchedules({ pageSize: PAGE_SIZE_ALL, departmentId, from, to }),
   ]);
-
-  // When the doctor has no schedules yet (and therefore no derivable id),
-  // the calendar shows the empty-doctor copy and skips the create button —
-  // the doctor cannot submit a body the BE will accept without a valid id.
-  const canManage = Boolean(lockedDoctorId);
 
   return (
     <Stack spacing={3}>
-      <Box>
-        <Typography variant="h4" component="h1" color="primary">
-          {tSchedules(K.Schedules.myTitle)}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {tSchedules(K.Schedules.mySubtitle)}
-        </Typography>
-      </Box>
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        spacing={{ xs: 2, md: 3 }}
+        justifyContent="space-between"
+        alignItems={{ xs: "flex-start", md: "center" }}
+      >
+        <Box>
+          <Typography variant="h4" component="h1" color="primary">
+            {tSchedules(K.Schedules.title)}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {tSchedules(K.Schedules.subtitle)}
+          </Typography>
+        </Box>
+        <ScheduleFilter
+          departments={departmentsResult.data}
+          activeDepartmentId={departmentId ?? null}
+          basePath={FE_PATH.SCHEDULES}
+          view={view}
+          month={formatMonthParam(month)}
+          weekStart={formatWeekStartParam(weekStart)}
+        />
+      </Stack>
       <ScheduleCalendar
         schedules={schedulesResult.data}
         doctors={doctorsResult.data}
         doctorsTotal={doctorsResult.total}
         initialDoctorPage={doctorsResult.page}
+        doctorDepartmentId={departmentId}
         departments={departmentsResult.data}
         view={view}
         month={month}
         weekStart={weekStart}
-        basePath={FE_PATH.DOCTOR_SCHEDULE}
-        lockedDoctorId={lockedDoctorId}
-        canManage={canManage}
+        basePath={FE_PATH.SCHEDULES}
+        currentDepartmentId={departmentId}
+        canManage
       />
     </Stack>
   );

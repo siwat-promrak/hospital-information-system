@@ -14,6 +14,7 @@ export const NAV_ICON = {
   DASHBOARD: "dashboard",
   DEPARTMENTS: "departments",
   DOCTORS: "doctors",
+  SCHEDULES: "schedules",
   MY_SCHEDULE: "my_schedule",
 } as const;
 
@@ -42,6 +43,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     iconName: NAV_ICON.DOCTORS,
     i18nKey: K.Nav.items.doctors,
     permission: PERMISSION_CODE.DOCTOR_LIST,
+  },
+  {
+    id: "schedules",
+    href: FE_PATH.SCHEDULES,
+    iconName: NAV_ICON.SCHEDULES,
+    i18nKey: K.Nav.items.schedules,
+    permission: PERMISSION_CODE.SCHEDULE_MANAGE,
+    requireRoles: [ROLE.STAFF, ROLE.ADMIN],
   },
   {
     id: "my-schedule",

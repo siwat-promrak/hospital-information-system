@@ -9,7 +9,6 @@ import Toolbar from "@mui/material/Toolbar";
 import Tooltip from "@mui/material/Tooltip";
 import { useTranslations } from "next-intl";
 
-import LocaleSwitcher from "@/app/[locale]/LocaleSwitcher";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 
@@ -38,12 +37,12 @@ interface AppHeaderProps {
  * Top app bar. Lays out (left → right):
  *   - hamburger (xs–sm) to toggle the temporary drawer
  *   - URL-derived breadcrumb
- *   - locale switcher
- *   - avatar + dropdown menu (sign out)
+ *   - avatar + dropdown menu (locale switcher + sign out)
  *
- * The desktop collapse/expand chevron lives at the bottom of the sidebar
- * itself (see `AppSidebar`), not here — keeps the toggle visually anchored
- * to what it controls.
+ * The locale switcher lives inside the user-menu dropdown (see `UserMenu`)
+ * to keep the header chrome compact. The desktop collapse/expand chevron
+ * lives at the bottom of the sidebar itself (see `AppSidebar`), not here —
+ * keeps each toggle visually anchored to what it controls.
  *
  * The AppBar shifts/widens to leave space for the persistent drawer on
  * md+; on smaller screens it spans the full width and the drawer slides
@@ -104,9 +103,6 @@ export default function AppHeader({
           alignItems="center"
           sx={{ flexShrink: 0 }}
         >
-          <Box sx={{ display: { xs: "none", sm: "inline-flex" } }}>
-            <LocaleSwitcher />
-          </Box>
           <UserMenu
             locale={locale}
             name={user.name}

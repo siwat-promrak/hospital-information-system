@@ -1,10 +1,7 @@
 import "server-only";
 
-import { BE_PATH, BE_PATH_BUILDER } from "@/auth/routes";
-import type {
-  DepartmentDoctorRow,
-  DepartmentRow,
-} from "@/types/department.types";
+import { BE_PATH } from "@/auth/routes";
+import type { DepartmentRow } from "@/types/department.types";
 import type { Paginated, PaginationParams } from "@/types/pagination.types";
 
 import { buildPaginationQuery } from "./pagination";
@@ -15,6 +12,12 @@ import { userFetch } from "./server-fetch";
  * the signed-in caller — the session cookie travels via `userFetch`,
  * and the BE's `JwtGuard` + `PermissionsGuard` decide whether to serve
  * or 403.
+ *
+ * The previous `listDepartmentDoctors` helper has been removed alongside
+ * the BE's `GET /departments/:id/doctors` route — callers needing "doctors
+ * in this department" should use `listDoctors({ departmentId })` from
+ * `doctor.api.ts` instead. Same filter shape, one paginated source of
+ * truth.
  */
 
 export function listDepartments(
@@ -22,14 +25,5 @@ export function listDepartments(
 ): Promise<Paginated<DepartmentRow>> {
   return userFetch<Paginated<DepartmentRow>>(
     `${BE_PATH.DEPARTMENTS}${buildPaginationQuery(params)}`,
-  );
-}
-
-export function listDepartmentDoctors(
-  departmentId: string,
-  params?: PaginationParams,
-): Promise<Paginated<DepartmentDoctorRow>> {
-  return userFetch<Paginated<DepartmentDoctorRow>>(
-    `${BE_PATH_BUILDER.departmentDoctors(departmentId)}${buildPaginationQuery(params)}`,
   );
 }

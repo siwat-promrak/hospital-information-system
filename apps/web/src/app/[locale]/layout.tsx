@@ -8,6 +8,10 @@ import CssBaseline from "@mui/material/CssBaseline";
 import theme from "@/theme/theme";
 import { routing } from "@/i18n/routing";
 import { K, NS } from "@/i18n/keys.generated";
+// Side-effect import — registers dayjs plugins + locales exactly once for
+// every page (server + client) so downstream date math runs with `utc`,
+// `timezone`, `localizedFormat`, etc. already extended (CLAUDE.md rule 9).
+import "@/lib/dayjs";
 
 type LocaleLayoutProps = {
   children: React.ReactNode;
