@@ -284,6 +284,7 @@ export function computeSchedulesSlots(
             startAt: slotStart.toISOString(),
             endAt: slotEnd.toISOString(),
             departmentId: schedule.departmentId,
+            scheduleId: schedule.id,
           });
         }
       }

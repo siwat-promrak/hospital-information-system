@@ -464,7 +464,7 @@ describe('F07 — appointment types + slot finder e2e', () => {
     // Seed a 09:00–10:00 schedule on the test day so the response is
     // deterministic. Far-future date → every slot is comfortably in the
     // future.
-    await prisma.doctorSchedule.create({
+    const happySchedule = await prisma.doctorSchedule.create({
       data: {
         doctorId: fixtures!.doctor.id,
         departmentId: fixtures!.deptPrimary.id,
@@ -487,18 +487,26 @@ describe('F07 — appointment types + slot finder e2e', () => {
         startAt: slotIso(9, 0),
         endAt: slotIso(9, 20),
         departmentId: fixtures!.deptPrimary.id,
+        scheduleId: happySchedule.id,
       },
       {
         startAt: slotIso(9, 20),
         endAt: slotIso(9, 40),
         departmentId: fixtures!.deptPrimary.id,
+        scheduleId: happySchedule.id,
       },
       {
         startAt: slotIso(9, 40),
         endAt: slotIso(10, 0),
         departmentId: fixtures!.deptPrimary.id,
+        scheduleId: happySchedule.id,
       },
     ]);
+
+    // Every returned slot must carry the owning schedule id (F09 provenance).
+    for (const slot of res.body) {
+      expect(slot.scheduleId).toBe(happySchedule.id);
+    }
 
     // Sanity-check the step matches the requested type's duration (20 min
     // for CONSULTATION) — equivalent to the unit test but verifies the

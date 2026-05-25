@@ -101,16 +101,21 @@ The wire row for `GET /slots`:
 {
   "startAt": "2026-06-15T09:00:00.000Z",  // ISO 8601 UTC, inclusive
   "endAt": "2026-06-15T09:20:00.000Z",    // ISO 8601 UTC, exclusive
-  "departmentId": "aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9"
+  "departmentId": "aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9",
+  "scheduleId": "fa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9"
 }
 ```
 
 - `endAt - startAt === APPOINTMENT_TYPE_DURATION_MINUTES[type]` in
   milliseconds.
 - `departmentId` is echoed verbatim from the schedule that produced the
-  slot — the F08 booker MUST pass it back when calling
+  slot — the F09 booker MUST pass it back when calling
   `POST /appointments` (the spec mandates `Appointment.departmentId` is
   inherited from the chosen schedule, NOT looked up from the doctor).
+- `scheduleId` is the owning `DoctorSchedule.id` — the F09 booker MUST
+  pass it back so the new `Appointment.scheduleId` FK is populated. The
+  booking endpoint loads the schedule by id to re-validate slot
+  containment and the `acceptsBooking` flag inside its transaction.
 
 ### `GET /api/v1/slots`
 
