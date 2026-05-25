@@ -78,30 +78,46 @@ export function assertStartAtNotInPast(startAtIso: string): void {
 }
 
 /**
- * Throws `409 DOCTOR_NOT_IN_DEPARTMENT` unless the doctor has an active
- * `doctor_departments` link for the given department. Caller passes a
- * Prisma transaction client so the affiliation read happens inside the
- * surrounding tx along with the overlap check + write.
+ * Throws `400 DOCTOR_DEPARTMENT_MISMATCH` unless the doctor's current
+ * `User.departmentId` equals the supplied `departmentId`. Post the Item-3
+ * centralisation, `User.departmentId` is the SINGLE source of truth for a
+ * doctor's home department — `Doctor` no longer carries its own column.
+ * The schedule row still stores a denormalised copy of the dept id (see
+ * `DoctorSchedule.departmentId`), so the validator asserts equality rather
+ * than membership.
+ *
+ * Caller passes a Prisma transaction client so the doctor read happens
+ * inside the surrounding tx along with the overlap check + write.
  */
 export async function assertDoctorInDepartment(
   tx: Prisma.TransactionClient,
   doctorId: string,
   departmentId: string,
 ): Promise<void> {
-  const affiliation = await tx.doctorDepartment.findFirst({
-    where: {
-      doctorId,
-      departmentId,
-      deletedAt: null,
-    },
-    select: { id: true },
+  const doctor = await tx.doctor.findFirst({
+    where: { id: doctorId, deletedAt: null },
+    select: { user: { select: { departmentId: true } } },
   });
 
-  if (!affiliation) {
+  if (!doctor) {
     throw AppException.conflict(
       ErrorCode.DOCTOR_NOT_IN_DEPARTMENT,
       'Doctor is not affiliated with the requested department.',
       { doctorId, departmentId },
+    );
+  }
+
+  const doctorDepartmentId = doctor.user.departmentId;
+
+  if (doctorDepartmentId !== departmentId) {
+    throw AppException.badRequest(
+      ErrorCode.DOCTOR_DEPARTMENT_MISMATCH,
+      "Schedule departmentId must match the doctor's current department.",
+      {
+        doctorId,
+        requestedDepartmentId: departmentId,
+        doctorDepartmentId,
+      },
     );
   }
 }

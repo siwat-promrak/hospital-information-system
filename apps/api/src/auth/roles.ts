@@ -5,14 +5,22 @@
  *
  * Keys are UPPER_SNAKE_CASE TypeScript handles; values are the `code` column
  * stored on each `Role` row.
+ *
+ * Seeded baseline rows are marked `is_deletable = false` in the DB
+ * (column added to `roles` for this work) so a future F11 admin UI cannot
+ * delete the immutable baseline; rename / description edits remain allowed.
+ * The invariant lives in the future F11 service layer — this file only
+ * documents it.
  */
 
 import { PERMISSION, type PermissionCode } from './permissions';
 
 export const ROLE = {
   ADMIN: 'ADMIN',
-  STAFF: 'STAFF',
   DOCTOR: 'DOCTOR',
+  NURSE: 'NURSE',
+  MEDICAL_RECORDS_OFFICER: 'MEDICAL_RECORDS_OFFICER',
+  PHARMACY: 'PHARMACY',
 } as const;
 
 export type RoleCode = (typeof ROLE)[keyof typeof ROLE];
@@ -28,18 +36,31 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     code: ROLE.ADMIN,
     name: 'Administrator',
     description:
-      'User, role, and permission management. Clinic-operations permissions can be granted to ADMIN at runtime via permission.assign if needed.',
-  },
-  {
-    code: ROLE.STAFF,
-    name: 'Clinic Staff',
-    description: 'Front-desk operator: patients, appointments, doctor schedules.',
+      'User + role management (CRUD on users / roles / policies via role.update). Clinic-operations permissions can be granted to ADMIN at runtime via role.update if needed.',
   },
   {
     code: ROLE.DOCTOR,
     name: 'Doctor',
     description:
-      'Clinician with schedule.manage scoped to their own doctor record. Created via admin invite alongside a Doctor row.',
+      'Clinician with own-doctor scope on schedules + appointments + medical records (`*.own`). Sees own-department reads for cross-coverage context. Created via admin invite alongside a Doctor row.',
+  },
+  {
+    code: ROLE.NURSE,
+    name: 'Nurse',
+    description:
+      'Department-scoped clinical front-desk: books / cancels / updates appointments, manages doctor schedules, manages patients (full CRUD), reads medical records — all within the caller’s own department.',
+  },
+  {
+    code: ROLE.MEDICAL_RECORDS_OFFICER,
+    name: 'Medical Records Officer',
+    description:
+      'Cross-department medical records: views all appointments + schedules + medical records, full CRUD on patient demographics, updates ANY medical record. No booking, no schedule management.',
+  },
+  {
+    code: ROLE.PHARMACY,
+    name: 'Pharmacy',
+    description:
+      'Cross-department pharmacy: read-only access to patients + doctors + medical records for medication prep. No writes.',
   },
 ];
 
@@ -50,38 +71,90 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
  */
 export const SIGN_IN_ELIGIBLE_ROLES: readonly RoleCode[] = [
   ROLE.ADMIN,
-  ROLE.STAFF,
   ROLE.DOCTOR,
+  ROLE.NURSE,
+  ROLE.MEDICAL_RECORDS_OFFICER,
+  ROLE.PHARMACY,
 ];
 
 /**
  * Seeded policy assignment: which permissions each role starts with.
- * Mirrors the 17-policy baseline (ADMIN→5, STAFF→11, DOCTOR→1) documented in
- * `docs/user-stories.md` E1 / `docs/feature-roadmap.md` §1.3.
+ *
+ * Totals (50 policies):
+ *   - ADMIN                   : 9   (4 user + 4 role + 1 doctor.read)
+ *   - DOCTOR                  : 15  (5 schedule.own + 5 appointment.own + 1
+ *                                    patient.read + 1 doctor.read + 3 medical_records.own)
+ *   - NURSE                   : 14  (4 schedule.own-department + 4 appointment.own-department
+ *                                    + 4 patient + 1 doctor.read + 1 medical_records.read.all)
+ *   - MEDICAL_RECORDS_OFFICER : 9   (4 patient + 1 appointment.read.all + 1 schedule.read.all
+ *                                    + 1 doctor.read + 1 medical_records.read.all
+ *                                    + 1 medical_records.update.all)
+ *   - PHARMACY                : 3   (patient.read + doctor.read + medical_records.read.all)
  *
  * Lives here (next to the role catalog) so adding a permission to a role
  * baseline is a single-file edit; the Prisma seeder iterates this map.
+ * Every seeded policy row is persisted with `is_deletable = false` —
+ * a future F11 admin UI must block removal of these baseline grants.
  */
 export const DEFAULT_ROLE_PERMISSIONS: Readonly<Record<RoleCode, readonly PermissionCode[]>> = {
   [ROLE.ADMIN]: [
-    PERMISSION.USER_INVITE,
-    PERMISSION.USER_DISABLE,
-    PERMISSION.USER_LIST,
-    PERMISSION.ROLE_MANAGE,
-    PERMISSION.PERMISSION_ASSIGN,
+    PERMISSION.USER_CREATE,
+    PERMISSION.USER_READ,
+    PERMISSION.USER_UPDATE,
+    PERMISSION.USER_DELETE,
+    PERMISSION.ROLE_CREATE,
+    PERMISSION.ROLE_READ,
+    PERMISSION.ROLE_UPDATE,
+    PERMISSION.ROLE_DELETE,
+    PERMISSION.DOCTOR_READ,
   ],
-  [ROLE.STAFF]: [
-    PERMISSION.APPOINTMENT_CREATE,
-    PERMISSION.APPOINTMENT_CANCEL,
-    PERMISSION.APPOINTMENT_LIST,
-    PERMISSION.APPOINTMENT_READ,
-    PERMISSION.SCHEDULE_MANAGE,
+  [ROLE.DOCTOR]: [
+    PERMISSION.SCHEDULE_READ_OWN,
+    PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+    PERMISSION.SCHEDULE_CREATE_OWN,
+    PERMISSION.SCHEDULE_UPDATE_OWN,
+    PERMISSION.SCHEDULE_DELETE_OWN,
+    PERMISSION.APPOINTMENT_READ_OWN,
+    PERMISSION.APPOINTMENT_READ_OWN_DEPARTMENT,
+    PERMISSION.APPOINTMENT_CREATE_OWN,
+    PERMISSION.APPOINTMENT_UPDATE_OWN,
+    PERMISSION.APPOINTMENT_DELETE_OWN,
+    PERMISSION.PATIENT_READ,
+    PERMISSION.DOCTOR_READ,
+    PERMISSION.MEDICAL_RECORDS_READ_ALL,
+    PERMISSION.MEDICAL_RECORDS_CREATE_OWN,
+    PERMISSION.MEDICAL_RECORDS_UPDATE_OWN,
+  ],
+  [ROLE.NURSE]: [
+    PERMISSION.SCHEDULE_CREATE_OWN_DEPARTMENT,
+    PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+    PERMISSION.SCHEDULE_UPDATE_OWN_DEPARTMENT,
+    PERMISSION.SCHEDULE_DELETE_OWN_DEPARTMENT,
+    PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+    PERMISSION.APPOINTMENT_READ_OWN_DEPARTMENT,
+    PERMISSION.APPOINTMENT_UPDATE_OWN_DEPARTMENT,
+    PERMISSION.APPOINTMENT_DELETE_OWN_DEPARTMENT,
     PERMISSION.PATIENT_CREATE,
     PERMISSION.PATIENT_READ,
     PERMISSION.PATIENT_UPDATE,
-    PERMISSION.PATIENT_LIST,
+    PERMISSION.PATIENT_DELETE,
     PERMISSION.DOCTOR_READ,
-    PERMISSION.DOCTOR_LIST,
+    PERMISSION.MEDICAL_RECORDS_READ_ALL,
   ],
-  [ROLE.DOCTOR]: [PERMISSION.SCHEDULE_MANAGE],
+  [ROLE.MEDICAL_RECORDS_OFFICER]: [
+    PERMISSION.PATIENT_CREATE,
+    PERMISSION.PATIENT_READ,
+    PERMISSION.PATIENT_UPDATE,
+    PERMISSION.PATIENT_DELETE,
+    PERMISSION.APPOINTMENT_READ_ALL,
+    PERMISSION.SCHEDULE_READ_ALL,
+    PERMISSION.DOCTOR_READ,
+    PERMISSION.MEDICAL_RECORDS_READ_ALL,
+    PERMISSION.MEDICAL_RECORDS_UPDATE_ALL,
+  ],
+  [ROLE.PHARMACY]: [
+    PERMISSION.PATIENT_READ,
+    PERMISSION.DOCTOR_READ,
+    PERMISSION.MEDICAL_RECORDS_READ_ALL,
+  ],
 };

@@ -23,7 +23,14 @@ const FORBIDDEN_PERMISSION_EXAMPLE = {
   statusCode: 403,
   code: ErrorCode.INSUFFICIENT_PERMISSION,
   message: 'Caller is missing the required permission(s).',
-  details: { required: [PERMISSION.SCHEDULE_MANAGE], held: [] },
+  details: {
+    required: [
+      PERMISSION.SCHEDULE_READ_OWN,
+      PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+      PERMISSION.SCHEDULE_READ_ALL,
+    ],
+    held: [],
+  },
 };
 
 const FORBIDDEN_SCOPE_EXAMPLE = {
@@ -99,7 +106,7 @@ export function ApiListSchedules(): MethodDecorator & ClassDecorator {
     ApiOkResponse({ description: 'Schedules page', type: PaginatedScheduleDto }),
     ApiForbiddenResponse({
       description:
-        'Missing `schedule.manage` (`INSUFFICIENT_PERMISSION`) OR DOCTOR scope violation (`INSUFFICIENT_PERMISSION_SCOPE`).',
+        'Missing the per-verb schedule permission (`INSUFFICIENT_PERMISSION`) OR DOCTOR scope violation (`INSUFFICIENT_PERMISSION_SCOPE`).',
       schema: { example: FORBIDDEN_PERMISSION_EXAMPLE },
     }),
   );
@@ -111,7 +118,7 @@ export function ApiGetSchedule(): MethodDecorator & ClassDecorator {
     ApiParam({ name: 'id', description: 'Schedule id (uuid).' }),
     ApiOkResponse({ description: 'Schedule detail', type: ScheduleResponseDto }),
     ApiForbiddenResponse({
-      description: 'Caller lacks `schedule.manage`.',
+      description: 'Caller lacks the per-verb schedule permission.',
       schema: { example: FORBIDDEN_PERMISSION_EXAMPLE },
     }),
     ApiNotFoundResponse({
@@ -143,7 +150,7 @@ export function ApiCreateSchedule(): MethodDecorator & ClassDecorator {
     }),
     ApiForbiddenResponse({
       description:
-        'Missing `schedule.manage` OR DOCTOR scope violation (`INSUFFICIENT_PERMISSION_SCOPE`) when `doctorId` is not the caller.',
+        'Missing the per-verb schedule permission OR DOCTOR scope violation (`INSUFFICIENT_PERMISSION_SCOPE`) when `doctorId` is not the caller.',
       schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
     }),
     ApiConflictResponse({
@@ -175,7 +182,7 @@ export function ApiUpdateSchedule(): MethodDecorator & ClassDecorator {
       schema: { example: VALIDATION_EXAMPLE },
     }),
     ApiForbiddenResponse({
-      description: 'Missing `schedule.manage` OR DOCTOR scope violation.',
+      description: 'Missing the per-verb schedule permission OR DOCTOR scope violation.',
       schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
     }),
     ApiNotFoundResponse({
@@ -205,7 +212,7 @@ export function ApiDeleteSchedule(): MethodDecorator & ClassDecorator {
     ApiParam({ name: 'id', description: 'Schedule id (uuid).' }),
     ApiNoContentResponse({ description: 'Schedule deleted.' }),
     ApiForbiddenResponse({
-      description: 'Missing `schedule.manage` OR DOCTOR scope violation.',
+      description: 'Missing the per-verb schedule permission OR DOCTOR scope violation.',
       schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
     }),
     ApiNotFoundResponse({

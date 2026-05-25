@@ -10,13 +10,14 @@
  *
  * Volume: 75 doctors × 3 weekdays × 12 weeks = 2700 schedules.
  *
- * Doctors with two or more departments rotate the week's schedule
- * through every affiliation (`weekIdx % affiliations.length`) so the
- * booking flow has multi-department coverage even for 3-dept doctors.
+ * Post the Item-3 centralisation, the doctor's home department lives on
+ * `User.departmentId` (Doctor no longer carries its own column). The seed
+ * joins through `doctor.user` to resolve the dept id used for the
+ * denormalised `DoctorSchedule.departmentId` cache.
  *
  * Depends on doctors.ts (and therefore departments.ts).
  */
-import { PrismaClient, type Doctor, type DoctorDepartment, type User } from '@prisma/client';
+import { PrismaClient, type Doctor, type User } from '@prisma/client';
 
 interface ScheduleTemplate {
   // 0 = Monday, 1 = Tuesday, ..., 6 = Sunday (ISO-style indexing inside the seeder)
@@ -63,14 +64,6 @@ const WEEKDAY_PATTERNS: ScheduleTemplate[][] = [
 const WEEKS_IN_PAST = 8;
 const WEEKS_IN_FUTURE = 4;
 
-interface SeededDoctorContext {
-  doctor: Doctor;
-  // Ordered list of department ids for this doctor — primary first, then
-  // additional affiliations in `DoctorDepartment` insertion order. Length
-  // is always >= 1 (guarded in `buildContexts`).
-  departmentIds: string[];
-}
-
 export async function seedDoctorSchedules(
   prisma: PrismaClient,
   doctors: Doctor[],
@@ -80,17 +73,36 @@ export async function seedDoctorSchedules(
 
   await prisma.doctorSchedule.deleteMany({ where: { doctorId: { in: doctorIds } } });
 
-  const affiliations = await prisma.doctorDepartment.findMany({
-    where: { doctorId: { in: doctorIds }, deletedAt: null },
+  // Post-Item-3: resolve each doctor's department via `User.departmentId`
+  // up-front so the per-row loop below does not issue a join on every
+  // insert. `User.departmentId` is NOT NULL for DOCTOR users per the DTO
+  // invariant, but a defensive guard catches a malformed upstream seed.
+  const doctorsWithUser = await prisma.doctor.findMany({
+    where: { id: { in: doctorIds } },
+    select: { id: true, user: { select: { departmentId: true } } },
   });
+  const doctorDepartmentId = new Map<string, string>();
 
-  const contexts = buildContexts(doctors, affiliations);
+  for (const row of doctorsWithUser) {
+    if (!row.user.departmentId) {
+      throw new Error(`Doctor ${row.id} has no User.departmentId — invariant violation`);
+    }
+
+    doctorDepartmentId.set(row.id, row.user.departmentId);
+  }
+
   const weekStart = mondayOfThisWeek();
 
   let createdCount = 0;
 
-  for (let i = 0; i < contexts.length; i += 1) {
-    const ctx = contexts[i]!;
+  for (let i = 0; i < doctors.length; i += 1) {
+    const doctor = doctors[i]!;
+    const departmentId = doctorDepartmentId.get(doctor.id);
+
+    if (!departmentId) {
+      throw new Error(`Doctor ${doctor.id} missing from department lookup`);
+    }
+
     const pattern = WEEKDAY_PATTERNS[i % WEEKDAY_PATTERNS.length]!;
 
     for (
@@ -98,11 +110,6 @@ export async function seedDoctorSchedules(
       weekIdx < WEEKS_IN_FUTURE;
       weekIdx += 1
     ) {
-      // `pickDepartmentForWeek` indexes by absolute week, so secondary-
-      // affiliated doctors still alternate dept primary↔secondary cleanly
-      // across the negative range too.
-      const departmentId = pickDepartmentForWeek(ctx, Math.abs(weekIdx));
-
       for (const template of pattern) {
         const startAt = atUtcHour(weekStart, weekIdx * 7 + template.dayOffset, template.startHour);
         const endAt = atUtcHour(weekStart, weekIdx * 7 + template.dayOffset, template.endHour);
@@ -119,7 +126,7 @@ export async function seedDoctorSchedules(
 
         await prisma.doctorSchedule.create({
           data: {
-            doctorId: ctx.doctor.id,
+            doctorId: doctor.id,
             departmentId,
             startAt,
             endAt,
@@ -136,40 +143,6 @@ export async function seedDoctorSchedules(
   }
 
   return createdCount;
-}
-
-function buildContexts(
-  doctors: Doctor[],
-  affiliations: DoctorDepartment[],
-): SeededDoctorContext[] {
-  const byDoctor = new Map<string, DoctorDepartment[]>();
-
-  for (const aff of affiliations) {
-    const list = byDoctor.get(aff.doctorId) ?? [];
-    list.push(aff);
-    byDoctor.set(aff.doctorId, list);
-  }
-
-  return doctors.map((doctor) => {
-    const affs = byDoctor.get(doctor.id) ?? [];
-    const primary = affs.find((a) => a.isPrimary) ?? affs[0];
-
-    if (!primary) {
-      throw new Error(`Doctor ${doctor.doctorCode} has no department affiliation`);
-    }
-
-    const additional = affs.filter((a) => a.departmentId !== primary.departmentId);
-    const departmentIds = [primary.departmentId, ...additional.map((a) => a.departmentId)];
-
-    return {
-      doctor,
-      departmentIds,
-    };
-  });
-}
-
-function pickDepartmentForWeek(ctx: SeededDoctorContext, weekIdx: number): string {
-  return ctx.departmentIds[weekIdx % ctx.departmentIds.length]!;
 }
 
 function mondayOfThisWeek(): Date {

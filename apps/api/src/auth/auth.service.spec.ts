@@ -13,7 +13,7 @@ import { PERMISSION } from './permissions';
 import { DEFAULT_ROLE_PERMISSIONS, ROLE } from './roles';
 
 const baseDto: ResolveDto = {
-  email: 'staff1@gmail.com',
+  email: 'nurse1@gmail.com',
   googleSub: 'g-abc',
   emailVerified: true,
   name: 'Pim Sukjai',
@@ -30,15 +30,16 @@ const noContext: AuthLogContext = {
 function buildUser(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
   return {
     id: 'user-1',
-    email: 'staff1@gmail.com',
-    roleId: 'role-staff',
-    roleCode: ROLE.STAFF,
+    email: 'nurse1@gmail.com',
+    roleId: 'role-nurse',
+    roleCode: ROLE.NURSE,
     firstNameEn: 'Pim',
     lastNameEn: 'Sukjai',
     firstNameTh: null,
     lastNameTh: null,
     picture: null,
-    permissionCodes: [...DEFAULT_ROLE_PERMISSIONS[ROLE.STAFF]],
+    departmentId: 'dept-uuid',
+    permissionCodes: [...DEFAULT_ROLE_PERMISSIONS[ROLE.NURSE]],
     doctor: null,
     ...overrides,
   };
@@ -71,25 +72,25 @@ describe('AuthService', () => {
     Object.values(authLog).forEach((fn) => fn.mockReset());
   });
 
-  it('resolves an active STAFF user to its 11-permission set', async () => {
+  it('resolves an active NURSE user to its full NURSE permission set', async () => {
     users.findByEmail.mockResolvedValue(buildUser());
     users.linkGoogleSub.mockResolvedValue(undefined);
 
     const result = await service.resolve(baseDto, noContext);
 
     expect(result.userId).toBe('user-1');
-    expect(result.roleCode).toBe(ROLE.STAFF);
-    expect(result.permissionCodes).toHaveLength(DEFAULT_ROLE_PERMISSIONS[ROLE.STAFF].length);
+    expect(result.roleCode).toBe(ROLE.NURSE);
+    expect(result.permissionCodes).toHaveLength(DEFAULT_ROLE_PERMISSIONS[ROLE.NURSE].length);
     expect(users.linkGoogleSub).toHaveBeenCalledWith('user-1', 'g-abc');
     expect(authLog.logSignInSuccess).toHaveBeenCalledWith(
       'user-1',
-      'staff1@gmail.com',
+      'nurse1@gmail.com',
       noContext,
     );
     expect(authLog.logSignInFailure).not.toHaveBeenCalled();
   });
 
-  it('resolves an ADMIN user with the 5 user/role/policy permissions', async () => {
+  it('resolves an ADMIN user with the user / role management permissions', async () => {
     users.findByEmail.mockResolvedValue(
       buildUser({
         roleCode: ROLE.ADMIN,
@@ -100,11 +101,14 @@ describe('AuthService', () => {
     const result = await service.resolve(baseDto, noContext);
 
     expect(result.roleCode).toBe(ROLE.ADMIN);
-    expect(result.permissionCodes).toContain(PERMISSION.PERMISSION_ASSIGN);
-    expect(result.permissionCodes).not.toContain(PERMISSION.APPOINTMENT_CREATE);
+    expect(result.permissionCodes).toContain(PERMISSION.ROLE_UPDATE);
+    expect(result.permissionCodes).toContain(PERMISSION.USER_CREATE);
+    expect(result.permissionCodes).not.toContain(
+      PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+    );
   });
 
-  it('resolves a DOCTOR user with the schedule.manage permission only', async () => {
+  it('resolves a DOCTOR user with the schedule.create.own permission among others', async () => {
     users.findByEmail.mockResolvedValue(
       buildUser({
         roleCode: ROLE.DOCTOR,
@@ -115,7 +119,10 @@ describe('AuthService', () => {
     const result = await service.resolve(baseDto, noContext);
 
     expect(result.roleCode).toBe(ROLE.DOCTOR);
-    expect(result.permissionCodes).toEqual([PERMISSION.SCHEDULE_MANAGE]);
+    expect(result.permissionCodes).toContain(PERMISSION.SCHEDULE_CREATE_OWN);
+    expect(result.permissionCodes).toContain(PERMISSION.MEDICAL_RECORDS_CREATE_OWN);
+    expect(result.permissionCodes).toContain(PERMISSION.APPOINTMENT_CREATE_OWN);
+    expect(result.permissionCodes).toContain(PERMISSION.PATIENT_READ);
   });
 
   it('rejects an unverified Google email with EMAIL_UNVERIFIED and logs the failure', async () => {

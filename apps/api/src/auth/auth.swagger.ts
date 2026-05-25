@@ -149,14 +149,14 @@ export function ApiAuthSignOut(): MethodDecorator & ClassDecorator {
 export function ApiMePermissionsCheck(): MethodDecorator & ClassDecorator {
   return applyDecorators(
     ApiOperation({
-      summary: `Permission-gated stub — verifies ${PERMISSION.PERMISSION_ASSIGN} flow`,
+      summary: `Permission-gated stub — verifies ${PERMISSION.ROLE_UPDATE} flow`,
     }),
     ApiOkResponse({
-      description: `Caller holds ${PERMISSION.PERMISSION_ASSIGN}`,
+      description: `Caller holds ${PERMISSION.ROLE_UPDATE}`,
       type: PermissionCheckResponseDto,
     }),
     ApiForbiddenResponse({
-      description: `Caller is missing ${PERMISSION.PERMISSION_ASSIGN}`,
+      description: `Caller is missing ${PERMISSION.ROLE_UPDATE}`,
       schema: {
         example: {
           ...ENVELOPE_EXAMPLE(
@@ -164,7 +164,7 @@ export function ApiMePermissionsCheck(): MethodDecorator & ClassDecorator {
             'Caller is missing the required permission(s).',
             403,
           ),
-          details: { required: [PERMISSION.PERMISSION_ASSIGN], held: [] },
+          details: { required: [PERMISSION.ROLE_UPDATE], held: [] },
         },
       },
     }),

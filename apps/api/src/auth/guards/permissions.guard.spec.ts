@@ -57,12 +57,13 @@ function buildUser(codes: string[]): AuthenticatedUser {
     id: 'u',
     email: 'u@x.y',
     roleId: 'r',
-    roleCode: ROLE.STAFF,
+    roleCode: ROLE.NURSE,
     firstNameEn: 'U',
     lastNameEn: 'X',
     firstNameTh: null,
     lastNameTh: null,
     picture: null,
+    departmentId: 'dept-u',
     permissionCodes: codes,
     doctor: null,
   };
@@ -107,28 +108,28 @@ describe('PermissionsGuard', () => {
 
   it('passes when the user holds at least one required code', async () => {
     const guard = new PermissionsGuard(
-      makeReflector({ [REQUIRED_PERMISSIONS_KEY]: [PERMISSION.SCHEDULE_MANAGE] }),
+      makeReflector({ [REQUIRED_PERMISSIONS_KEY]: [PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT] }),
       authLog as unknown as AuthLogService,
     );
 
     await expect(
-      guard.canActivate(makeContext({ user: buildUser([PERMISSION.SCHEDULE_MANAGE]) })),
+      guard.canActivate(makeContext({ user: buildUser([PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT]) })),
     ).resolves.toBe(true);
     expect(authLog.logPermissionDenied).not.toHaveBeenCalled();
   });
 
   it('rejects with INSUFFICIENT_PERMISSION and logs the denial with { required, held }', async () => {
     const guard = new PermissionsGuard(
-      makeReflector({ [REQUIRED_PERMISSIONS_KEY]: [PERMISSION.PERMISSION_ASSIGN] }),
+      makeReflector({ [REQUIRED_PERMISSIONS_KEY]: [PERMISSION.ROLE_UPDATE] }),
       authLog as unknown as AuthLogService,
     );
-    const user = buildUser([PERMISSION.APPOINTMENT_CREATE]);
+    const user = buildUser([PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT]);
 
     await expect(guard.canActivate(makeContext({ user }))).rejects.toMatchObject({
       code: ErrorCode.INSUFFICIENT_PERMISSION,
       details: {
-        required: [PERMISSION.PERMISSION_ASSIGN],
-        held: [PERMISSION.APPOINTMENT_CREATE],
+        required: [PERMISSION.ROLE_UPDATE],
+        held: [PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT],
       },
     });
     await expect(
@@ -138,15 +139,15 @@ describe('PermissionsGuard', () => {
     expect(authLog.logPermissionDenied).toHaveBeenCalledWith(
       user.id,
       user.email,
-      [PERMISSION.PERMISSION_ASSIGN],
-      [PERMISSION.APPOINTMENT_CREATE],
+      [PERMISSION.ROLE_UPDATE],
+      [PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT],
       expect.objectContaining({ ip: '127.0.0.1', method: 'GET' }),
     );
   });
 
   it('rejects when no user is attached and logs the denial with null user fields', async () => {
     const guard = new PermissionsGuard(
-      makeReflector({ [REQUIRED_PERMISSIONS_KEY]: [PERMISSION.SCHEDULE_MANAGE] }),
+      makeReflector({ [REQUIRED_PERMISSIONS_KEY]: [PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT] }),
       authLog as unknown as AuthLogService,
     );
 
@@ -156,7 +157,7 @@ describe('PermissionsGuard', () => {
     expect(authLog.logPermissionDenied).toHaveBeenCalledWith(
       null,
       null,
-      [PERMISSION.SCHEDULE_MANAGE],
+      [PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT],
       [],
       expect.any(Object),
     );

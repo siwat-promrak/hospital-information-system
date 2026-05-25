@@ -63,8 +63,8 @@ export function ApiListDoctors(): MethodDecorator & ClassDecorator {
       type: PaginatedDoctorDto,
     }),
     ApiForbiddenResponse({
-      description: 'Caller is missing the `doctor.list` permission.',
-      schema: { example: FORBIDDEN_EXAMPLE('doctor.list') },
+      description: 'Caller is missing the `doctor.read` permission.',
+      schema: { example: FORBIDDEN_EXAMPLE('doctor.read') },
     }),
   );
 }

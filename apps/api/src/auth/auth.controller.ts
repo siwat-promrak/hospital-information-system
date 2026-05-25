@@ -61,7 +61,7 @@ export class AuthController {
   }
 
   @Get('me/permissions-check')
-  @RequirePermission(PERMISSION.PERMISSION_ASSIGN)
+  @RequirePermission(PERMISSION.ROLE_UPDATE)
   @ApiMePermissionsCheck()
   permissionCheck(): PermissionCheckResponseDto {
     return { ok: true };

@@ -17,19 +17,27 @@
  * After bootstrap, every subsequent user is created with a non-null
  * `role_id`; DTO validation at the API layer enforces this.
  *
+ * Department-aware ordering: post-refactor `User.departmentId` is NOT
+ * NULL for DOCTOR / NURSE rows. Departments are therefore seeded BEFORE
+ * `users.ts` (so the NURSE has a department to anchor in) and BEFORE
+ * `doctors.ts` (so the per-doctor `departmentId` FK resolves).
+ *
  * Totals (after seed):
- *   - 3 roles (ADMIN, STAFF, DOCTOR)
- *   - 16 permissions
- *   - 16 policies (5 ADMIN + 11 STAFF + 0 DOCTOR)
- *   - 80 users — 1 super-admin + 2 ADMIN + 2 STAFF + 75 DOCTOR
+ *   - 5 roles (ADMIN, DOCTOR, NURSE, MEDICAL_RECORDS_OFFICER, PHARMACY)
+ *   - 35 permissions (CRUD-verb catalog: user 4 + role 4 + appointment 9 +
+ *     schedule 9 + patient 4 + doctor 1 + medical_records 4)
+ *   - 49 policies (9 ADMIN + 14 DOCTOR + 14 NURSE +
+ *     9 MEDICAL_RECORDS_OFFICER + 3 PHARMACY)
+ *   - 81 users — 1 super-admin + 2 ADMIN + 1 NURSE +
+ *     1 MEDICAL_RECORDS_OFFICER + 1 PHARMACY + 75 DOCTOR
  *   - 10 departments
- *   - ~34 department_appointment_types (per-department allowed types)
+ *   - ~35 department_appointment_types (per-department allowed types)
  *   - 10 patients (5 MALE + 5 FEMALE)
- *   - 75 doctors with primary + optional additional affiliations
+ *   - 75 doctors each anchored in a single department
  *   - 2700 doctor_schedules across the past 8 + next 4 weeks (12-week window)
  *
- * Appointment rows are NOT seeded — they are created via application
- * workflows in later features.
+ * Appointment + medical_records rows are NOT seeded — they are created via
+ * application workflows in later features.
  */
 import { PrismaClient } from '@prisma/client';
 
@@ -49,12 +57,14 @@ const prisma = new PrismaClient();
 async function main(): Promise<void> {
   const superAdmin = await seedSuperAdmin(prisma);
   const roles = await seedRoles(prisma, superAdmin);
-  const permissions = await seedPermissions(prisma, superAdmin);
+  const permissions = await seedPermissions(prisma);
   const policyCount = await seedPolicies(prisma, roles, permissions, superAdmin);
   await assignSuperAdminRole(prisma, roles.admin);
 
-  const users = await seedUsers(prisma, roles, superAdmin);
+  // Departments first so scoped users (NURSE) and doctors have a
+  // departmentId to anchor in.
   const departments = await seedDepartments(prisma, superAdmin);
+  const users = await seedUsers(prisma, roles, departments, superAdmin);
   const departmentAppointmentTypeCount = await seedDepartmentAppointmentTypes(
     prisma,
     departments,
@@ -66,10 +76,16 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log('Seed complete.', {
-    roles: 3,
-    permissions: 16,
+    roles: 5,
+    permissions: 35,
     policies: policyCount,
-    users: 1 + users.admins.length + users.staff.length + seededDoctors.users.length,
+    users:
+      1 +
+      users.admins.length +
+      1 + // NURSE
+      1 + // MEDICAL_RECORDS_OFFICER
+      1 + // PHARMACY
+      seededDoctors.users.length,
     departments: departments.length,
     departmentAppointmentTypes: departmentAppointmentTypeCount,
     patients: patients.length,

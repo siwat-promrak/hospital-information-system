@@ -12,6 +12,7 @@ import {
   getScopedDoctorId,
   isDoctorScoped,
 } from './schedule.scope';
+import { SCHEDULE_VERB } from './schedule.scope.const';
 import {
   assertDoctorInDepartment,
   assertNoOverlap,
@@ -20,17 +21,23 @@ import {
 } from './schedule.validation';
 import { SchedulesService, resolveListRange } from './schedules.service';
 
-const STAFF_USER: AuthenticatedUser = {
-  id: 'user-staff',
-  email: 'staff@example.com',
-  roleId: 'role-staff',
-  roleCode: ROLE.STAFF,
-  firstNameEn: 'Staff',
+const NURSE_USER: AuthenticatedUser = {
+  id: 'user-nurse',
+  email: 'nurse@example.com',
+  roleId: 'role-nurse',
+  roleCode: ROLE.NURSE,
+  firstNameEn: 'Nurse',
   lastNameEn: 'One',
   firstNameTh: null,
   lastNameTh: null,
   picture: null,
-  permissionCodes: ['schedule.manage'],
+  departmentId: 'dept-nurse',
+  permissionCodes: [
+    'schedule.create.own-department',
+    'schedule.read.own-department',
+    'schedule.update.own-department',
+    'schedule.delete.own-department',
+  ],
   doctor: null,
 };
 
@@ -44,8 +51,14 @@ const DOCTOR_USER: AuthenticatedUser = {
   firstNameTh: null,
   lastNameTh: null,
   picture: null,
-  permissionCodes: ['schedule.manage'],
-  doctor: { id: 'doctor-own' },
+  departmentId: 'dept-doctor',
+  permissionCodes: [
+    'schedule.create.own',
+    'schedule.read.own',
+    'schedule.update.own',
+    'schedule.delete.own',
+  ],
+  doctor: { id: 'doctor-own', departmentId: 'dept-doctor' },
 };
 
 const dt = (iso: string): Date => new Date(iso);
@@ -241,12 +254,12 @@ describe('checkScheduleWindow', () => {
 
 describe('scope helpers', () => {
   it('isDoctorScoped only fires for DOCTOR', () => {
-    expect(isDoctorScoped(STAFF_USER)).toBe(false);
+    expect(isDoctorScoped(NURSE_USER)).toBe(false);
     expect(isDoctorScoped(DOCTOR_USER)).toBe(true);
   });
 
-  it('getScopedDoctorId returns null for STAFF and the linked id for DOCTOR', () => {
-    expect(getScopedDoctorId(STAFF_USER)).toBeNull();
+  it('getScopedDoctorId returns null for NURSE and the linked id for DOCTOR', () => {
+    expect(getScopedDoctorId(NURSE_USER)).toBeNull();
     expect(getScopedDoctorId(DOCTOR_USER)).toBe('doctor-own');
   });
 
@@ -256,17 +269,15 @@ describe('scope helpers', () => {
     ).toThrow(AppException);
   });
 
-  it('assertCanActOnDoctor passes for STAFF on any target', () => {
-    expect(() => assertCanActOnDoctor(STAFF_USER, 'any-doctor')).not.toThrow();
+  it('assertCanActOnDoctor passes for NURSE on a doctor in the same department', () => {
+    expect(() =>
+      assertCanActOnDoctor(NURSE_USER, SCHEDULE_VERB.CREATE, 'any-doctor', 'dept-nurse'),
+    ).not.toThrow();
   });
 
-  it('assertCanActOnDoctor passes for DOCTOR on own id', () => {
-    expect(() => assertCanActOnDoctor(DOCTOR_USER, 'doctor-own')).not.toThrow();
-  });
-
-  it('assertCanActOnDoctor throws INSUFFICIENT_PERMISSION_SCOPE for DOCTOR on foreign id', () => {
+  it('assertCanActOnDoctor throws INSUFFICIENT_PERMISSION_SCOPE for NURSE on a doctor in a foreign department', () => {
     try {
-      assertCanActOnDoctor(DOCTOR_USER, 'doctor-other');
+      assertCanActOnDoctor(NURSE_USER, SCHEDULE_VERB.CREATE, 'any-doctor', 'dept-other');
       fail('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(AppException);
@@ -276,25 +287,85 @@ describe('scope helpers', () => {
       expect((err as AppException).getStatus()).toBe(403);
     }
   });
+
+  it('assertCanActOnDoctor passes for DOCTOR on own id', () => {
+    expect(() =>
+      assertCanActOnDoctor(DOCTOR_USER, SCHEDULE_VERB.CREATE, 'doctor-own', 'dept-doctor'),
+    ).not.toThrow();
+  });
+
+  it('assertCanActOnDoctor throws INSUFFICIENT_PERMISSION_SCOPE for DOCTOR on foreign id', () => {
+    try {
+      assertCanActOnDoctor(DOCTOR_USER, SCHEDULE_VERB.CREATE, 'doctor-other', 'dept-doctor');
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(
+        ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+      );
+      expect((err as AppException).getStatus()).toBe(403);
+    }
+  });
+
+  it('assertCanActOnDoctor (CREATE) rejects a DOCTOR who only holds schedule.read.own-department for a foreign doctor in their dept — the read scope MUST NOT widen create authority', () => {
+    // DOCTOR holds `schedule.read.own-department` (for cross-coverage
+    // visibility) AND `schedule.create.own` (write). The pre-Item-1 widest-
+    // scope resolver would have returned OWN_DEPARTMENT for the write —
+    // letting the doctor create schedules for ANY doctor in the dept. The
+    // per-verb fix rejects this case.
+    const DOCTOR_WITH_DEPT_READ_SCOPE: typeof DOCTOR_USER = {
+      ...DOCTOR_USER,
+      permissionCodes: [
+        ...DOCTOR_USER.permissionCodes,
+        'schedule.read.own-department',
+      ],
+    };
+
+    try {
+      assertCanActOnDoctor(
+        DOCTOR_WITH_DEPT_READ_SCOPE,
+        SCHEDULE_VERB.CREATE,
+        'doctor-other',
+        'dept-doctor',
+      );
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(
+        ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+      );
+      expect((err as AppException).details).toEqual(
+        expect.objectContaining({
+          required: ['schedule.create.own-department'],
+          scope: 'own',
+          requestedDoctorId: 'doctor-other',
+          ownDoctorId: 'doctor-own',
+        }),
+      );
+    }
+  });
 });
 
 describe('assertDoctorInDepartment', () => {
-  const buildTx = (returnRow: { id: string } | null) =>
+  // Post-Item-3 the lookup reads `doctor.user.departmentId` (Doctor no
+  // longer carries a `department_id` column). The mock therefore returns
+  // `{ user: { departmentId } }` instead of a flat `{ departmentId }`.
+  const buildTx = (returnRow: { user: { departmentId: string } } | null) =>
     ({
-      doctorDepartment: {
+      doctor: {
         findFirst: jest.fn().mockResolvedValue(returnRow),
       },
     }) as unknown as Parameters<typeof assertDoctorInDepartment>[0];
 
-  it('passes when an active affiliation row exists', async () => {
-    const tx = buildTx({ id: 'aff-1' });
+  it('passes when the doctor row exists AND user.departmentId matches', async () => {
+    const tx = buildTx({ user: { departmentId: 'dept' } });
 
     await expect(
       assertDoctorInDepartment(tx, 'doc', 'dept'),
     ).resolves.toBeUndefined();
   });
 
-  it('throws 409 DOCTOR_NOT_IN_DEPARTMENT when no row is found', async () => {
+  it('throws 409 DOCTOR_NOT_IN_DEPARTMENT when the doctor is missing', async () => {
     const tx = buildTx(null);
 
     try {
@@ -304,6 +375,19 @@ describe('assertDoctorInDepartment', () => {
       expect(err).toBeInstanceOf(AppException);
       expect((err as AppException).code).toBe(ErrorCode.DOCTOR_NOT_IN_DEPARTMENT);
       expect((err as AppException).getStatus()).toBe(409);
+    }
+  });
+
+  it('throws 400 DOCTOR_DEPARTMENT_MISMATCH when the doctor’s user.departmentId differs', async () => {
+    const tx = buildTx({ user: { departmentId: 'dept-other' } });
+
+    try {
+      await assertDoctorInDepartment(tx, 'doc', 'dept');
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(ErrorCode.DOCTOR_DEPARTMENT_MISMATCH);
+      expect((err as AppException).getStatus()).toBe(400);
     }
   });
 });
