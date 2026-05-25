@@ -88,7 +88,7 @@ below live in `docs/user-stories.md`.
 | F02 | Backend auth core + auth log              | `feat/auth-backend`             | NestJS `auth/` module: JWT verify (jose), guards, error filter, `POST /auth/resolve`, `POST /auth/signout`. Loads `user.role.policies` per request and exposes `permissionCodes[]` on the request context for `PermissionsGuard` / `@RequirePermission()`. Resolves ADMIN, STAFF, and DOCTOR (DOCTOR carries `schedule.manage`). Adds the append-only `auth_logs` table (forward migration `add_auth_log`) and an `AuthLogService` that records `SIGN_IN_SUCCESS` / `SIGN_IN_FAILED` / `PERMISSION_DENIED` / `SIGN_OUT` events with optional IP + User-Agent forensic columns. | US-2.3, US-2.4, US-2.5, US-2.6, US-2.7, US-3.1        | F01           | New auth unit + e2e specs pass; `/auth/resolve` + `/auth/signout` covered by Swagger; protected stub returns `401` without cookie, `200` with valid JWT minted via test helper, `403 INSUFFICIENT_PERMISSION` when permission missing; every sign-in success / failure / permission-denial / sign-out writes exactly one row to `auth_logs`. | M      | P0       |
 | F03 | Frontend NextAuth wiring + sign-in        | `feat/auth-frontend`            | Install NextAuth v5, Google provider, `/signin` page, role-aware home dispatcher, sign-out (calls F02's `POST /auth/signout` then clears the cookie). Configures NextAuth `session.maxAge` + `session.updateAge` for sliding-window renewal — no custom refresh-token model. No patient sign-in. | US-2.1, US-2.2, US-3.4                                | F02           | Manual: Google sign-in lands on `/[locale]`, role dispatcher routes ADMIN to the admin dashboard, STAFF to the clinic dashboard, and DOCTOR to the schedule editor; sign-out calls the BE audit endpoint then clears cookie; `/signin?error=email_unverified` renders localized error. | M      | P0       |
 | F05 ✅ | Doctors & departments directory           | `feat/directory`                | Read-only BE endpoints + minimal FE list/detail pages for departments and doctors. Doctor lists include the doctor's department affiliations (via `doctor_departments`); a doctor may appear under multiple departments. **Shipped:** also delivered the app shell (sidebar + header + breadcrumb), the `lib/api` transport foundation, paginated list endpoints (`Paginated<T>` envelope), and the HS256 session-JWT workaround tracked as FU-01. | US-4.1, US-4.2, US-4.3                                | F02, F03      | Manual: `/departments` and `/doctors` list seeded data; doctor detail page renders affiliations with the `isPrimary` flag; STAFF can view (gated on `doctor.list` / `doctor.read`); ADMIN and DOCTOR receive `403 INSUFFICIENT_PERMISSION` unless granted; pagination + filter survive page navigation.                  | M      | P0       |
-| F06 | Doctor schedule CRUD                      | `feat/schedules`                | BE `/doctors/:id/schedules` CRUD + UI for users with `schedule.manage` (STAFF unrestricted; DOCTOR limited to own schedules via service-layer scope). Each schedule carries `departmentId`; the doctor must be affiliated with that department. Three DB CHECK constraints back-stop window/break validity. | US-5.1, US-5.2, US-5.3, US-5.4                        | F05           | Manual: a STAFF user creates a schedule with `departmentId`; overlap returns `409`; mismatched department returns `409 DOCTOR_NOT_IN_DEPARTMENT`; edit & delete work; a DOCTOR can manage only their own schedules (else `403 INSUFFICIENT_PERMISSION_SCOPE`); a user without `schedule.manage` (e.g. ADMIN by default) returns `403 INSUFFICIENT_PERMISSION`. | L      | P0       |
+| F06 ✅ | Doctor schedule CRUD                      | `feat/schedules`                | Flat BE `/schedules` CRUD (list/get/create/update/delete) + calendar UI (month + week views) for users with `schedule.manage` (STAFF unrestricted; DOCTOR limited to own schedules via service-layer scope). Each schedule is a dated window (`startAt` / `endAt` UTC) carrying `departmentId`; the doctor must be affiliated with that department. Two DB CHECK constraints back-stop window/break validity; a service-layer guard rejects past-`startAt`. **Shipped:** also delivered the global snackbar (`notistack`), dayjs adoption (CLAUDE.md rule 9), the `pageSize=all` pagination sentinel (extension of CLAUDE.md §8), reusable `SearchableSelect` with server-paged infinite scroll, expanded seed (75 doctors, 2700 schedules), and the F06 API handoff doc. | US-5.1, US-5.2, US-5.3, US-5.4                        | F05           | Manual: a STAFF user creates a dated schedule with `departmentId`; overlap returns `409 SCHEDULE_OVERLAP`; mismatched department returns `409 DOCTOR_NOT_IN_DEPARTMENT`; past `startAt` returns `400 SCHEDULE_START_IN_PAST`; edit & delete work; a DOCTOR can manage only their own schedules (foreign GET → `404`, foreign mutate → `403 INSUFFICIENT_PERMISSION_SCOPE`); a user without `schedule.manage` (e.g. ADMIN by default) returns `403 INSUFFICIENT_PERMISSION`. | L      | P0       |
 | F07 | Appointment types + slot finder           | `feat/slots`                    | BE-only: `/appointment-types` and `/doctors/:id/slots` (requires `departmentId`). No UI. Gated on `appointment.create`. | US-6.1, US-6.2                                        | F06           | Unit tests cover slot grid arithmetic, break-window exclusion, and exclusion of past/booked slots; manual `curl` against seed data returns expected slots; mismatched `(departmentId, type)` returns `400 DEPARTMENT_TYPE_NOT_ALLOWED`.                                                                                          | M      | P0       |
 | F08 | Staff booking + lifecycle                 | `feat/staff-booking`            | BE `POST /patients` (walk-in), `GET /patients?q=`, `POST /appointments` (inherits `departmentId` from the chosen schedule; validates `(departmentId, appointmentType)` against `department_appointment_types`), `GET /appointments`, `GET /appointments/:id`, `POST /appointments/:id/cancel` + booking & list UI. **STAFF-only by default** — ADMIN does not hold `appointment.*` in the seeded baseline; grant via `permission.assign`. **No ownership filter** — every STAFF can act on every patient. | US-7.1, US-7.2, US-7.3, US-7.4, US-8.1, US-8.2, US-8.3 | F07           | Manual: STAFF books for any patient; conflicting double-book returns `409 SLOT_TAKEN`; mismatched `(departmentId, type)` returns `400 DEPARTMENT_TYPE_NOT_ALLOWED`; cancel frees slot; the `appointments_end_after_start` DB CHECK back-stops `endAt > startAt`.                                                                                | L      | P0       |
 | F11 | Admin user + role/permission management   | `feat/admin-users`              | BE `/admin/users` (list, invite, disable, enable — invite path supports DOCTOR by creating the User + Doctor + `doctor_departments` rows transactionally), `/admin/roles/:id/policies` (grant/revoke), optional `/admin/roles` (create custom role, P2 — requires `role.manage`) + minimal `(app)/admin/users` & `(app)/admin/roles` UI. ADMIN starts narrow (5 permissions) and may grant additional capabilities to themselves or others via `permission.assign`. **Single feature — no API/UI split.** | US-11.1, US-11.2, US-11.3, US-11.5 (+ US-11.6 P2)     | F03, F08      | Manual: ADMIN invites a new STAFF email; new staff signs in successfully; ADMIN disables them; subsequent sign-in returns `USER_DISABLED`; self-disable is blocked; ADMIN grants `appointment.cancel` to STAFF and observes the new permission on next request; ADMIN cannot revoke `permission.assign` from the ADMIN role. | L      | P1       |
@@ -573,82 +573,283 @@ Frontend (`apps/web/src/`):
 
 ---
 
-### F06 — Doctor schedule CRUD (P0, L)
+### F06 — Doctor schedule CRUD (P0, L) ✅ shipped
+
+**Status:** shipped on `feat/schedules`. The branch lands a single squash
+covering both the API + calendar UI plus the supporting infrastructure
+the original brief did not anticipate:
+
+- `feat(api): regenerate _init migration with dated doctor_schedules + raised pagination`
+- `feat(api): add F06 schedules module (flat /schedules CRUD, scope, validation)`
+- `feat(api): extend pagination contract with pageSize=all sentinel`
+- `feat(api): expand seed with 75 doctors + 2700 dated schedules`
+- `feat(api): add ?q= search to GET /doctors and drop /departments/:id/doctors`
+- `feat(api): rename DTOs to *.response / *.query / *.dto conventions; extract decorators/`
+- `feat(api): bootstrap dayjs at app start with utc/timezone plugins (rule 9)`
+- `feat(web): add F06 schedule calendar (month + week views, day-details dialog)`
+- `feat(web): add SearchableSelect + paged doctor picker server action`
+- `feat(web): add SnackbarProvider + use-notify hook (i18n-keyed)`
+- `feat(web): bootstrap dayjs at root layout + register Thai locale`
+- `feat(web): redesign department legend (12-color palette, position-indexed)`
+- `feat(web): move LocaleSwitcher into UserMenu`
+- `docs: add F06 API handoff + bump CLAUDE.md rule 8 / add rule 9`
 
 **Why a standalone feature**
 
-Schedules drive the slot finder. Implementing them in their own PR
-isolates overlap-validation logic and the recurrence model from the
-appointment domain.
+Schedules drive the slot finder (F07) and the booking flow (F08).
+Implementing them in their own PR isolates the dated-window overlap math,
+the DOCTOR own-doctor scope, and the calendar UI from the appointment
+domain — and gives a single review pass for the supporting infrastructure
+(dayjs bootstrap, `pageSize=all` pagination extension, snackbar, paged
+combobox) that every later feature now builds on.
 
-**Endpoints**
+**What actually shipped (delta from the original brief)**
 
-- `GET /doctors/:id/schedules` — list schedules for a doctor.
-- `POST /doctors/:id/schedules` — create a schedule (carries required
-  `departmentId`, optional `breakStartMinute` / `breakEndMinute`,
-  `acceptsBooking`).
-- `PATCH /schedules/:id` — partial update.
-- `DELETE /schedules/:id` — remove.
+- **Dated time windows (NOT weekly-recurring).** The brief modelled
+  schedules as `dayOfWeek + startMinute + endMinute + effectiveFrom +
+  effectiveUntil` — recurring weekday templates that a client expanded to
+  materialise a calendar date. Mid-feature this pivoted to **concrete
+  dated windows**: `startAt: DateTime + endAt: DateTime + breakStartAt? +
+  breakEndAt? + acceptsBooking`. The `_init` migration was regenerated
+  (destructive) to land the new column shape; the `_add_auth_log`
+  follow-on migration is unaffected. Rationale and trade-offs are
+  documented in the F06 API handoff (`docs/handoffs/F06-schedules-api.md`).
+- **Flat `/schedules` endpoints** (not nested under
+  `/doctors/:id/schedules`). The full surface is:
+  - `GET /schedules?page=&pageSize=&doctorId=&departmentId=&from=&to=`
+    — paginated list, sorted `startAt ASC`. Default range when neither
+    `from`/`to` provided is the current calendar month UTC.
+  - `GET /schedules/:id` — detail, 404 on miss or DOCTOR foreign id
+    (no existence leak).
+  - `POST /schedules` — create.
+  - `PATCH /schedules/:id` — partial update (every field optional, no
+    `doctorId`).
+  - `DELETE /schedules/:id` — soft-delete, 204.
 
-**Required permission:** `schedule.manage` (held by STAFF and DOCTOR).
-ADMIN does NOT hold it by default — grant via `permission.assign` if
-needed.
+  All are `@RequirePermission(PERMISSION.SCHEDULE_MANAGE)`. DOCTOR scope:
+  foreign GET → `404 SCHEDULE_NOT_FOUND` (no existence leak), foreign
+  mutate → `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- **Past-`startAt` service-layer guard.** Create and edit both reject
+  when the (post-merge) `startAt` is at or before `now` with
+  `400 SCHEDULE_START_IN_PAST`. The DB cannot express `now` in a CHECK
+  constraint, so this rule lives in `schedule.validation.ts`. The DB
+  CHECKs (`doctor_schedules_end_after_start`,
+  `doctor_schedules_break_valid`) back-stop the window/break invariants.
+- **Calendar UI with month + week view toggle.** Routes:
+  - `/(app)/schedules` — STAFF / ADMIN view (every doctor, optional
+    department filter).
+  - `/(app)/me/schedule` — DOCTOR own-doctor view (BE auto-scopes; no
+    department filter).
 
-**Service-layer scope (CRITICAL):** when `caller.role === DOCTOR`, every
-mutation and read MUST satisfy `schedule.doctorId === caller.doctor.id`;
-otherwise the service returns `403 INSUFFICIENT_PERMISSION_SCOPE`. STAFF
-gets the unrestricted form of the same permission.
+  URL state: `?view=month|week`, `?month=YYYY-MM`, `?weekStart=YYYY-MM-DD`,
+  `?departmentId=<uuid>`. Prev / Today / Next header navigation is
+  view-aware (±1 month or ±7 days).
+- **Day-details dialog.** Clicking a date cell in month view, or an empty
+  area in a week-view column, opens a dialog listing every schedule on
+  that day with a Create button. Past dates disable Create. Replaced the
+  earlier "click cell → straight to create" / "+N more → jump to week"
+  pattern with a single inspectable surface.
+- **Lane assignment in week view.** Overlapping schedules render
+  side-by-side (Google Calendar style) via greedy interval-graph coloring
+  in `apps/web/src/schedule/lanes.ts`.
+- **Sticky calendar headers.** The weekday / day-of-week row stays pinned
+  while the calendar body scrolls inside its own container (constrained
+  to `maxHeight: calc(100dvh - 240px)`).
+- **Past schedules locked client-side.** When `endAt <= now`, the edit
+  dialog opens in read-only form with a banner.
+- **Edit-mode field locks.** When editing an existing schedule, doctor,
+  department, and date are non-editable. Only times + break +
+  `acceptsBooking` are mutable. The doctor lock prevents accidentally
+  reassigning a schedule across doctors (matches the BE which excludes
+  `doctorId` from `UpdateScheduleDto`).
+- **Reusable `SearchableSelect`** in `components/shared/`. Generic over
+  `<T>`, used by the doctor picker. Supports server-paged infinite
+  scroll via `loadMore` / `hasMore` props. The doctor picker uses it
+  with a 20-row initial page + a `loadDoctorsPageAction` server action
+  paged the rest in on scroll.
+- **Global snackbar.** A `notistack`-backed `SnackbarProvider` wraps the
+  `(app)` layout. Server-action results are mapped through
+  `ERROR_CODE_TO_KEY` and `SNACKBAR_SUCCESS_KEY` catalogs to i18n-keyed
+  messages so the user never sees a raw BE error string.
+- **Dayjs adopted for ALL date math** (CLAUDE.md rule 9, also added
+  this PR). `apps/api/src/dayjs.ts` and `apps/web/src/lib/dayjs.ts`
+  register plugins at app start: `utc`, `timezone`, `localizedFormat`,
+  `isSameOrBefore`, `isSameOrAfter`, `customParseFormat`. The Thai
+  locale is loaded on the FE side. Past-`startAt` validation and FE
+  read-only predicate both delegate to dayjs.
+- **Pagination `pageSize=all` sentinel.** Extended the global pagination
+  contract (CLAUDE.md §8) to support `?pageSize=all` for the calendar's
+  date-window fetch — the only safe way to bypass `MAX_PAGE_SIZE`
+  because the `from`/`to` filter already caps the row count.
+  `MAX_PAGE_SIZE` was raised globally from 100 → 500 to give other
+  large-but-bounded views (e.g. department lists) headroom.
+  Auto-applies to every list endpoint consuming `PaginationQueryDto`.
+- **`GET /doctors?q=` search.** Case-insensitive substring across
+  `firstNameEn/Th`, `lastNameEn/Th`, and `doctorCode`. Combines with
+  `?departmentId=` via AND. Unblocks the searchable doctor picker.
+- **`GET /departments/:id/doctors` removed.** Consolidated to
+  `GET /doctors?departmentId=` (already returns the doctor's full
+  affiliations including `isPrimary`, so no information is lost).
+- **DTO naming + decorator folders.** Class-validator decorator factories
+  moved to `<module>/decorators/` (e.g. `decorators/schedule-window.decorator.ts`,
+  `common/pagination/decorators/page-size.decorator.ts`). DTO files now
+  use the explicit `<entity>.response.dto.ts` / `<verb>-<entity>.dto.ts`
+  / `list-<entities>.query.dto.ts` convention. Request bodies use a verb
+  prefix without the `Request` suffix (CLAUDE.md §6b convention).
+- **Seed expanded.** 75 doctors (15 hand-crafted + 60 generated) across
+  all 10 departments, with 1 / 2 / 3 affiliations (42 / 20 / 13 split).
+  2700 dated schedules across the past 8 + next 4 weeks (12-week window)
+  driven by 5 weekday-pattern templates. Doctors with multiple
+  affiliations rotate the week's schedule through every department so
+  the booking flow has multi-department coverage even for 3-dept
+  doctors. Volume is large enough to stress pagination + filtering.
+- **Locale switcher moved into the user menu.** The previous
+  `LocaleSwitcher` page-header component was removed; the locale toggle
+  now lives in the user-menu dropdown so the header reserves space for
+  view controls.
+- **Department legend redesigned.** 12-color palette,
+  position-indexed (no hash collisions across the seeded 10
+  departments), uniform swatch + label rows.
 
-**Validation:**
+**Files shipped**
 
-- `departmentId` must appear in the doctor's `doctor_departments`
-  affiliations; otherwise reject with `DOCTOR_NOT_IN_DEPARTMENT`.
-- Window math: `0 <= startMinute < endMinute <= 1440`; break window (if
-  set) lies inside `(startMinute, endMinute)` with
-  `breakStart < breakEnd`. These DTO checks mirror the DB CHECKs
-  (`doctor_schedules_window_valid`, `doctor_schedules_break_valid`),
-  which back-stop bypassed validation.
+Backend (`apps/api/`):
+- `src/schedules/` — module, controller, service (+ spec), Swagger
+  composites, types, const, `dto/` (`create-schedule.dto.ts`,
+  `update-schedule.dto.ts`, `list-schedules.query.dto.ts`,
+  `schedule.response.dto.ts`), `decorators/schedule-window.decorator.ts`,
+  `schedule.scope.ts` (DOCTOR own-doctor enforcement), and
+  `schedule.validation.ts` (affiliation + overlap + past-startAt).
+- `src/common/pagination/` — extended with the `PAGE_SIZE_ALL` sentinel,
+  `decorators/page-size.decorator.ts`, and tests for the new validator
+  + helper.
+- `src/dayjs.ts` — dayjs plugin bootstrap, imported once from
+  `main.ts`.
+- `src/doctors/` — added `?q=` substring search to the list endpoint;
+  removed `GET /departments/:id/doctors`; DTOs split into
+  `doctor.response.dto.ts` + `list-doctors.query.dto.ts`.
+- `src/departments/` — DTO renamed to `department.response.dto.ts`.
+- `src/auth/dto/` — three response DTOs extracted
+  (`me.response.dto.ts`, `permission-check.response.dto.ts`,
+  `resolve.response.dto.ts`).
+- `prisma/schema.prisma` — `DoctorSchedule` rewritten to dated
+  windows; two new CHECK constraints
+  (`doctor_schedules_end_after_start`, `doctor_schedules_break_valid`).
+- `prisma/migrations/<timestamp>_init/migration.sql` — regenerated for
+  the new schema shape (destructive — see below).
+- `prisma/seed/doctors.ts` + `prisma/seed/doctor-schedules.ts` —
+  75 doctors + 2700 dated schedules.
+- `test/schedules.e2e-spec.ts` — coverage for CRUD happy paths,
+  cross-field validation, affiliation + overlap, past-startAt,
+  permission gate, DOCTOR scope behaviour.
 
-**Files expected to change**
+Frontend (`apps/web/`):
+- `src/components/schedule/` — 11 components: `ScheduleCalendar`,
+  `ScheduleMonthView`, `ScheduleWeekView`, `ScheduleBlock`,
+  `ScheduleChip`, `ScheduleDayDetailsDialog`, `ScheduleDayMobileList`,
+  `ScheduleFilter`, `ScheduleFormDialog`, `ScheduleHeaderNav`,
+  `ScheduleViewToggle`.
+- `src/components/shared/` — `SearchableSelect.tsx`,
+  `SnackbarProvider.tsx`.
+- `src/schedule/` — pure helpers: `lanes.ts` (lane assignment),
+  `month.ts` (month grid + param helpers), `week.ts` (week grid + param
+  helpers), `time.ts` (calendar constants + read-only predicate).
+- `src/lib/notifications/` — `messages.const.ts`
+  (`SNACKBAR_SUCCESS_KEY`, `ERROR_CODE_TO_KEY`,
+  `SNACKBAR_GENERIC_ERROR_KEY`), `use-notify.ts`.
+- `src/lib/dayjs.ts` — dayjs plugin + locale bootstrap, imported once
+  from the root layout.
+- `src/lib/utils/date.ts` — formatting + comparison helpers
+  consuming the bootstrapped dayjs.
+- `src/lib/api/schedule.api.ts` + `.const.ts` + `.actions.ts` — typed
+  client + server actions for the schedule modal flows.
+- `src/lib/api/doctor.actions.ts` — server action backing
+  `SearchableSelect`'s `loadMore` for the doctor picker.
+- `src/app/[locale]/(app)/schedules/page.tsx` — STAFF / ADMIN view.
+- `src/app/[locale]/(app)/me/schedule/page.tsx` — DOCTOR own-doctor
+  view.
+- `src/types/schedule.types.ts` — `ScheduleResponse` + `LaneAssignment`
+  + view discriminators.
 
-- `apps/api/src/schedules/` — module, controller, service, DTOs
-  (`create-schedule.dto.ts`, `update-schedule.dto.ts`), `swagger/`.
-  All endpoints declare `@RequirePermission('schedule.manage')`.
-- `apps/api/src/schedules/schedule.validation.ts` — overlap detection
-  + department-affiliation check, covered by unit tests.
-- `apps/api/src/schedules/schedule.scope.ts` — helper that enforces
-  the DOCTOR own-doctor scope rule for every mutation/read.
-- `apps/web/src/app/[locale]/(app)/doctors/[id]/schedule/page.tsx` —
-  list grouped by weekday (and per-department within a day).
-- `apps/web/src/app/[locale]/(app)/me/schedule/page.tsx` — the
-  DOCTOR own-schedule view (uses the same component, but the route
-  resolves `:id` from `session.doctor.id`).
-- `apps/web/src/app/[locale]/(app)/doctors/[id]/schedule/_components/`
-  — add/edit dialog (with department selector populated from the
-  doctor's affiliations), delete confirm dialog.
-- `apps/web/src/lib/api/schedules.ts` — typed client.
+i18n + docs:
+- `messages/en.json` + `messages/th.json` — new `Schedules.*` (incl.
+  errors), `Snackbar.*`, plus auxiliary keys for the new UI; regenerated
+  `i18n/keys.generated.ts`.
+- `docs/handoffs/F06-schedules-api.md` — full wire contract for the
+  FE / consumer.
 
 **Migration / breaking-change notes**
 
-- None — uses existing `doctor_schedules` model (which already carries
-  `departmentId` and break columns from F01).
+- **The `_init` migration was regenerated** (destructive) to switch
+  `doctor_schedules` from minute-based recurring (`day_of_week`,
+  `start_minute`, `end_minute`, `break_start_minute`, `break_end_minute`,
+  `effective_from`, `effective_until`) to dated
+  (`start_at`, `end_at`, `break_start_at`, `break_end_at`) timestamps.
+  The DB CHECK pair changed from
+  (`doctor_schedules_window_valid`, `doctor_schedules_break_valid`)
+  (minute-based) to (`doctor_schedules_end_after_start`,
+  `doctor_schedules_break_valid`) (datetime-based). The
+  `_add_auth_log` follow-on migration is unaffected.
+- Reviewers on a pre-F06 schema MUST drop the local DB and re-run
+  `pnpm --filter @hospital/api prisma migrate dev` followed by
+  `pnpm --filter @hospital/api db:seed`. Call this out in the PR
+  description.
+- `MAX_PAGE_SIZE` raised globally from `100` → `500` with a new
+  `PAGE_SIZE_ALL = 'all'` sentinel. Existing consumers that pass a
+  numeric `pageSize` keep working unchanged; the bound only matters at
+  the validator.
+- `GET /departments/:id/doctors` is removed. Any consumer must move to
+  `GET /doctors?departmentId=<uuid>` (FE moved in this PR).
 
 **Manual smoke test**
 
-1. As a STAFF user, open a doctor's schedule page.
-2. Add a Monday 09:00–12:00 schedule on a department the doctor is
-   affiliated with → appears in list.
-3. Try to add an overlapping Monday 11:00–13:00 → `409 SCHEDULE_OVERLAP`.
-4. Try `departmentId` outside the doctor's affiliations →
+1. As a STAFF user, open `/schedules`. The calendar lands on the current
+   calendar month, ordered chronologically.
+2. Toggle to week view via the header — URL becomes
+   `?view=week&weekStart=YYYY-MM-DD`. Prev / Today / Next now move by 7
+   days.
+3. Click an empty day cell in month view → the day-details dialog opens
+   listing nothing on that day. Click "Create schedule" → schedule form
+   dialog pre-fills the clicked date. Submit a 09:00–12:00 window on a
+   department the doctor is affiliated with → snackbar confirms create,
+   chip appears in the cell.
+4. Try to create an overlapping 11:00–13:00 on the same doctor →
+   `409 SCHEDULE_OVERLAP`, snackbar shows the localized error.
+5. Try `departmentId` outside the doctor's affiliations →
    `409 DOCTOR_NOT_IN_DEPARTMENT`.
-5. Edit start time to 08:30 → succeeds.
-6. Delete the schedule → row gone; the UI warns first if future
-   appointments exist (book one through F08 to exercise this).
-7. As a DOCTOR user, open `/me/schedule` → see only own schedules.
-   Try to `GET /doctors/<other>/schedules` →
-   `403 INSUFFICIENT_PERMISSION_SCOPE`.
-8. As an ADMIN (who lacks `schedule.manage`), the same `POST` returns
-   `403 INSUFFICIENT_PERMISSION`.
+6. Try `startAt` in the past → `400 SCHEDULE_START_IN_PAST`.
+7. Click an existing chip → edit modal opens. Doctor / department / date
+   fields are disabled; times + break + `acceptsBooking` are editable.
+   Save → snackbar confirms update.
+8. Open a past schedule chip → modal opens in read-only mode with a
+   banner. Save button is hidden.
+9. Filter by department via the page-header `ScheduleFilter` →
+   `?departmentId=` added to URL, only the filtered chips remain. Switching
+   department resets the view (no stale chips).
+10. Sign in as a DOCTOR user → land on `/me/schedule`. Sidebar exposes
+    only the own-schedule entry. The doctor field on the create modal is
+    locked to the caller's id. Foreign GETs return `404`; foreign
+    mutates return `403 INSUFFICIENT_PERMISSION_SCOPE`.
+11. Sign in as an ADMIN — `POST /schedules` returns
+    `403 INSUFFICIENT_PERMISSION` because ADMIN lacks `schedule.manage`
+    in the seeded baseline.
+
+**Known limitations**
+
+- **DOCTOR with zero schedules cannot create their first via the UI.**
+  `/(app)/me/schedule` derives the editor's `lockedDoctorId` from the
+  first row of the current listing — when the listing is empty there is
+  no doctor id to lock to, so the Create button is hidden (`canManage =
+  Boolean(lockedDoctorId)`). A STAFF user must seed the first row for
+  any newly-invited doctor, after which the doctor can manage their own
+  schedules normally. Cleaner fixes: expose the caller's `doctor.id`
+  through `/me` for the FE to read, or look up the linked doctor row
+  unconditionally during the page render. Deferred — the seed already
+  ships 75 doctors with full schedules, so this only affects fresh
+  admin invites in a non-seeded DB.
+- Existing future appointments inside a deleted or shrunk schedule
+  remain `BOOKED`. F08 surfaces the count in the UI; F06 does not
+  cascade-cancel.
 
 ---
 
@@ -724,9 +925,10 @@ book or manage patients must first grant the relevant permission(s) via
   3. Verify `(departmentId, appointmentType)` exists in
      `department_appointment_types`; else `400 DEPARTMENT_TYPE_NOT_ALLOWED`.
   4. Re-validate the slot against active schedules
-     (`(doctor_id, department_id, dayOfWeek)`-filtered) and existing
-     non-cancelled appointments; on conflict return
-     `409 SLOT_TAKEN`.
+     (`(doctor_id, department_id)`-filtered by `[startAt, endAt)`
+     intersection — F06 schedules are dated windows, not recurring
+     weekday templates) and existing non-cancelled appointments; on
+     conflict return `409 SLOT_TAKEN`.
   5. Persist with `status=BOOKED`, `endAt = startAt + duration`. The
      DB CHECK `appointments_end_after_start` back-stops the math.
 - `apps/api/src/patients/` — `POST /patients` (walk-in,

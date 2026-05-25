@@ -118,6 +118,9 @@ File-naming convention:
 - `*.types.ts` — TypeScript `type` / `interface` declarations.
 - `*.const.ts` — primitive / object constants (header names, cookie keys, regex patterns, default values, …).
 - `<concept>.ts` — domain catalogs that are richer than a single constant (e.g. `permissions.ts`, `roles.ts`, `appointment-types.ts`). One file per concept.
+- `*.decorator.ts` — class-validator decorator factories (e.g. `@IsScheduleWindowValid()`).
+- `*.validation.ts` / `<concept>.validation.ts` — service-layer domain helpers (e.g. `assertNoOverlap`).
+- `<module>/decorators/` — all class-validator decorator factories AND all NestJS route/parameter decorators owned by the module live in this folder. One file per decorator. Cross-cutting decorators (used by multiple modules) live under `apps/api/src/common/<concept>/decorators/` (e.g. `apps/api/src/common/pagination/decorators/page-size.decorator.ts`).
 
 What this rule applies to:
 - Exported AND non-exported interfaces, types, enums.
@@ -328,6 +331,36 @@ Both throw the typed `ApiError` (with `status`, `code`, `details`, `body`) from 
 - Promote to a `<module>/swagger/` subfolder (one file per decorator, kebab-case file `<verb-resource>.decorator.ts` + PascalCase export `ApiVerbResource`) **only** when a module grows past ~3-4 endpoint decorators. Default to flat.
 - Do NOT create a cross-cutting `apps/api/src/swagger/` directory — Swagger decorators belong to the feature module that owns them.
 
+#### 6b. DTO naming — suffix encodes role on the wire
+
+Every DTO class AND file under `apps/api/src/<module>/dto/` MUST encode its role (request body / query params / response) in BOTH the export name and the filename so the wire boundary is obvious without opening the file.
+
+**Export-name convention:**
+
+| Category | Export suffix | Examples |
+| --- | --- | --- |
+| Request body | `Create<X>Dto`, `Update<X>Dto` (or `<Verb><X>Dto` for non-CRUD operations) | `CreateScheduleDto`, `UpdateScheduleDto`, `ResolveDto` |
+| Query params | `<List\|Search><X>QueryDto` | `ListSchedulesQueryDto`, `ListDoctorsQueryDto` |
+| Response (single item) | `<X>ResponseDto` | `DoctorResponseDto`, `DoctorDetailResponseDto`, `DepartmentResponseDto`, `ScheduleResponseDto`, `MeResponseDto`, `ResolveResponseDto`, `PermissionCheckResponseDto` |
+| Response (paginated list) | The generic `PaginatedDto(<X>ResponseDto)` factory — no rename needed. | `PaginatedDto(DoctorResponseDto)` |
+
+Inner reference types embedded in a response (e.g. `DoctorDepartmentAffiliationDto`, `ScheduleDoctorRefDto`, `MeDoctorRefDto`) keep their plain `Dto` suffix — they are NOT top-level endpoint responses and live next to the response DTO that uses them.
+
+**File-name convention** — adopt the explicit form so a `grep` of the filename tells you the role:
+
+| Filename | Holds |
+| --- | --- |
+| `<verb>-<entity>.dto.ts` | A request body DTO. `create-schedule.dto.ts` → `CreateScheduleDto`; `update-schedule.dto.ts` → `UpdateScheduleDto`. |
+| `<verb>-<entities>.query.dto.ts` | A query DTO. `list-schedules.query.dto.ts` → `ListSchedulesQueryDto`; `list-doctors.query.dto.ts` → `ListDoctorsQueryDto`. |
+| `<entity>.response.dto.ts` | One or more response DTOs for an entity + their inner reference types. `doctor.response.dto.ts` → `DoctorResponseDto` + `DoctorDetailResponseDto` + `DoctorDepartmentAffiliationDto`. |
+| `<verb>.dto.ts` | A request body for a non-CRUD operation that needs a dedicated file (typically because the file is split from a matching response). `resolve.dto.ts` → `ResolveDto`. |
+
+Do NOT mix a request body and a response in the same file — split into `<verb>.dto.ts` + `<entity>.response.dto.ts` (or `<verb>.response.dto.ts` if the response is operation-shaped) so each file has one job. The auth module's `resolve.dto.ts` + `resolve.response.dto.ts` pair is the canonical split.
+
+The `AuthenticatedUser` interface in `users.types.ts` is NOT a wire DTO — it is the per-request structural type populated by `JwtGuard`. It stays in `*.types.ts` and is mirrored (structurally) by `MeResponseDto` for OpenAPI; do NOT rename it.
+
+**Why no `Request` suffix on bodies?** Two conventions are defensible. The "consistent suffix" school tags every DTO with its role (`CreateScheduleRequestDto`, `ScheduleResponseDto`, `ListSchedulesQueryDto`) — symmetric and greppable, but redundant: `Create` already MEANS request, and you can't have a `Create...ResponseDto` (the response to a create is named after what comes back, e.g. `ScheduleResponseDto`, not after the action). We pick the "verb prefix carries direction" school: request bodies use a verb prefix and no role suffix (`CreateScheduleDto`, `ResolveDto`); query DTOs and response DTOs keep their role suffix because they have no verb to do that work (`List` alone is too thin; an entity name alone wouldn't tell you "this is what came back"). The asymmetry tells a true story about the data — a request shape is owned by an action, a response shape is owned by an entity — and matches the de-facto NestJS community convention (`CreateUserDto` / `UpdateUserDto`). Non-CRUD bodies (`ResolveDto`, `RefreshTokenDto`) stay verb-y bare names; their matching response gets the suffix (`ResolveResponseDto`), so the pair never collides.
+
 ### 6a. RBAC catalog — never hardcode permission or role codes
 
 Permission and role codes have a single source of truth in `apps/api/src/auth/`. Application code (guards, decorators, services, DTOs, tests) AND the Prisma seeders MUST import from it — never inline the string literal.
@@ -380,24 +413,27 @@ Never re-declare permission/role codes in `prisma/seed/*.ts` — those files alr
 
 Every BE list endpoint that can grow past a handful of rows (`GET /departments`, `GET /doctors`, `GET /patients`, `GET /appointments`, …) MUST be paginated with the same contract. Detail endpoints (`GET /doctors/:id`) are exempt.
 
-**Wire contract** — request: `?page=N&pageSize=M` (1-indexed `page` ≥ 1, `pageSize` ≥ 1 ≤ 100, both optional). Response:
+**Wire contract** — request: `?page=N&pageSize=M` (1-indexed `page` ≥ 1, `pageSize` either an integer in `[1, MAX_PAGE_SIZE]` (= 500) OR the literal sentinel string `all` — both query params optional). Response:
 
 ```ts
 interface Paginated<T> {
   data: T[];
   total: number;        // post-filter row count
-  page: number;         // echoed request value (or default)
-  pageSize: number;     // echoed request value (or default)
-  totalPages: number;   // Math.max(1, Math.ceil(total / pageSize))
+  page: number;         // echoed request value (or default; forced to 1 when pageSize=all)
+  pageSize: number;     // echoed request value, or `total` when pageSize=all
+  totalPages: number;   // Math.max(1, Math.ceil(total / pageSize)); 1 when pageSize=all
 }
 ```
 
-Defaults / limits: `DEFAULT_PAGE = 1`, `DEFAULT_PAGE_SIZE = 20`, `MAX_PAGE_SIZE = 100`. Mirrored verbatim between BE and FE so a rename surfaces on both sides.
+`pageSize=all` is the "fetch everything matching the filter" sentinel. It is reserved for views that genuinely need the full filtered set in one round-trip — currently the F06 schedule calendar's `from` / `to` date-window fetch. The sentinel disables paging entirely (`take: undefined` on the Prisma query) and is the ONLY way to bypass `MAX_PAGE_SIZE`. Other endpoints continue to default to `DEFAULT_PAGE_SIZE = 20`.
+
+Defaults / limits: `DEFAULT_PAGE = 1`, `DEFAULT_PAGE_SIZE = 20`, `MAX_PAGE_SIZE = 500` (numeric ceiling), `PAGE_SIZE_ALL = 'all'` (unbounded sentinel). Mirrored verbatim between BE and FE so a rename surfaces on both sides.
 
 **Backend** — shared infra at `apps/api/src/common/pagination/`:
-- `PaginationQueryDto` — class-validator `@IsInt @Min(1) @Max(100)` with `@Type(() => Number)` for query coercion. Compose it via `extends` for endpoints that add filter params (e.g. `class ListDoctorsQueryDto extends PaginationQueryDto { departmentId?: string }`).
+- `PaginationQueryDto` — class-validator `page` is `@IsInt @Min(1)` with `@Type(() => Number)`; `pageSize` is a union (`number | PageSizeAll`) validated by the custom `@IsPageSize()` decorator at `page-size.validator.ts` (accepts integers in `[1, MAX_PAGE_SIZE]` or the exact lowercase string `'all'`). Compose via `extends` for endpoints that add filter params (e.g. `class ListDoctorsQueryDto extends PaginationQueryDto { departmentId?: string }`).
+- `PaginationParams` (in `pagination.types.ts`) — service-layer mirror of `PaginationQueryDto`. Every `List*Args` interface in a feature module (`ListDoctorsArgs`, `ListSchedulesArgs`, `ListDepartmentsArgs`, …) MUST `extends PaginationParams` instead of re-declaring `page` / `pageSize`. Single source of truth so a rename surfaces in one place.
 - `PaginatedDto(ItemDto)` — Swagger factory; returns a typed `Paginated<ItemDto>` class so each endpoint's OpenAPI schema shows the right item shape. Register with `@ApiExtraModels(ItemDto, PaginatedItemDto)`.
-- `resolvePagination(query)` + `buildPaginatedResponse(data, total, page, pageSize)` — service helpers. Run `Promise.all([prisma.X.findMany({ skip, take, ... }), prisma.X.count({ where })])` so the row fetch + count happen in one round-trip.
+- `resolvePagination(query)` + `buildPaginatedResponse(data, total, page, pageSize)` — service helpers. Run `Promise.all([prisma.X.findMany({ skip, take, ... }), prisma.X.count({ where })])` so the row fetch + count happen in one round-trip. When `pageSize === PAGE_SIZE_ALL` the helper returns `take: undefined` (Prisma "no LIMIT") and `buildPaginatedResponse` echoes `pageSize = total`, `page = 1`, `totalPages = 1`.
 
 **Frontend** — shared infra at `apps/web/src/lib/api/`:
 - `pagination.ts` — `buildPaginationQuery(params, extraParams?)` produces the `?page=…&pageSize=…&filter=…` suffix. Pass per-endpoint filter params via the `extraParams` slot (skips `undefined` / `""`).
@@ -405,3 +441,28 @@ Defaults / limits: `DEFAULT_PAGE = 1`, `DEFAULT_PAGE_SIZE = 20`, `MAX_PAGE_SIZE 
 - API client returns `Promise<Paginated<T>>`.
 - Pages read `page` from `searchParams`, parse with `parsePositiveInt(value) ?? DEFAULT_PAGE`, and render `<PaginationControl>` (`components/shared/PaginationControl.tsx`) which preserves any other query params (e.g. `departmentId`) on navigation and hides itself when `totalPages <= 1`.
 - Filter changes (e.g. switching department in `DoctorListFilter`) MUST reset `page=1` so the user doesn't land on an empty page that no longer exists in the new result set.
+
+### 9. Dayjs for ALL date / time arithmetic
+
+Both `apps/api` and `apps/web` MUST use `dayjs` for any date/time math — now-comparison, add/subtract, formatting, parsing, range checks, timezone handling. Hand-rolled `Date` arithmetic is forbidden.
+
+**Banned (refactor on sight):**
+- `new Date(d.getTime() + 86_400_000)` and friends — use `dayjs(d).add(1, 'day').toDate()`.
+- `Date.UTC(...)`, `d.getUTCDate()`, `d.setUTCHours(...)` — use `dayjs.utc(...)`.
+- `Intl.DateTimeFormat(...).format(d)` for user-visible dates — use `dayjs(d).locale(locale).format('LL')` (or appropriate `localizedFormat` token).
+- Lexicographic ISO comparison (`a.startAt.localeCompare(b.startAt) < 0`) — use `dayjs(a.startAt).isBefore(b.startAt)`.
+- Manual `(end - start) / 60_000` minute math — use `dayjs(end).diff(start, 'minute')`.
+
+**Allowed:**
+- `new Date()` to capture "now" at a boundary — then immediately wrap: `const now = dayjs();`.
+- Prisma returning `Date` — wrap with `dayjs(prismaRow.startAt)` before any arithmetic.
+- ISO datetime strings on the wire — parse with `dayjs(iso)` (no plugin needed for ISO-8601).
+- Test fixtures where the literal datetime IS the test data.
+
+**Versions + setup (exact-pin per rule 7):**
+- `dayjs@1.11.13` (both apps).
+- Plugins enabled at app start (BE: `apps/api/src/dayjs.ts` loaded from `main.ts`; FE: `apps/web/src/lib/dayjs.ts` imported once from the root layout): `utc`, `timezone`, `localizedFormat`, `isSameOrBefore`, `isSameOrAfter`, `customParseFormat`.
+- FE additionally imports `dayjs/locale/th` and `dayjs/locale/en` so locale-switching matches next-intl.
+- BE math always runs in UTC (`dayjs.utc()`). FE renders in the user's locale via `dayjs(iso).locale(locale)`.
+
+This rule is the source of truth for past-schedule validation on the BE (`schedule.startAt > dayjs.utc()` on create AND on the merged row when editing) and the read-only predicate on the FE.
