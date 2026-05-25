@@ -38,6 +38,9 @@ export const ErrorCode = {
 
   // Slots (F07)
   DEPARTMENT_TYPE_NOT_ALLOWED: 'DEPARTMENT_TYPE_NOT_ALLOWED',
+
+  // Medical records (F08)
+  MEDICAL_RECORD_ALREADY_EXISTS: 'MEDICAL_RECORD_ALREADY_EXISTS',
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];

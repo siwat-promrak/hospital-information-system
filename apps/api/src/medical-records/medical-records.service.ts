@@ -186,20 +186,53 @@ export class MedicalRecordsService {
       );
     }
 
-    const row = await this.prisma.medicalRecord.create({
-      data: {
-        doctorId: caller.doctor.id,
-        patientId: dto.patientId,
-        departmentId: appointment.departmentId,
-        appointmentId: appointment.id,
-        note: dto.note,
-        drug: dto.drug ?? null,
-        createdBy: caller.id,
-      },
-      include: medicalRecordInclude,
+    // Pre-check the per-appointment uniqueness invariant so the error
+    // shape matches the schedule-overlap convention (the DB UNIQUE
+    // constraint backs it up if a race slips through — see catch below).
+    const existing = await this.prisma.medicalRecord.findUnique({
+      where: { appointmentId: appointment.id },
+      select: { id: true },
     });
 
-    return this.toResponse(row);
+    if (existing) {
+      throw AppException.conflict(
+        ErrorCode.MEDICAL_RECORD_ALREADY_EXISTS,
+        'A medical record already exists for this appointment.',
+        { appointmentId: appointment.id, existingMedicalRecordId: existing.id },
+      );
+    }
+
+    try {
+      const row = await this.prisma.medicalRecord.create({
+        data: {
+          doctorId: caller.doctor.id,
+          patientId: dto.patientId,
+          departmentId: appointment.departmentId,
+          appointmentId: appointment.id,
+          note: dto.note,
+          drug: dto.drug ?? null,
+          createdBy: caller.id,
+        },
+        include: medicalRecordInclude,
+      });
+
+      return this.toResponse(row);
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        Array.isArray(err.meta?.target) &&
+        (err.meta?.target as string[]).includes('appointment_id')
+      ) {
+        throw AppException.conflict(
+          ErrorCode.MEDICAL_RECORD_ALREADY_EXISTS,
+          'A medical record already exists for this appointment.',
+          { appointmentId: appointment.id },
+        );
+      }
+
+      throw err;
+    }
   }
 
   /**
