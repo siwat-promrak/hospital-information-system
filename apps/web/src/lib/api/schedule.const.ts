@@ -56,6 +56,13 @@ export const SCHEDULE_QUERY_PARAM = {
    * (`YYYY-MM-DD`). Only used when `view === "week"`.
    */
   WEEK_START: "weekStart",
+  /**
+   * FE-only URL state — DOCTOR-only scope toggle on the unified
+   * `/schedules` page. Values: `"mine"` (filter to caller's own doctor row)
+   * or `"dept"` (show every schedule in caller's department). Other view
+   * modes ignore this param. Defaults to `"mine"` on first visit.
+   */
+  SCOPE: "scope",
 } as const;
 
 export type ScheduleQueryParam =
@@ -71,6 +78,18 @@ export const SCHEDULE_VIEW = {
 } as const;
 
 export type ScheduleView = (typeof SCHEDULE_VIEW)[keyof typeof SCHEDULE_VIEW];
+
+/**
+ * Values for the DOCTOR-only scope toggle (`?scope=`). Picked verbatim from
+ * the URL so the page server-component can dispatch without parsing.
+ */
+export const SCHEDULE_SCOPE = {
+  MINE: "mine",
+  DEPT: "dept",
+} as const;
+
+export type ScheduleScope =
+  (typeof SCHEDULE_SCOPE)[keyof typeof SCHEDULE_SCOPE];
 
 export const SCHEDULE_ERROR_CODE = {
   OVERLAP: "SCHEDULE_OVERLAP",

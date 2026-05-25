@@ -1,10 +1,14 @@
 /**
  * Module augmentation for NextAuth v5 so `session.user.userId` /
- * `session.user.roleCode` / `session.user.permissionCodes` are typed
- * everywhere (server components, client components, JWT callback).
+ * `session.user.roleCode` / `session.user.permissionCodes` /
+ * `session.user.departmentId` are typed everywhere (server components,
+ * client components, JWT callback).
  *
  * These fields are populated by the `signIn` callback in `src/auth.ts`
  * from the `POST /auth/resolve` response and persisted on the JWT.
+ *
+ * `departmentId` is `null` for org-wide roles (ADMIN, MEDICAL_RECORDS_OFFICER,
+ * PHARMACY) and a valid uuid for department-scoped roles (DOCTOR, NURSE).
  */
 import type { DefaultSession, DefaultUser } from "next-auth";
 import type { DefaultJWT } from "next-auth/jwt";
@@ -16,6 +20,7 @@ declare module "next-auth" {
     userId?: string;
     roleCode?: RoleCode | string;
     permissionCodes?: string[];
+    departmentId?: string | null;
   }
 
   interface Session {
@@ -23,6 +28,7 @@ declare module "next-auth" {
       userId: string;
       roleCode: RoleCode | string;
       permissionCodes: string[];
+      departmentId: string | null;
     } & DefaultSession["user"];
   }
 }
@@ -32,5 +38,6 @@ declare module "next-auth/jwt" {
     userId?: string;
     roleCode?: RoleCode | string;
     permissionCodes?: string[];
+    departmentId?: string | null;
   }
 }

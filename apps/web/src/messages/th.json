@@ -24,12 +24,23 @@
   "SignOut": {
     "label": "ออกจากระบบ"
   },
+  "Common": {
+    "Role": {
+      "admin": "ผู้ดูแลระบบ",
+      "doctor": "แพทย์",
+      "nurse": "พยาบาล",
+      "medicalRecordsOfficer": "เจ้าหน้าที่เวชระเบียน",
+      "pharmacy": "เภสัชกร"
+    }
+  },
   "Dashboard": {
     "welcome": "ยินดีต้อนรับ, {name}",
     "roleLabel": "บทบาท",
     "permissionsLabel": "สิทธิ์",
     "comingSoonAdmin": "แดชบอร์ดผู้ดูแลระบบ — การจัดการผู้ใช้, บทบาท, และนโยบายจะมาใน F11",
-    "comingSoonStaff": "แดชบอร์ดเจ้าหน้าที่ — การลงทะเบียนคนไข้, การจอง, และนัดหมายจะมาใน F08",
+    "comingSoonNurse": "แดชบอร์ดพยาบาล — การจองนัดหมายเฉพาะแผนกและการค้นหาคนไข้จะมาใน F08",
+    "comingSoonMedicalRecordsOfficer": "แดชบอร์ดเจ้าหน้าที่เวชระเบียน — การดูนัดหมายและคนไข้ทั่วทั้งองค์กรจะมาใน F08",
+    "comingSoonPharmacy": "แดชบอร์ดเภสัชกร — การค้นหานัดหมายและคนไข้สำหรับการจ่ายยาจะมาใน F08 ขึ้นไป",
     "comingSoonDoctor": "แดชบอร์ดแพทย์ — ตัวจัดการตารางของตนเองจะมาใน F06",
     "noPermissions": "ยังไม่ได้รับสิทธิ์ใด ๆ"
   },
@@ -45,18 +56,19 @@
       "departments": "แผนก",
       "doctors": "แพทย์",
       "schedules": "ตารางเวร",
-      "mySchedule": "ตารางของฉัน"
+      "medicalRecords": "เวชระเบียน"
     }
   },
   "Breadcrumb": {
     "home": "หน้าแรก",
     "admin": "ผู้ดูแลระบบ",
-    "staff": "เจ้าหน้าที่",
-    "me": "ฉัน",
-    "schedule": "ตาราง",
+    "nurse": "พยาบาล",
+    "medicalRecordsOfficer": "เวชระเบียน",
+    "pharmacy": "เภสัชกรรม",
     "schedules": "ตารางเวร",
     "departments": "แผนก",
-    "doctors": "แพทย์"
+    "doctors": "แพทย์",
+    "medicalRecords": "เวชระเบียน"
   },
   "UserMenu": {
     "openMenu": "เปิดเมนูผู้ใช้",
@@ -106,12 +118,11 @@
       "filterByDepartment": "กรองตามแผนก",
       "allDepartments": "ทุกแผนก",
       "empty": "ยังไม่มีแพทย์ในระบบ แพทย์จะปรากฏที่นี่เมื่อได้รับเชิญผ่าน ผู้ดูแลระบบ → ผู้ใช้ (F11)",
-      "primary": "หลัก",
       "viewDetail": "ดู"
     },
     "DoctorDetail": {
       "back": "ย้อนกลับไปยังรายชื่อแพทย์",
-      "departmentsLabel": "แผนก",
+      "departmentLabel": "แผนก",
       "scheduleSummary": "ตารางประจำสัปดาห์",
       "scheduleEmpty": "ยังไม่มีตารางที่ตั้งไว้ การจัดการตารางจะมาใน F06",
       "contact": "ข้อมูลติดต่อ",
@@ -128,16 +139,21 @@
   "Schedules": {
     "title": "ตารางเวร",
     "subtitle": "ช่วงเวลาทำงานของแพทย์ทุกท่าน — สลับมุมมองเดือน/สัปดาห์ได้",
-    "myTitle": "ตารางของฉัน",
-    "mySubtitle": "ช่วงเวลาทำงานของคุณ",
+    "allTitle": "ตารางเวรทั้งหมด",
+    "allSubtitle": "ช่วงเวลาทำงานทั้งหมดในโรงพยาบาล — แบ่งสีตามแผนก",
+    "deptTitle": "ตารางเวรของแผนก",
+    "deptSubtitle": "ช่วงเวลาทำงานของแพทย์ในแผนกของคุณ",
+    "ownTitle": "ตารางของฉัน",
+    "ownSubtitle": "ช่วงเวลาทำงานของคุณ",
     "filterByDepartment": "กรองตามแผนก",
+    "filterByDoctor": "กรองตามแพทย์",
     "allDepartments": "ทุกแผนก",
+    "allDoctors": "แพทย์ทุกท่าน",
     "addSchedule": "เพิ่มตารางเวร",
     "addForDate": "เพิ่มสำหรับวันที่ {date}",
     "moreCount": "+ อีก {count} รายการ",
     "breakLabel": "พักเบรก",
     "notAcceptingBookings": "ไม่รับการจอง",
-    "legendDepartment": "แผนก",
     "today": "วันนี้",
     "prevMonth": "เดือนก่อนหน้า",
     "nextMonth": "เดือนถัดไป",
@@ -146,6 +162,11 @@
     "viewMonth": "เดือน",
     "viewWeek": "สัปดาห์",
     "viewToggleAriaLabel": "มุมมองปฏิทิน",
+    "toggleShowMineOnly": "แสดงเฉพาะของฉัน",
+    "legendTitle": "แผนก",
+    "doctorLoadingMore": "กำลังโหลดรายชื่อแพทย์เพิ่มเติม…",
+    "doctorShowingCount": "แสดง {loaded} จาก {total} ราย — เลื่อนเพื่อโหลดเพิ่ม",
+    "doctorSearchScopedHint": "การค้นหาจะตรงเฉพาะรายชื่อที่โหลดแล้ว เลื่อนเพื่อโหลดเพิ่ม",
     "upcoming": "ที่กำลังจะถึง",
     "readOnlyTitle": "ตารางสิ้นสุดแล้ว",
     "readOnlyBody": "เวลาสิ้นสุดของตารางนี้ผ่านไปแล้ว ไม่สามารถแก้ไขหรือลบได้",
@@ -184,7 +205,29 @@
       "deleteConfirmBody": "ตารางนี้จะถูกลบอย่างถาวร นัดหมายที่มีอยู่จะไม่ได้รับผลกระทบ แต่จะไม่รับการจองใหม่",
       "deleteConfirm": "ลบ",
       "deleteCancel": "ยกเลิก",
-      "editLockedNotice": "แพทย์ แผนก และวันที่ถูกล็อกไว้ หากต้องการเปลี่ยน กรุณาลบตารางนี้และสร้างใหม่"
+      "editLockedNotice": "แพทย์ แผนก และวันที่ถูกล็อกไว้ หากต้องการเปลี่ยน กรุณาลบตารางนี้และสร้างใหม่",
+      "lockedToCallerHint": "ล็อกไว้ที่ตารางของคุณเท่านั้น",
+      "viewOnlyOtherDoctor": "คุณสามารถดูตารางนี้ได้เท่านั้น การบันทึกและลบจำกัดเฉพาะตารางของตัวเอง",
+      "fieldErrors": {
+        "doctorRequired": "กรุณาเลือกแพทย์",
+        "doctorInvalid": "แพทย์ที่เลือกไม่ถูกต้อง",
+        "departmentRequired": "กรุณาเลือกแผนก",
+        "departmentInvalid": "แผนกที่เลือกไม่ถูกต้อง",
+        "dateRequired": "กรุณาเลือกวัน",
+        "dateInvalid": "วันที่ไม่ถูกต้อง",
+        "startTimeRequired": "กรุณาระบุเวลาเริ่ม",
+        "startTimeInvalid": "เวลาเริ่มต้องอยู่ในรูปแบบ HH:mm (เช่น 09:00)",
+        "endTimeRequired": "กรุณาระบุเวลาสิ้นสุด",
+        "endTimeInvalid": "เวลาสิ้นสุดต้องอยู่ในรูปแบบ HH:mm (เช่น 17:00)",
+        "endBeforeStart": "เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม",
+        "startInPast": "เวลาเริ่มต้องอยู่ในอนาคต",
+        "breakStartRequired": "กรุณาระบุเวลาเริ่มพัก",
+        "breakStartInvalid": "เวลาเริ่มพักต้องอยู่ในรูปแบบ HH:mm",
+        "breakEndRequired": "กรุณาระบุเวลาสิ้นสุดพัก",
+        "breakEndInvalid": "เวลาสิ้นสุดพักต้องอยู่ในรูปแบบ HH:mm",
+        "breakEndBeforeStart": "เวลาสิ้นสุดพักต้องอยู่หลังเวลาเริ่มพัก",
+        "breakOutsideWindow": "ช่วงพักต้องอยู่ภายในเวลาเริ่ม–สิ้นสุด"
+      }
     },
     "Errors": {
       "forbidden": "คุณไม่มีสิทธิ์จัดการตารางเวร",

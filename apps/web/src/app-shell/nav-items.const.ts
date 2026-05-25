@@ -1,6 +1,5 @@
 import { FE_PATH } from "@/auth/routes";
 import { PERMISSION_CODE } from "@/auth/permissions";
-import { ROLE } from "@/auth/roles";
 import { K } from "@/i18n/keys.generated";
 
 import type { NavItem } from "./nav-items.types";
@@ -15,13 +14,19 @@ export const NAV_ICON = {
   DEPARTMENTS: "departments",
   DOCTORS: "doctors",
   SCHEDULES: "schedules",
-  MY_SCHEDULE: "my_schedule",
+  MEDICAL_RECORDS: "medical_records",
 } as const;
 
 /**
  * Canonical sidebar navigation catalog. Adding a new menu item is a
  * single-edit change here — the sidebar reads this catalog rather than
  * hand-listing items in JSX.
+ *
+ * Items use `permission` (any-of semantics) to control visibility:
+ *   - `permission` is an array — at least one held code shows the item.
+ *
+ * `requireRoles` is also supported but currently unused — permission codes
+ * are the canonical gate post-consolidation.
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   {
@@ -35,29 +40,39 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: FE_PATH.DEPARTMENTS,
     iconName: NAV_ICON.DEPARTMENTS,
     i18nKey: K.Nav.items.departments,
-    permission: PERMISSION_CODE.DOCTOR_LIST,
+    // Departments is a catalog-like directory view — gated on the same
+    // doctor-read capability that powers the rest of the directory pages.
+    permission: [PERMISSION_CODE.DOCTOR_READ],
   },
   {
     id: "doctors",
     href: FE_PATH.DOCTORS,
     iconName: NAV_ICON.DOCTORS,
     i18nKey: K.Nav.items.doctors,
-    permission: PERMISSION_CODE.DOCTOR_LIST,
+    permission: [PERMISSION_CODE.DOCTOR_READ],
   },
   {
     id: "schedules",
     href: FE_PATH.SCHEDULES,
     iconName: NAV_ICON.SCHEDULES,
     i18nKey: K.Nav.items.schedules,
-    permission: PERMISSION_CODE.SCHEDULE_MANAGE,
-    requireRoles: [ROLE.STAFF, ROLE.ADMIN],
+    // Unified permission-aware page — DOCTOR / NURSE / MRO all land here.
+    // The page itself adapts its UI (legend, filters, "Show mine" toggle)
+    // based on which scope permission(s) the caller holds.
+    permission: [
+      PERMISSION_CODE.SCHEDULE_READ_OWN,
+      PERMISSION_CODE.SCHEDULE_READ_OWN_DEPARTMENT,
+      PERMISSION_CODE.SCHEDULE_READ_ALL,
+    ],
   },
   {
-    id: "my-schedule",
-    href: FE_PATH.DOCTOR_SCHEDULE,
-    iconName: NAV_ICON.MY_SCHEDULE,
-    i18nKey: K.Nav.items.mySchedule,
-    permission: PERMISSION_CODE.SCHEDULE_MANAGE,
-    requireRoles: [ROLE.DOCTOR],
+    id: "medical-records",
+    href: FE_PATH.MEDICAL_RECORDS,
+    iconName: NAV_ICON.MEDICAL_RECORDS,
+    i18nKey: K.Nav.items.medicalRecords,
+    // DOCTOR / NURSE / MRO / PHARMACY all see this entry once their role
+    // includes the read-all permission. ADMIN never holds it, so the entry
+    // stays out of the admin sidebar.
+    permission: [PERMISSION_CODE.MEDICAL_RECORDS_READ_ALL],
   },
 ];

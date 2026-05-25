@@ -19,13 +19,11 @@ import type { DoctorListRow as DoctorListRowData } from "@/types/doctor.types";
 interface DoctorListRowProps {
   doctor: DoctorListRowData;
   viewDetailLabel: string;
-  primaryLabel: string;
 }
 
 export default function DoctorListRow({
   doctor,
   viewDetailLabel,
-  primaryLabel,
 }: DoctorListRowProps) {
   const detailHref = FE_PATH_BUILDER.doctorDetail(doctor.id);
 
@@ -89,21 +87,10 @@ export default function DoctorListRow({
               mt: 0.5,
             }}
           >
-            {doctor.departments.length === 0 ? (
-              <Typography variant="caption" color="text.disabled">
-                —
-              </Typography>
-            ) : (
-              doctor.departments.map((aff) => (
-                <DepartmentChipLink
-                  key={aff.departmentId}
-                  departmentId={aff.departmentId}
-                  departmentName={aff.departmentName}
-                  isPrimary={aff.isPrimary}
-                  primaryLabel={primaryLabel}
-                />
-              ))
-            )}
+            <DepartmentChipLink
+              departmentId={doctor.department.id}
+              departmentName={doctor.department.name}
+            />
           </Box>
         }
       />

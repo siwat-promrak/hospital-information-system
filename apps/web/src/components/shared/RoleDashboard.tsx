@@ -16,7 +16,9 @@ interface RoleDashboardProps {
 
 /**
  * Shared dashboard placeholder rendered by the role-specific routes
- * (/admin, /staff, /me/schedule) until F06 / F08 / F11 land. Surfaces the
+ * (/admin, /nurse, /medical-records-officer, /pharmacy) until F08 / F11
+ * land. DOCTOR no longer routes to a role-specific dashboard — the
+ * unified `/schedules` page is their default surface. Surfaces the
  * authenticated user's name, role, and the resolved permission codes.
  *
  * Sign-out lives in the AppShell user menu now, so this body no longer

@@ -1,10 +1,10 @@
 "use client";
 
-import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import EventNoteIcon from "@mui/icons-material/EventNote";
+import FolderSharedIcon from "@mui/icons-material/FolderShared";
 import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
 import PeopleIcon from "@mui/icons-material/People";
 import Box from "@mui/material/Box";
@@ -294,6 +294,6 @@ const ICON_FOR: Readonly<
   [NAV_ICON.DEPARTMENTS]: LocalHospitalIcon,
   [NAV_ICON.DOCTORS]: PeopleIcon,
   [NAV_ICON.SCHEDULES]: EventNoteIcon,
-  [NAV_ICON.MY_SCHEDULE]: CalendarMonthIcon,
+  [NAV_ICON.MEDICAL_RECORDS]: FolderSharedIcon,
 };
 

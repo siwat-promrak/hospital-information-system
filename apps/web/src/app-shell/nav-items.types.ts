@@ -24,8 +24,9 @@ export type NavItemI18nKey = (typeof K.Nav.items)[keyof typeof K.Nav.items];
  *     `@mui/icons-material` imports and can be consumed by server + client
  *     code).
  *   - `i18nKey` — leaf key under `NS.NavItems`.
- *   - `permission` — optional permission code (from `PERMISSION_CODE`).
- *     When set, the item is only rendered if the caller holds the code.
+ *   - `permission` — optional list of permission codes (from
+ *     `PERMISSION_CODE`). Any-of semantics: the item is rendered when
+ *     the caller holds at least one of the listed codes.
  *   - `requireRoles` — optional whitelist of role codes; if set, the item
  *     is only rendered when `session.user.roleCode` is one of them.
  */
@@ -34,6 +35,6 @@ export interface NavItem {
   href: string;
   iconName: NavIconKey;
   i18nKey: NavItemI18nKey;
-  permission?: string;
+  permission?: readonly string[];
   requireRoles?: readonly RoleCode[];
 }

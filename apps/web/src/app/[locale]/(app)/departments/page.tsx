@@ -38,7 +38,7 @@ export default async function DepartmentsPage({
   const tHeader = await getTranslations(NS.DirectoryDepartments);
   const tErrors = await getTranslations(NS.DirectoryErrors);
 
-  if (!hasPermission(session, PERMISSION_CODE.DOCTOR_LIST)) {
+  if (!hasPermission(session, PERMISSION_CODE.DOCTOR_READ)) {
     return <ForbiddenCard message={tErrors(K.Directory.Errors.forbidden)} />;
   }
 

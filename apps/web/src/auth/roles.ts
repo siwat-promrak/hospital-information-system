@@ -11,20 +11,31 @@ import { FE_PATH } from "./routes";
 
 export const ROLE = {
   ADMIN: "ADMIN",
-  STAFF: "STAFF",
   DOCTOR: "DOCTOR",
+  NURSE: "NURSE",
+  MEDICAL_RECORDS_OFFICER: "MEDICAL_RECORDS_OFFICER",
+  PHARMACY: "PHARMACY",
 } as const;
 
 export type RoleCode = (typeof ROLE)[keyof typeof ROLE];
 
 /**
  * Post-sign-in destination per role. Used by the role dispatcher at
- * `/[locale]/page.tsx`. Future PRs (F05/F06/F08/F11) replace the
- * placeholder routes with their real implementations — but the path
- * mappings stay the same.
+ * `/[locale]/page.tsx`.
+ *
+ *   ADMIN                   → `/admin`
+ *   DOCTOR                  → `/schedules` (unified permission-aware page)
+ *   NURSE                   → `/nurse`
+ *   MEDICAL_RECORDS_OFFICER → `/medical-records-officer`
+ *   PHARMACY                → `/pharmacy`
+ *
+ * Custom roles created at runtime (US-11.6) fall through to a sensible
+ * default in the dispatcher.
  */
 export const DASHBOARD_PATH: Readonly<Record<RoleCode, string>> = {
   [ROLE.ADMIN]: FE_PATH.ADMIN,
-  [ROLE.STAFF]: FE_PATH.STAFF,
-  [ROLE.DOCTOR]: FE_PATH.DOCTOR_SCHEDULE,
+  [ROLE.DOCTOR]: FE_PATH.SCHEDULES,
+  [ROLE.NURSE]: FE_PATH.NURSE,
+  [ROLE.MEDICAL_RECORDS_OFFICER]: FE_PATH.MEDICAL_RECORDS_OFFICER,
+  [ROLE.PHARMACY]: FE_PATH.PHARMACY,
 };

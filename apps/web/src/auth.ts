@@ -167,6 +167,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       user.userId = resolved.payload.userId;
       user.roleCode = resolved.payload.roleCode;
       user.permissionCodes = resolved.payload.permissionCodes;
+      user.departmentId = resolved.payload.departmentId;
 
       return true;
     },
@@ -183,6 +184,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         token.userId = user.userId;
         token.roleCode = user.roleCode;
         token.permissionCodes = user.permissionCodes;
+        token.departmentId = user.departmentId ?? null;
       }
 
       return token;
@@ -197,6 +199,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         session.user.userId = token.userId;
         session.user.roleCode = token.roleCode;
         session.user.permissionCodes = token.permissionCodes ?? [];
+        session.user.departmentId = token.departmentId ?? null;
       }
 
       return session;

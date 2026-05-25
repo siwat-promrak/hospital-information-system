@@ -2,22 +2,25 @@
  * Doctor response shapes. Mirrors the BE types in
  * `apps/api/src/doctors/doctors.types.ts`. Hand-mirrored — a future
  * `packages/shared` workspace will dedupe.
+ *
+ * After the RBAC refactor, a doctor has a 1:1 relationship with a
+ * department — the previous M:N affiliation array is gone.
  */
 
 export type DoctorGender = "MALE" | "FEMALE";
 
 /**
- * Per-department affiliation embedded in every doctor row. A doctor may
- * appear under multiple departments — the FE renders one chip per entry.
+ * Thin department reference embedded in every doctor row. The BE
+ * emits this alongside `departmentId` so the directory can render the
+ * department name without a second round-trip.
  */
-export interface DoctorDepartmentAffiliation {
-  departmentId: string;
-  departmentName: string;
-  isPrimary: boolean;
+export interface DoctorDepartmentRef {
+  id: string;
+  name: string;
 }
 
 /**
- * Returned by `GET /doctors`. Includes the affiliation list so the staff
+ * Returned by `GET /doctors`. Carries a single department ref so the
  * directory can group / filter without a second round-trip.
  */
 export interface DoctorListRow {
@@ -27,7 +30,8 @@ export interface DoctorListRow {
   lastNameEn: string;
   fullName: string;
   gender: DoctorGender | null;
-  departments: DoctorDepartmentAffiliation[];
+  departmentId: string;
+  department: DoctorDepartmentRef;
 }
 
 /**

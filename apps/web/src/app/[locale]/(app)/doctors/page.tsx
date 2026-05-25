@@ -42,7 +42,7 @@ export default async function DoctorsPage({
   const tHeader = await getTranslations(NS.DirectoryDoctors);
   const tErrors = await getTranslations(NS.DirectoryErrors);
 
-  if (!hasPermission(session, PERMISSION_CODE.DOCTOR_LIST)) {
+  if (!hasPermission(session, PERMISSION_CODE.DOCTOR_READ)) {
     return (
       <Card variant="outlined" sx={{ p: 4, textAlign: "center" }}>
         <Typography variant="body2" color="text.secondary">
@@ -64,7 +64,6 @@ export default async function DoctorsPage({
   ]);
 
   const viewDetailLabel = tHeader(K.Directory.Doctors.viewDetail);
-  const primaryLabel = tHeader(K.Directory.Doctors.primary);
 
   return (
     <Stack spacing={3}>
@@ -102,7 +101,6 @@ export default async function DoctorsPage({
                 <DoctorListRow
                   doctor={doc}
                   viewDetailLabel={viewDetailLabel}
-                  primaryLabel={primaryLabel}
                 />
               </Box>
             ))}
