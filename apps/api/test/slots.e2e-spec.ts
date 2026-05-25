@@ -513,7 +513,7 @@ describe('F07 — appointment types + slot finder e2e', () => {
   maybe('STAFF: a BOOKED appointment excludes its slot', async () => {
     // Fresh schedule on +1h so it does not collide with the earlier
     // 09:00–10:00 window for this same doctor / dept.
-    await prisma.doctorSchedule.create({
+    const blockerSchedule = await prisma.doctorSchedule.create({
       data: {
         doctorId: fixtures!.doctor.id,
         departmentId: fixtures!.deptPrimary.id,
@@ -529,6 +529,7 @@ describe('F07 — appointment types + slot finder e2e', () => {
         patientId: await ensureScratchPatient(prisma, fixtures!.superAdminId),
         doctorId: fixtures!.doctor.id,
         departmentId: fixtures!.deptPrimary.id,
+        scheduleId: blockerSchedule.id,
         appointmentType: AppointmentType.CONSULTATION,
         status: AppointmentStatus.BOOKED,
         startAt: slotDate(11, 20),
@@ -554,7 +555,7 @@ describe('F07 — appointment types + slot finder e2e', () => {
 
   maybe('STAFF: a CANCELLED appointment does NOT exclude its slot', async () => {
     // Schedule 13:00–14:00 for this case.
-    await prisma.doctorSchedule.create({
+    const cancelledSchedule = await prisma.doctorSchedule.create({
       data: {
         doctorId: fixtures!.doctor.id,
         departmentId: fixtures!.deptPrimary.id,
@@ -570,6 +571,7 @@ describe('F07 — appointment types + slot finder e2e', () => {
         patientId: await ensureScratchPatient(prisma, fixtures!.superAdminId),
         doctorId: fixtures!.doctor.id,
         departmentId: fixtures!.deptPrimary.id,
+        scheduleId: cancelledSchedule.id,
         appointmentType: AppointmentType.CONSULTATION,
         status: AppointmentStatus.CANCELLED,
         startAt: slotDate(13, 20),

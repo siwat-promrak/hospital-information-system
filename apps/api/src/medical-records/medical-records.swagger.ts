@@ -1,6 +1,7 @@
 import { applyDecorators } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiExtraModels,
   ApiForbiddenResponse,
@@ -40,6 +41,13 @@ const VALIDATION_EXAMPLE = {
   statusCode: 400,
   code: ErrorCode.VALIDATION_FAILED,
   message: 'Request validation failed.',
+};
+
+const CONFLICT_DUPLICATE_EXAMPLE = {
+  statusCode: 409,
+  code: ErrorCode.MEDICAL_RECORD_ALREADY_EXISTS,
+  message: 'A medical record already exists for this appointment.',
+  details: { appointmentId: '7c8e2a10-1234-5678-9abc-deadbeefcafe' },
 };
 
 const PaginatedMedicalRecordDto = PaginatedDto(MedicalRecordResponseDto);
@@ -115,6 +123,10 @@ export function ApiCreateMedicalRecord(): MethodDecorator & ClassDecorator {
     ApiNotFoundResponse({
       description: 'Referenced appointment is unknown.',
       schema: { example: { ...NOT_FOUND_EXAMPLE, message: 'Appointment not found.' } },
+    }),
+    ApiConflictResponse({
+      description: 'A medical record already exists for this appointment.',
+      schema: { example: CONFLICT_DUPLICATE_EXAMPLE },
     }),
   );
 }

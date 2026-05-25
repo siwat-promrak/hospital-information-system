@@ -121,7 +121,7 @@ below live in `docs/user-stories.md`.
 | F05 ✅ | Doctors & departments directory           | `feat/directory`                | Read-only BE endpoints + minimal FE list/detail pages for departments and doctors. Doctor lists include the doctor's home department (sourced from the linked `User.departmentId` — Doctor↔Department is 1:1). **Shipped:** also delivered the app shell (sidebar + header + breadcrumb), the `lib/api` transport foundation, paginated list endpoints (`Paginated<T>` envelope), and the HS256 session-JWT workaround tracked as FU-01. | US-4.1, US-4.2, US-4.3                                | F02, F03      | Manual: `/departments` and `/doctors` list seeded data; doctor detail page renders the home department; NURSE can view (gated on `doctor.read`); ADMIN sees by default; pagination + filter survive page navigation.                  | M      | P0       |
 | F06 ✅ | Doctor schedule CRUD                      | `feat/schedules`                | Flat BE `/schedules` CRUD (list/get/create/update/delete) + calendar UI (month + week views). Scope is enforced per CRUD verb via the scope-aware permission codes (`schedule.<verb>.own` for DOCTOR, `schedule.<verb>.own-department` for NURSE). Each schedule is a dated window (`startAt` / `endAt` UTC) carrying `departmentId` (denormalised from the doctor's `User.departmentId` at write time). Two DB CHECK constraints back-stop window/break validity; a service-layer guard rejects past-`startAt`. **Shipped:** also delivered the global snackbar (`notistack`), dayjs adoption (CLAUDE.md rule 9), the `pageSize=all` pagination sentinel (extension of CLAUDE.md §8), reusable `SearchableSelect` with server-paged infinite scroll, expanded seed (75 doctors, 2700 schedules), and the F06 API handoff doc. | US-5.1, US-5.2, US-5.3, US-5.4                        | F05           | Manual: a NURSE creates a dated schedule for a doctor in their own department; overlap returns `409 SCHEDULE_OVERLAP`; mismatched department returns `400 DOCTOR_DEPARTMENT_MISMATCH`; past `startAt` returns `400 SCHEDULE_START_IN_PAST`; edit & delete work; a DOCTOR can manage only their own schedules (foreign GET → `404`, foreign mutate → `403 INSUFFICIENT_PERMISSION_SCOPE`); a user holding only `.read.own-department` on a write call returns `403 INSUFFICIENT_PERMISSION_SCOPE`. | L      | P0       |
 | F07 ✅ | Appointment types + slot finder           | `feat/slots`                    | BE-only: `/appointment-types` and `/slots?doctorId=&departmentId=&date=&type=` (flat — promoted out of `/doctors/:id/slots` so the four required filters are peers). No UI. Gated on `appointment.create.own-department`. | US-6.1, US-6.2                                        | F06           | Unit tests cover slot grid arithmetic, break-window exclusion, and exclusion of past/booked slots; manual `curl` against seed data returns expected slots; mismatched `(departmentId, type)` returns `400 DEPARTMENT_TYPE_NOT_ALLOWED`; NURSE probing a foreign department returns `403 INSUFFICIENT_PERMISSION_SCOPE`.                                                                                          | M      | P0       |
-| F08 | Medical records BE module                 | `feat/medical-records`          | BE-only: `/medical-records` CRUD (list/get/create/update — **no delete**, records are permanent). Per-appointment clinical note authored by the assigned doctor (`doctor_id`, `patient_id`, `department_id` denorm cache, `appointment_id`, `note`, `drug?`). Scope-aware via `medical_records.read.all` / `medical_records.create.own` / `medical_records.update.own` / `medical_records.update.all`. | (new — TBD)                                           | F07           | Manual: a DOCTOR creates a record for their own appointment; an MRO updates any record; a PHARMACY user reads all records; DOCTOR attempting to update another doctor's record returns `403 INSUFFICIENT_PERMISSION_SCOPE`.                                                                                                                                                                                       | M      | P0       |
+| F08 ✅ | Medical records BE module                 | `feat/medical-records`          | BE-only: `/medical-records` CRUD (list/get/create/update — **no delete**, records are permanent). Per-appointment clinical note authored by the assigned doctor (`doctor_id`, `patient_id`, `department_id` denorm cache, `appointment_id` UNIQUE, `note`, `drug?`). Scope-aware via `medical_records.read.all` / `medical_records.create.own` / `medical_records.update.own` / `medical_records.update.all`. Also lands the `Appointment.scheduleId` NOT NULL FK so every booking carries provenance back to the `DoctorSchedule` that produced it. | US-9.1, US-9.2, US-9.3, US-9.4, US-9.5                | F07           | Manual: a DOCTOR creates a record for their own appointment; an MRO updates any record; a PHARMACY user reads all records; DOCTOR attempting to update another doctor's record returns `403 INSUFFICIENT_PERMISSION_SCOPE`. A second `POST /medical-records` for the same `appointmentId` returns `409 MEDICAL_RECORD_ALREADY_EXISTS` (the `medical_records.appointment_id @unique` constraint). `Appointment.scheduleId` is NOT NULL — every booking links back to its source `DoctorSchedule`.                                                                                                                                                                                       | M      | P0       |
 | F09 | Front-desk booking + lifecycle            | `feat/booking`                  | BE `POST /patients` (walk-in), `GET /patients?q=`, `POST /appointments` (inherits `departmentId` from the chosen schedule; validates `(departmentId, appointmentType)` against `department_appointment_types`), `GET /appointments`, `GET /appointments/:id`, `POST /appointments/:id/cancel` + booking & list UI. **NURSE in own department by default** (full CRUD on patients + `appointment.*.own-department`); DOCTOR can act on their own appointments via `appointment.*.own`. | US-7.1, US-7.2, US-7.3, US-7.4, US-8.1, US-8.2, US-8.3 | F08           | Manual: NURSE books for any patient in their department; conflicting double-book returns `409 SLOT_TAKEN`; mismatched `(departmentId, type)` returns `400 DEPARTMENT_TYPE_NOT_ALLOWED`; cancel frees slot; the `appointments_end_after_start` DB CHECK back-stops `endAt > startAt`.                                                                                | L      | P0       |
 | F11 | Admin user + role/permission management   | `feat/admin-users`              | BE `/admin/users` (list, invite, disable, enable — invite path supports DOCTOR by creating the User + Doctor rows transactionally with the doctor's home `User.departmentId` set), `/admin/roles/:id/policies` (grant/revoke), optional `/admin/roles` (create custom role, P2 — requires `role.create`) + minimal `(app)/admin/users` & `(app)/admin/roles` UI. ADMIN starts narrow (9 user+role permissions) and may grant additional capabilities to themselves or others via `role.update`. **Single feature — no API/UI split.** | US-11.1, US-11.2, US-11.3, US-11.5 (+ US-11.6 P2)     | F03, F09      | Manual: ADMIN invites a new NURSE email; new nurse signs in successfully; ADMIN disables them; subsequent sign-in returns `USER_DISABLED`; self-disable is blocked; ADMIN grants `appointment.create.own-department` to a custom role and observes the new permission on next request; baseline `is_deletable=false` policies cannot be revoked. | L      | P1       |
 | F12 | i18n parity + README                      | `chore/i18n-readme`             | Audit all strings to `messages/*.json`, add `Roles.*` / `Permissions.*` namespaces, regenerate keys, write project `README.md`. | US-12.1, US-12.2                                      | F11           | `pnpm type-check` green; manual lang switch shows no raw English on TH; README walkthrough takes a fresh clone to a running app in <15 min.                                                                                | M      | P1       |
@@ -980,7 +980,46 @@ returns `403 INSUFFICIENT_PERMISSION_SCOPE`. A mismatched
 
 ---
 
-### F08 — Medical records BE module (P0, M)
+### F08 — Medical records BE module (P0, M) ✅ shipped
+
+**Status:** shipped on `feat/medical-records`. The BE module itself
+(controller / service / Swagger / DTOs / module wiring / per-verb
+permissions / scope resolver) was actually folded INTO the earlier F07
+slot-finder PR — landing the catalog + module together kept the F07
+diff coherent. This branch closes the F08 deliverable by filling in
+the schema invariants, the duplicate-create error path, the e2e suite,
+and the roadmap ship-marking.
+
+**What actually shipped (delta from the original brief)**
+
+- **BE module landed inside the F07 PR.** `apps/api/src/medical-records/`
+  (controller, service, Swagger composites, DTOs, types, const, module
+  wiring + `MEDICAL_RECORDS_*` permissions + `resolveMedicalRecordsUpdateScope`)
+  shipped on `feat/slots`. This branch extends that surface, it does not
+  re-implement it.
+- **`Appointment.scheduleId` NOT NULL FK** to `DoctorSchedule.id` —
+  every booking now carries provenance back to the schedule the slot
+  finder carved it out of. Safe to introduce without a backfill because
+  zero `Appointment` rows exist yet (no seed, no application code that
+  inserts an `Appointment` — F09 is still upcoming).
+- **`MedicalRecord.appointmentId` is `@unique`** — exactly one clinical
+  record per appointment. Duplicate `POST /medical-records` returns
+  `409 MEDICAL_RECORD_ALREADY_EXISTS` (a new code in the canonical
+  `ErrorCode` catalog). The service pre-checks via `findUnique({ where:
+  { appointmentId } })` so the error matches the F06 `SCHEDULE_OVERLAP`
+  convention, with a defensive P2002 catch as a fallback.
+- **Combined forward migration** `f08_appointment_schedule_and_medical_record_unique`
+  applies both schema changes in a single step (new column + new FK +
+  new `(scheduleId, status)` index on `appointments`; new unique index +
+  dropped redundant `(appointmentId)` index on `medical_records`).
+- **E2e suite** at `apps/api/test/medical-records.e2e-spec.ts`
+  (26 cases, all green). Covers every AC in this section AND every
+  US-9.x acceptance criterion: per-role CRUD matrix, scope enforcement
+  on create + update, duplicate-create 409, corrupt-state DOCTOR (no
+  `Doctor` row) 403, permanence (DELETE returns 404 because no route
+  is registered).
+- **No FE work** — BE-only per the original brief. The FE consumer
+  ships in F09.
 
 **Why a standalone feature**
 
@@ -1015,9 +1054,16 @@ permission, full audit cluster on `created_at/by` + `updated_at/by`.
 
 **Migration / breaking-change notes**
 
-- Forward migration adds the `medical_records` table (no enum changes;
-  no CHECK constraints). Apply with
-  `pnpm --filter @hospital/api prisma migrate dev`.
+- The `medical_records` table itself was created by the F01 init
+  migration. The F08 ship adds the combined forward migration
+  `f08_appointment_schedule_and_medical_record_unique` (one step,
+  two changes): a NOT NULL `appointments.schedule_id` FK to
+  `doctor_schedules.id` with a supporting `(schedule_id, status)`
+  index, AND a unique index on `medical_records.appointment_id`
+  (replacing the redundant non-unique index). Safe to apply forward
+  without a backfill because zero `Appointment` rows exist yet —
+  F09 has not shipped. Apply with
+  `pnpm --filter @hospital/api prisma migrate deploy`.
 
 **Manual smoke test**
 

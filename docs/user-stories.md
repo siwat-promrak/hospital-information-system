@@ -145,8 +145,8 @@ was retired post-centralisation since Doctor↔Department is now 1:1 via
 | `department_appointment_types`| Per-department allowed `AppointmentType` set (the "department booking rules" from the spec). Unique on `(departmentId, appointmentType)`. Booking validation MUST check the pair exists here.        |
 | `doctors`                     | Practitioner. 1-1 link to a `User` (`role.code = DOCTOR`). Carries `doctorCode` (unique), `medicalLicenseNo` (unique), `identificationNo` (required, freeform — parity with Patient). **No `departmentId` column** — the doctor's home department is sourced from `doctor.user.departmentId` (the linked User row). Doctor↔Department is **1:1** post the department centralisation. |
 | `doctor_schedules`            | Dated availability window (NOT recurring) with `doctorId`, `departmentId` (denormalised from `doctor.user.departmentId` at write time so historical schedules survive a doctor moving departments — service layer rejects mismatches with `400 DOCTOR_DEPARTMENT_MISMATCH`), `startAt` / `endAt` (`timestamptz(3)` UTC, CHECK `end_at > start_at`), optional `breakStartAt` / `breakEndAt` (CHECK-validated), `acceptsBooking` flag. Each row is one specific UTC start/end pair; one-off shifts are first-class. Indexed on `(doctorId, departmentId)` and `(startAt)` for the calendar's date-range fetches. F06 pivoted from minute-based recurring templates to dated windows (the `_init` migration was regenerated). |
-| `appointments`                | `patientId`, `doctorId`, `departmentId` (inherited from the chosen schedule), `appointmentType`, `status`, `startAt` / `endAt` (CHECK `end > start`), `reason?` (Postgres `text`, no length cap), `createdBy` (renamed from `createdByUserId`), `updatedBy?`, `cancelledBy?` (renamed from `cancelledByUserId`) / `cancelledAt?` / `cancellationReason?`, `completedAt?`. **No `deletedAt` / `deletedBy`** — uses `status=CANCELLED` instead. |
-| `medical_records`             | Per-appointment clinical note authored by the assigned doctor. Carries `doctorId`, `patientId`, `departmentId` (denorm cache from the appointment), `appointmentId`, `note`, `drug?` (free-text for P0). Full audit cluster (`created_at/by`, `updated_at/by`). **Permanent — no soft-delete columns** (`deleted_at` / `deleted_by` are intentionally absent) and **no `medical_records.delete` permission** exists. |
+| `appointments`                | `patientId`, `doctorId`, `departmentId` (inherited from the chosen schedule), `scheduleId` (NOT NULL FK to `doctor_schedules.id` — F08 provenance link), `appointmentType`, `status`, `startAt` / `endAt` (CHECK `end > start`), `reason?` (Postgres `text`, no length cap), `createdBy` (renamed from `createdByUserId`), `updatedBy?`, `cancelledBy?` (renamed from `cancelledByUserId`) / `cancelledAt?` / `cancellationReason?`, `completedAt?`. Indexed on `(scheduleId, status)` so per-schedule lookups stay cheap. **No `deletedAt` / `deletedBy`** — uses `status=CANCELLED` instead. |
+| `medical_records`             | Per-appointment clinical note authored by the assigned doctor. Carries `doctorId`, `patientId`, `departmentId` (denorm cache from the appointment), `appointmentId` (**UNIQUE** — exactly one record per appointment; duplicate inserts surface as `409 MEDICAL_RECORD_ALREADY_EXISTS` at the service layer), `note`, `drug?` (free-text for P0). Full audit cluster (`created_at/by`, `updated_at/by`). **Permanent — no soft-delete columns** (`deleted_at` / `deleted_by` are intentionally absent) and **no `medical_records.delete` permission** exists. |
 | `roles`                       | RBAC role (`code` unique). Carries `is_deletable` (default `true`; all seeded rows pinned to `false`). Seeded with `ADMIN`, `DOCTOR`, `NURSE`, `MEDICAL_RECORDS_OFFICER`, `PHARMACY`; admins holding `role.create` may add custom roles at runtime. |
 | `permissions`                 | Atomic capability with a stable `code` (`<resource>.<verb>.<scope>`). **Code-defined**: seeded from a canonical list in `apps/api/src/auth/permissions.ts`; adding a new permission requires a code change + seed re-run. **Catalog-only** — no audit columns (`created_by` / `updated_*` / `deleted_*` are absent) since the table never mutates at runtime. |
 | `policies`                    | `(roleId, permissionId)` join — "role R has permission P". Unique on the pair. Carries `is_deletable` (default `true`; all seeded rows pinned to `false`). Granted / revoked at runtime by admins holding `role.update`. |
@@ -976,11 +976,13 @@ appointment, so that the slot becomes free for reuse.
 
 ---
 
-## E9 — Medical records
+## E9 — Medical records ✅ shipped (F08, `feat/medical-records`)
 
 Per-appointment clinical note authored by the assigned doctor. **Records
 are permanent** — no soft-delete column and no `medical_records.delete`
-permission. Per-role baseline:
+permission. `medical_records.appointmentId` is `@unique` so a duplicate
+`POST /medical-records` returns `409 MEDICAL_RECORD_ALREADY_EXISTS`.
+Per-role baseline:
 - **DOCTOR** — `medical_records.read.all` + `.create.own` + `.update.own`.
 - **NURSE** — `medical_records.read.all`.
 - **MRO** — `medical_records.read.all` + `.update.all`.
