@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 
 import { AppointmentTypesModule } from './appointment-types/appointment-types.module';
+import { AppointmentsModule } from './appointments/appointments.module';
 import { AuthLogModule } from './auth-log/auth-log.module';
 import { AuthModule } from './auth/auth.module';
 import { InternalSecretGuard } from './auth/guards/internal-secret.guard';
@@ -37,6 +38,7 @@ import { UsersModule } from './users/users.module';
     SlotsModule,
     MedicalRecordsModule,
     PatientsModule,
+    AppointmentsModule,
     HealthModule,
   ],
   providers: [
