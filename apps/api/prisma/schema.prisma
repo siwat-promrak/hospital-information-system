@@ -478,6 +478,8 @@ model DoctorSchedule {
   updatedByUser User?      @relation("DoctorScheduleUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User?      @relation("DoctorScheduleDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  appointments Appointment[]
+
   @@index([doctorId, departmentId])
   @@index([startAt])
   @@map("doctor_schedules")
@@ -488,6 +490,10 @@ model DoctorSchedule {
 // `appointmentType` column is the `AppointmentType` schema enum; the
 // per-type duration map (NEW_PATIENT_VISIT=30, FOLLOW_UP=15, CONSULTATION=20,
 // PROCEDURE=60) still lives in application code — no separate table in P0.
+//
+// `scheduleId` is the F08 provenance link to the `DoctorSchedule` that
+// produced this booking — every appointment goes through the F07 slot
+// finder, which requires a schedule, so the column is NOT NULL.
 //
 // `reason` is Postgres TEXT (no length cap, per spec).
 //
@@ -503,6 +509,7 @@ model Appointment {
   patientId       String            @map("patient_id") @db.Uuid
   doctorId        String            @map("doctor_id") @db.Uuid
   departmentId    String            @map("department_id") @db.Uuid
+  scheduleId      String            @map("schedule_id") @db.Uuid
   appointmentType AppointmentType   @map("appointment_type")
   status          AppointmentStatus @default(BOOKED)
   startAt         DateTime          @map("start_at") @db.Timestamptz(3)
@@ -521,18 +528,20 @@ model Appointment {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
   updatedBy String?  @map("updated_by") @db.Uuid
 
-  patient         Patient    @relation(fields: [patientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  doctor          Doctor     @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  department      Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  createdByUser   User       @relation("AppointmentsCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  updatedByUser   User?      @relation("AppointmentsUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  cancelledByUser User?      @relation("AppointmentsCancelledBy", fields: [cancelledBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patient         Patient        @relation(fields: [patientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  doctor          Doctor         @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  department      Department     @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  schedule        DoctorSchedule @relation(fields: [scheduleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser   User           @relation("AppointmentsCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser   User?          @relation("AppointmentsUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cancelledByUser User?          @relation("AppointmentsCancelledBy", fields: [cancelledBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   medicalRecords MedicalRecord[]
 
   @@index([doctorId, startAt])
   @@index([patientId, startAt])
   @@index([status])
+  @@index([scheduleId, status])
   @@map("appointments")
 }
 
@@ -541,6 +550,11 @@ model Appointment {
 // PERMANENT — there is no soft-delete cluster, and the catalog does NOT
 // expose a `medical_records.delete` permission. Edits are allowed (with
 // `updated_at` / `updated_by` for the audit trail).
+//
+// `appointmentId` is UNIQUE — exactly one medical record per appointment.
+// A duplicate insert surfaces as `409 MEDICAL_RECORD_ALREADY_EXISTS` at
+// the service layer (the BE pre-checks before the insert so the error
+// matches the schedule overlap convention).
 //
 // `department_id` is denormalised from `Doctor.department_id` at write time
 // (the same convention the schedule + appointment tables use). It preserves
@@ -559,7 +573,7 @@ model MedicalRecord {
   doctorId      String  @map("doctor_id") @db.Uuid
   patientId     String  @map("patient_id") @db.Uuid
   departmentId  String  @map("department_id") @db.Uuid
-  appointmentId String  @map("appointment_id") @db.Uuid
+  appointmentId String  @unique @map("appointment_id") @db.Uuid
   note          String  @db.Text
   drug          String? @db.Text // free-text for P0; JSONB array later
 
@@ -578,7 +592,6 @@ model MedicalRecord {
 
   @@index([doctorId])
   @@index([patientId])
-  @@index([appointmentId])
   @@map("medical_records")
 }
 
