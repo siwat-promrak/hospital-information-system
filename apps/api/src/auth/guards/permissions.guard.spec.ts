@@ -64,6 +64,7 @@ function buildUser(codes: string[]): AuthenticatedUser {
     lastNameTh: null,
     picture: null,
     permissionCodes: codes,
+    doctor: null,
   };
 }
 

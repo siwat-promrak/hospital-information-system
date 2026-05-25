@@ -20,6 +20,13 @@ const userWithPermissionsInclude = Prisma.validator<Prisma.UserInclude>()({
       },
     },
   },
+  // F06 — schedule.scope reads `caller.doctor.id` on every mutation to enforce
+  // the DOCTOR own-doctor rule. Joining here keeps the JWT-guard read to a
+  // single round-trip; STAFF/ADMIN simply see `null`.
+  doctor: {
+    where: { deletedAt: null },
+    select: { id: true },
+  },
 });
 
 type UserWithPermissions = Prisma.UserGetPayload<{
@@ -111,6 +118,7 @@ export class UsersService {
       lastNameTh: user.lastNameTh,
       picture: user.picture,
       permissionCodes,
+      doctor: user.doctor ? { id: user.doctor.id } : null,
     };
   }
 }

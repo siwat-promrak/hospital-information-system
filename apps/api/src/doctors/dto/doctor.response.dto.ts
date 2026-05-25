@@ -1,8 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { Gender } from '@prisma/client';
-import { IsOptional, IsUUID } from 'class-validator';
-
-import { PaginationQueryDto } from '../../common/pagination';
 
 export class DoctorDepartmentAffiliationDto {
   @ApiProperty({ example: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9' })
@@ -17,7 +14,7 @@ export class DoctorDepartmentAffiliationDto {
 
 const GENDER_VALUES = Object.values(Gender);
 
-export class DoctorDto {
+export class DoctorResponseDto {
   @ApiProperty({ example: '4f3e2a10-1234-5678-9abc-deadbeef1234' })
   id!: string;
 
@@ -40,7 +37,7 @@ export class DoctorDto {
   departments!: DoctorDepartmentAffiliationDto[];
 }
 
-export class DoctorDetailDto extends DoctorDto {
+export class DoctorDetailResponseDto extends DoctorResponseDto {
   @ApiProperty({ example: '+66-2-555-1212' })
   phone!: string;
 
@@ -59,19 +56,4 @@ export class DoctorDetailDto extends DoctorDto {
     description: 'Number of active schedule rows owned by the doctor.',
   })
   scheduleCount!: number;
-}
-
-/**
- * Query DTO for `GET /doctors`. Composes the shared `PaginationQueryDto`
- * (`?page=&pageSize=`) with the optional `?departmentId=` filter so the
- * controller validates everything in one pipe pass.
- */
-export class ListDoctorsQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({
-    example: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9',
-    description: 'Restrict to doctors affiliated with this department.',
-  })
-  @IsOptional()
-  @IsUUID()
-  departmentId?: string;
 }

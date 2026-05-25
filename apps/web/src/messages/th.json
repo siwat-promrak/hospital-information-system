@@ -44,6 +44,7 @@
       "dashboard": "แดชบอร์ด",
       "departments": "แผนก",
       "doctors": "แพทย์",
+      "schedules": "ตารางเวร",
       "mySchedule": "ตารางของฉัน"
     }
   },
@@ -53,13 +54,18 @@
     "staff": "เจ้าหน้าที่",
     "me": "ฉัน",
     "schedule": "ตาราง",
+    "schedules": "ตารางเวร",
     "departments": "แผนก",
     "doctors": "แพทย์"
   },
   "UserMenu": {
     "openMenu": "เปิดเมนูผู้ใช้",
     "signedInAs": "เข้าสู่ระบบในชื่อ",
-    "language": "ภาษา"
+    "language": "ภาษา",
+    "locales": {
+      "en": "English",
+      "th": "ภาษาไทย"
+    }
   },
   "Pagination": {
     "ariaLabel": "การนำทางหน้า",
@@ -69,6 +75,23 @@
     "last": "หน้าสุดท้าย",
     "currentPage": "หน้า {page} หน้าปัจจุบัน",
     "gotoPage": "ไปยังหน้า {page}"
+  },
+  "Snackbar": {
+    "Success": {
+      "scheduleCreated": "สร้างตารางเวรสำเร็จ",
+      "scheduleUpdated": "บันทึกตารางเวรสำเร็จ",
+      "scheduleDeleted": "ลบตารางเวรสำเร็จ",
+      "signedOut": "ออกจากระบบเรียบร้อยแล้ว"
+    },
+    "Errors": {
+      "generic": "เกิดข้อผิดพลาด กรุณาลองอีกครั้ง",
+      "overlap": "เวลานี้ทับซ้อนกับตารางที่มีอยู่",
+      "doctorNotInDepartment": "แพทย์ที่เลือกไม่ได้สังกัดแผนกนี้",
+      "scopeViolation": "คุณสามารถจัดการได้เฉพาะตารางของตัวเองเท่านั้น",
+      "forbidden": "คุณไม่มีสิทธิ์ดำเนินการนี้",
+      "startInPast": "ไม่สามารถสร้างหรือแก้ไขตารางที่มีเวลาเริ่มในอดีตได้",
+      "network": "การเชื่อมต่อขัดข้อง กรุณาตรวจสอบเครือข่ายและลองอีกครั้ง"
+    }
   },
   "Directory": {
     "Departments": {
@@ -100,6 +123,83 @@
     "Errors": {
       "forbidden": "คุณไม่มีสิทธิ์เข้าถึงหน้านี้",
       "loadFailed": "โหลดข้อมูลไม่สำเร็จ"
+    }
+  },
+  "Schedules": {
+    "title": "ตารางเวร",
+    "subtitle": "ช่วงเวลาทำงานของแพทย์ทุกท่าน — สลับมุมมองเดือน/สัปดาห์ได้",
+    "myTitle": "ตารางของฉัน",
+    "mySubtitle": "ช่วงเวลาทำงานของคุณ",
+    "filterByDepartment": "กรองตามแผนก",
+    "allDepartments": "ทุกแผนก",
+    "addSchedule": "เพิ่มตารางเวร",
+    "addForDate": "เพิ่มสำหรับวันที่ {date}",
+    "moreCount": "+ อีก {count} รายการ",
+    "breakLabel": "พักเบรก",
+    "notAcceptingBookings": "ไม่รับการจอง",
+    "legendDepartment": "แผนก",
+    "today": "วันนี้",
+    "prevMonth": "เดือนก่อนหน้า",
+    "nextMonth": "เดือนถัดไป",
+    "prevWeek": "สัปดาห์ก่อนหน้า",
+    "nextWeek": "สัปดาห์ถัดไป",
+    "viewMonth": "เดือน",
+    "viewWeek": "สัปดาห์",
+    "viewToggleAriaLabel": "มุมมองปฏิทิน",
+    "upcoming": "ที่กำลังจะถึง",
+    "readOnlyTitle": "ตารางสิ้นสุดแล้ว",
+    "readOnlyBody": "เวลาสิ้นสุดของตารางนี้ผ่านไปแล้ว ไม่สามารถแก้ไขหรือลบได้",
+    "pastBadge": "ผ่านมาแล้ว",
+    "DayDetails": {
+      "title": "ตารางวันที่ {date}",
+      "empty": "ไม่มีตารางในวันนี้",
+      "create": "สร้างตาราง",
+      "cannotCreatePast": "ไม่สามารถสร้างตารางในวันที่ผ่านมาแล้ว",
+      "close": "ปิด"
+    },
+    "Form": {
+      "createTitle": "สร้างตารางเวร",
+      "editTitle": "แก้ไขตารางเวร",
+      "doctor": "แพทย์",
+      "doctorPlaceholder": "เลือกแพทย์",
+      "doctorNoMatches": "ไม่พบแพทย์ที่ตรงกัน",
+      "doctorLoadingMore": "กำลังโหลดรายชื่อแพทย์เพิ่มเติม…",
+      "doctorShowingCount": "แสดง {loaded} จาก {total} ราย — เลื่อนเพื่อโหลดเพิ่ม",
+      "doctorSearchScopedHint": "การค้นหาจะตรงเฉพาะรายชื่อที่โหลดแล้ว เลื่อนเพื่อโหลดเพิ่ม",
+      "department": "แผนก",
+      "departmentPlaceholder": "เลือกแผนก",
+      "date": "วันที่",
+      "dateLockedHelper": "วันที่ถูกล็อกไว้ที่ {date}",
+      "startTime": "เวลาเริ่ม",
+      "endTime": "เวลาสิ้นสุด",
+      "hasBreak": "มีเวลาพัก",
+      "breakStartTime": "เริ่มพัก",
+      "breakEndTime": "สิ้นสุดพัก",
+      "acceptsBooking": "รับการจองใหม่",
+      "save": "บันทึก",
+      "create": "สร้าง",
+      "cancel": "ยกเลิก",
+      "delete": "ลบ",
+      "deleteConfirmTitle": "ลบตารางนี้?",
+      "deleteConfirmBody": "ตารางนี้จะถูกลบอย่างถาวร นัดหมายที่มีอยู่จะไม่ได้รับผลกระทบ แต่จะไม่รับการจองใหม่",
+      "deleteConfirm": "ลบ",
+      "deleteCancel": "ยกเลิก",
+      "editLockedNotice": "แพทย์ แผนก และวันที่ถูกล็อกไว้ หากต้องการเปลี่ยน กรุณาลบตารางนี้และสร้างใหม่"
+    },
+    "Errors": {
+      "forbidden": "คุณไม่มีสิทธิ์จัดการตารางเวร",
+      "overlap": "เวลานี้ทับซ้อนกับตารางที่มีอยู่ของแพทย์ท่านนี้",
+      "doctorNotInDepartment": "แพทย์ที่เลือกไม่ได้สังกัดแผนกนี้",
+      "scopeViolation": "คุณสามารถจัดการได้เฉพาะตารางของตัวเองเท่านั้น",
+      "startInPast": "เวลาเริ่มต้องอยู่ในอนาคต",
+      "endBeforeStart": "เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม",
+      "breakOutsideWindow": "ช่วงพักต้องอยู่ภายในเวลาเริ่ม–สิ้นสุด",
+      "breakInvalid": "เวลาสิ้นสุดพักต้องอยู่หลังเวลาเริ่มพัก",
+      "missingDoctor": "กรุณาเลือกแพทย์",
+      "missingDepartment": "กรุณาเลือกแผนก",
+      "missingDate": "กรุณาเลือกวัน",
+      "invalidDateTime": "วันที่หรือเวลาไม่ถูกต้อง",
+      "generic": "บันทึกตารางไม่สำเร็จ กรุณาลองอีกครั้ง"
     }
   }
 }

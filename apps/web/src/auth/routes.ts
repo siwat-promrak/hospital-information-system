@@ -21,6 +21,7 @@ export const FE_PATH = {
   DOCTOR_SCHEDULE: "/me/schedule",
   DEPARTMENTS: "/departments",
   DOCTORS: "/doctors",
+  SCHEDULES: "/schedules",
 } as const;
 
 export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];
@@ -38,15 +39,19 @@ export const BE_PATH = {
   AUTH_SIGN_OUT: "/auth/signout",
   DEPARTMENTS: "/departments",
   DOCTORS: "/doctors",
+  SCHEDULES: "/schedules",
 } as const;
 
 export type BePath = (typeof BE_PATH)[keyof typeof BE_PATH];
 
 /**
  * Builder for parameterised BE routes consumed via the `/api/be/*` rewrite.
+ *
+ * `GET /departments/:id/doctors` was retired in favour of
+ * `GET /doctors?departmentId=<uuid>` (single paginated doctors endpoint
+ * with a filter param), so the previous `departmentDoctors` entry is
+ * gone.
  */
 export const BE_PATH_BUILDER = {
-  departmentDoctors: (departmentId: string) =>
-    `${BE_PATH.DEPARTMENTS}/${departmentId}/doctors`,
   doctorDetail: (doctorId: string) => `${BE_PATH.DOCTORS}/${doctorId}`,
 } as const;

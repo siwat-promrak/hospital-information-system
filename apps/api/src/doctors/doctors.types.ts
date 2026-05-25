@@ -1,49 +1,26 @@
-import type { Gender } from '@prisma/client';
-
-/**
- * Per-department affiliation embedded in every doctor row. A doctor may
- * appear under multiple departments — the FE renders one chip per entry.
- */
-export interface DoctorDepartmentAffiliation {
-  departmentId: string;
-  departmentName: string;
-  isPrimary: boolean;
-}
-
-/**
- * Row returned by `GET /doctors`. Includes the affiliation list so the
- * staff directory can group / filter without a second round-trip.
- */
-export interface DoctorListRow {
-  id: string;
-  doctorCode: string;
-  firstNameEn: string;
-  lastNameEn: string;
-  fullName: string;
-  gender: Gender | null;
-  departments: DoctorDepartmentAffiliation[];
-}
-
-/**
- * Row returned by `GET /doctors/:id`. Extends the list row with the doctor
- * detail fields and a thin schedule summary (count of active schedules).
- * The schedule editor (F06) will surface the full detail; here we just
- * preview existence.
- */
-export interface DoctorDetailRow extends DoctorListRow {
-  phone: string;
-  medicalLicenseNo: string;
-  address: string | null;
-  scheduleCount: number;
-}
+import type { PaginationParams } from '../common/pagination';
 
 /**
  * Service-layer arguments for `listAll`. Pagination + the existing
  * department filter; new filters (search, role, …) extend this without
  * changing the controller wiring.
+ *
+ * Inherits `page` / `pageSize` (including the `PAGE_SIZE_ALL` sentinel
+ * support) from the shared `PaginationParams` interface.
+ *
+ * Row shapes returned to the wire are `DoctorResponseDto` (list) and
+ * `DoctorDetailResponseDto` (detail) — see `./dto/doctor.response.dto.ts`.
+ * The DTO classes ARE the response types; no parallel TS interfaces are
+ * maintained (Item 6 / Pattern A).
  */
-export interface ListDoctorsArgs {
-  page?: number;
-  pageSize?: number;
+export interface ListDoctorsArgs extends PaginationParams {
   departmentId?: string;
+  /**
+   * Optional case-insensitive substring filter. Matched against
+   * `User.firstNameEn`, `User.lastNameEn`, `User.firstNameTh`,
+   * `User.lastNameTh` and `Doctor.doctorCode` (logical OR). The controller
+   * trims whitespace and normalises empty strings to `undefined`, so a
+   * defined value here is always a non-empty trimmed string.
+   */
+  q?: string;
 }

@@ -11,9 +11,9 @@
 //   helper (apps/api/src/common/normalize-email.ts). Prisma cannot express a
 //   case-insensitive unique constraint without a Postgres extension, so the
 //   normalization is enforced at the application layer on every write/lookup.
-// - All timestamps are `timestamptz(3)` (UTC). Times-of-day on a doctor
-//   schedule are stored as minutes-since-midnight (`Int`) so slot math is
-//   pure arithmetic.
+// - All timestamps are `timestamptz(3)` (UTC). Doctor schedules are
+//   concrete dated windows (`start_at` / `end_at` timestamps) — not
+//   recurring weekly templates.
 // - Every table except `appointments` carries the audit cluster
 //   `created_at` / `created_by` / `updated_at` / `updated_by` /
 //   `deleted_at` / `deleted_by`. `created_by` / `updated_by` / `deleted_by`
@@ -58,21 +58,6 @@ enum AppointmentType {
   FOLLOW_UP
   CONSULTATION
   PROCEDURE
-}
-
-// `DayOfWeek` mirrors the seven calendar days. Stored as an enum rather than
-// an Int so the schema documents the domain and Postgres rejects out-of-range
-// values without a check constraint. Application-layer mapping to the
-// JavaScript `Date.getDay()` integer (0 = Sunday … 6 = Saturday) is handled by
-// helper functions in code.
-enum DayOfWeek {
-  SUN
-  MON
-  TUE
-  WED
-  THU
-  FRI
-  SAT
 }
 
 // `Gender` is captured on patients (required) and doctors (optional). Stored
@@ -426,35 +411,34 @@ model DoctorDepartment {
 }
 
 // ─── Schedule ────────────────────────────────────────────────────────────────
-// A doctor's recurring weekly working window. `dayOfWeek` is the `DayOfWeek`
-// enum (SUN…SAT); application code maps to the JavaScript `Date.getDay()`
-// integer when needed. `startMinute` / `endMinute` are minutes since midnight
-// clinic-local (0–1440). `breakStartMinute` / `breakEndMinute` carve out a
-// lunch (or similar) gap; the slot generator excludes that window. Effective
-// dates let staff change schedules without losing history.
+// A concrete dated availability window for one doctor in one department.
+// `startAt` / `endAt` are UTC timestamps that bound the working window;
+// `breakStartAt` / `breakEndAt` (optional) carve out a lunch (or similar)
+// gap. `acceptsBooking` toggles whether the slot is published for booking.
 //
-// Since a doctor can span multiple departments (see `DoctorDepartment`), each
-// schedule pins which department the working window is for; the booking flow
-// inherits `departmentId` on the new `Appointment` from the chosen schedule.
+// Schedules are NOT recurring — each row is one specific dated window. The
+// booking flow inherits `departmentId` from the schedule onto the new
+// `Appointment`.
 //
 // Time-range invariants enforced via raw-SQL CHECK constraints in the init
 // migration (Prisma 5 cannot express CHECK constraints natively):
-//   - start_minute < end_minute, both in [0, 1440]
-//   - if break_*_minute set, both must be set and the window must lie inside
-//     (start, end)
+//   - end_at > start_at
+//   - if either break_*_at is set, both must be set, break_start_at <
+//     break_end_at, and the break window must lie inside [start_at, end_at]
 
 model DoctorSchedule {
-  id               String    @id @default(uuid()) @db.Uuid
-  doctorId         String    @map("doctor_id") @db.Uuid
-  departmentId     String    @map("department_id") @db.Uuid
-  dayOfWeek        DayOfWeek @map("day_of_week")
-  startMinute      Int       @map("start_minute")
-  endMinute        Int       @map("end_minute")
-  breakStartMinute Int?      @map("break_start_minute")
-  breakEndMinute   Int?      @map("break_end_minute")
-  acceptsBooking   Boolean   @default(true) @map("accepts_booking")
-  effectiveFrom    DateTime  @map("effective_from") @db.Date
-  effectiveUntil   DateTime? @map("effective_until") @db.Date
+  id             String    @id @default(uuid()) @db.Uuid
+  doctorId       String    @map("doctor_id") @db.Uuid
+  departmentId   String    @map("department_id") @db.Uuid
+  startAt        DateTime  @map("start_at") @db.Timestamptz(3)
+  endAt          DateTime  @map("end_at") @db.Timestamptz(3)
+  breakStartAt   DateTime? @map("break_start_at") @db.Timestamptz(3)
+  breakEndAt     DateTime? @map("break_end_at") @db.Timestamptz(3)
+  /// Whether the slot finder (F07) should expose this window for patient
+  /// booking. Set `false` for blocked / on-call / admin-only windows
+  /// (e.g. OR standby, doctor's-meeting block) that should still be
+  /// visible on the staff calendar but not bookable by patients.
+  acceptsBooking Boolean   @default(true) @map("accepts_booking")
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
@@ -469,8 +453,8 @@ model DoctorSchedule {
   updatedByUser User?      @relation("DoctorScheduleUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User?      @relation("DoctorScheduleDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([doctorId, dayOfWeek, effectiveFrom])
   @@index([doctorId, departmentId])
+  @@index([startAt])
   @@map("doctor_schedules")
 }
 

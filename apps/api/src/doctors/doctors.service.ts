@@ -10,12 +10,12 @@ import {
 } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 
-import type {
-  DoctorDepartmentAffiliation,
-  DoctorDetailRow,
-  DoctorListRow,
-  ListDoctorsArgs,
-} from './doctors.types';
+import {
+  DoctorDepartmentAffiliationDto,
+  DoctorDetailResponseDto,
+  DoctorResponseDto,
+} from './dto/doctor.response.dto';
+import type { ListDoctorsArgs } from './doctors.types';
 
 /**
  * Shared `include` for the doctor lookups. Declared once so the inferred
@@ -58,12 +58,15 @@ export class DoctorsService {
    * List active doctors with their department affiliations. Optionally
    * filter to a single department — the filter joins through
    * `doctor_departments` so a doctor still surfaces if they hold the
-   * affiliation as primary OR secondary.
+   * affiliation as primary OR secondary. An optional `q` substring filter
+   * matches case-insensitively against the EN + TH name fields on the
+   * linked `User` row and the `Doctor.doctorCode`; the five field matches
+   * are logical-OR'd and combined with the department filter via AND.
    *
    * Sort is `doctorCode asc` for a stable directory view. Paginated — see
    * `Paginated<T>` for the envelope shape.
    */
-  async listAll(args: ListDoctorsArgs = {}): Promise<Paginated<DoctorListRow>> {
+  async listAll(args: ListDoctorsArgs = {}): Promise<Paginated<DoctorResponseDto>> {
     const where: Prisma.DoctorWhereInput = { deletedAt: null };
 
     if (args.departmentId) {
@@ -73,6 +76,16 @@ export class DoctorsService {
           deletedAt: null,
         },
       };
+    }
+
+    if (args.q) {
+      where.OR = [
+        { user: { firstNameEn: { contains: args.q, mode: 'insensitive' } } },
+        { user: { lastNameEn: { contains: args.q, mode: 'insensitive' } } },
+        { user: { firstNameTh: { contains: args.q, mode: 'insensitive' } } },
+        { user: { lastNameTh: { contains: args.q, mode: 'insensitive' } } },
+        { doctorCode: { contains: args.q, mode: 'insensitive' } },
+      ];
     }
 
     const resolved = resolvePagination(args);
@@ -97,7 +110,7 @@ export class DoctorsService {
    * Detail lookup for a single doctor. Returns `404 NOT_FOUND` if the
    * doctor is missing or soft-deleted.
    */
-  async getById(id: string): Promise<DoctorDetailRow> {
+  async getById(id: string): Promise<DoctorDetailResponseDto> {
     const doctor = await this.prisma.doctor.findFirst({
       where: { id, deletedAt: null },
       include: doctorWithAffiliationsInclude,
@@ -120,8 +133,8 @@ export class DoctorsService {
     };
   }
 
-  private toListRow(row: DoctorWithAffiliations): DoctorListRow {
-    const affiliations: DoctorDepartmentAffiliation[] = row.departments.map(
+  private toListRow(row: DoctorWithAffiliations): DoctorResponseDto {
+    const affiliations: DoctorDepartmentAffiliationDto[] = row.departments.map(
       (link) => ({
         departmentId: link.department.id,
         departmentName: link.department.name,

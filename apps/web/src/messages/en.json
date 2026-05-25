@@ -44,6 +44,7 @@
       "dashboard": "Dashboard",
       "departments": "Departments",
       "doctors": "Doctors",
+      "schedules": "Schedules",
       "mySchedule": "My schedule"
     }
   },
@@ -53,13 +54,18 @@
     "staff": "Staff",
     "me": "Me",
     "schedule": "Schedule",
+    "schedules": "Schedules",
     "departments": "Departments",
     "doctors": "Doctors"
   },
   "UserMenu": {
     "openMenu": "Open user menu",
     "signedInAs": "Signed in as",
-    "language": "Language"
+    "language": "Language",
+    "locales": {
+      "en": "English",
+      "th": "ภาษาไทย"
+    }
   },
   "Pagination": {
     "ariaLabel": "Pagination navigation",
@@ -69,6 +75,23 @@
     "last": "Last page",
     "currentPage": "Page {page}, current page",
     "gotoPage": "Go to page {page}"
+  },
+  "Snackbar": {
+    "Success": {
+      "scheduleCreated": "Schedule created.",
+      "scheduleUpdated": "Schedule updated.",
+      "scheduleDeleted": "Schedule deleted.",
+      "signedOut": "You have been signed out."
+    },
+    "Errors": {
+      "generic": "Something went wrong. Please try again.",
+      "overlap": "This time conflicts with an existing schedule.",
+      "doctorNotInDepartment": "The selected doctor is not affiliated with this department.",
+      "scopeViolation": "You can only manage your own schedules.",
+      "forbidden": "You don't have permission for that action.",
+      "startInPast": "Cannot create or edit a schedule with a past start time.",
+      "network": "Network error. Please check your connection and try again."
+    }
   },
   "Directory": {
     "Departments": {
@@ -100,6 +123,83 @@
     "Errors": {
       "forbidden": "You don't have permission to view this page.",
       "loadFailed": "Failed to load directory data."
+    }
+  },
+  "Schedules": {
+    "title": "Schedules",
+    "subtitle": "Working windows for every doctor — switch between month and week views.",
+    "myTitle": "My schedule",
+    "mySubtitle": "Your working windows.",
+    "filterByDepartment": "Filter by department",
+    "allDepartments": "All departments",
+    "addSchedule": "Add schedule",
+    "addForDate": "Add for {date}",
+    "moreCount": "+ {count} more",
+    "breakLabel": "Break",
+    "notAcceptingBookings": "Closed to bookings",
+    "legendDepartment": "Department",
+    "today": "Today",
+    "prevMonth": "Previous month",
+    "nextMonth": "Next month",
+    "prevWeek": "Previous week",
+    "nextWeek": "Next week",
+    "viewMonth": "Month",
+    "viewWeek": "Week",
+    "viewToggleAriaLabel": "Calendar view",
+    "upcoming": "Upcoming",
+    "readOnlyTitle": "Schedule has ended",
+    "readOnlyBody": "This schedule's end time has already passed. It cannot be edited or deleted.",
+    "pastBadge": "Past",
+    "DayDetails": {
+      "title": "Schedules on {date}",
+      "empty": "No schedules on this day.",
+      "create": "Create schedule",
+      "cannotCreatePast": "Cannot create a schedule in the past.",
+      "close": "Close"
+    },
+    "Form": {
+      "createTitle": "Create schedule",
+      "editTitle": "Edit schedule",
+      "doctor": "Doctor",
+      "doctorPlaceholder": "Select doctor",
+      "doctorNoMatches": "No matching doctors",
+      "doctorLoadingMore": "Loading more doctors…",
+      "doctorShowingCount": "Showing {loaded} of {total} doctors — scroll to load more",
+      "doctorSearchScopedHint": "Search only matches doctors already loaded. Scroll to load more.",
+      "department": "Department",
+      "departmentPlaceholder": "Select department",
+      "date": "Date",
+      "dateLockedHelper": "Date locked to {date}.",
+      "startTime": "Start time",
+      "endTime": "End time",
+      "hasBreak": "Include break",
+      "breakStartTime": "Break start",
+      "breakEndTime": "Break end",
+      "acceptsBooking": "Accepts new bookings",
+      "save": "Save",
+      "create": "Create",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "deleteConfirmTitle": "Delete this schedule?",
+      "deleteConfirmBody": "This schedule will be removed permanently. Existing appointments are not affected, but no new bookings will be accepted against it.",
+      "deleteConfirm": "Delete",
+      "deleteCancel": "Cancel",
+      "editLockedNotice": "Doctor, department, and date are locked. To change them, delete this schedule and create a new one."
+    },
+    "Errors": {
+      "forbidden": "You don't have permission to manage schedules.",
+      "overlap": "This time conflicts with an existing schedule for the doctor.",
+      "doctorNotInDepartment": "The selected doctor is not affiliated with this department.",
+      "scopeViolation": "You can only manage your own schedules.",
+      "startInPast": "Start time must be in the future.",
+      "endBeforeStart": "End time must be after start time.",
+      "breakOutsideWindow": "Break window must lie inside the start–end window.",
+      "breakInvalid": "Break end must be after break start.",
+      "missingDoctor": "Select a doctor.",
+      "missingDepartment": "Select a department.",
+      "missingDate": "Select a date.",
+      "invalidDateTime": "Date or time is invalid.",
+      "generic": "Failed to save the schedule. Please try again."
     }
   }
 }

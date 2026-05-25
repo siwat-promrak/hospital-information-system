@@ -23,7 +23,10 @@ import {
 import { CurrentUser } from './decorators/current-user.decorator';
 import { InternalRoute } from './decorators/internal-route.decorator';
 import { RequirePermission } from './decorators/require-permission.decorator';
-import { ResolveDto, ResolveResponseDto } from './dto/resolve.dto';
+import { MeResponseDto } from './dto/me.response.dto';
+import { PermissionCheckResponseDto } from './dto/permission-check.response.dto';
+import { ResolveDto } from './dto/resolve.dto';
+import { ResolveResponseDto } from './dto/resolve.response.dto';
 import { PERMISSION } from './permissions';
 
 @ApiTags('auth')
@@ -51,14 +54,16 @@ export class AuthController {
 
   @Get('me')
   @ApiMe()
-  me(@CurrentUser() user: AuthenticatedUser): AuthenticatedUser {
-    return user;
+  me(@CurrentUser() user: AuthenticatedUser): MeResponseDto {
+    // `AuthenticatedUser` (interface) IS structurally `MeResponseDto`
+    // (class) — the JWT guard already populated every field.
+    return user as MeResponseDto;
   }
 
   @Get('me/permissions-check')
   @RequirePermission(PERMISSION.PERMISSION_ASSIGN)
   @ApiMePermissionsCheck()
-  permissionCheck(): { ok: true } {
+  permissionCheck(): PermissionCheckResponseDto {
     return { ok: true };
   }
 }

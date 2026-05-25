@@ -46,8 +46,11 @@ Conventions:
   from `(DoctorSchedule, AppointmentType.durationMinutes)`.
 - Slot grid step equals the chosen appointment type's duration (e.g. a 20-min
   consultation yields 09:00, 09:20, 09:40, …).
-- All schedule times are stored as `startMinute: Int` (minutes since midnight,
-  clinic-local).
+- All schedule times are stored as `startAt` / `endAt` (`timestamptz(3)` UTC) —
+  concrete dated windows, not recurring weekday templates. Doctor schedules
+  pivoted to this shape in F06; the per-row date + time fully encode the
+  working window. See `docs/handoffs/F06-schedules-api.md` for the wire
+  contract.
 - `BOOKED` and `COMPLETED` block a slot; `CANCELLED` frees it for immediate
   reuse.
 - `COMPLETED` transition is **deferred** in P0 (enum value exists, no
@@ -119,7 +122,7 @@ for the auth core.
 | `department_appointment_types`| Per-department allowed `AppointmentType` set (the "department booking rules" from the spec). Unique on `(departmentId, appointmentType)`. Booking validation MUST check the pair exists here.        |
 | `doctors`                     | Practitioner. 1-1 link to a `User` (`role.code = DOCTOR`). Carries `doctorCode` (unique), `medicalLicenseNo` (unique), `identificationNo` (required, freeform — parity with Patient). **No `departmentId` column** — affiliation lives in `doctor_departments`. |
 | `doctor_departments`          | M:N join between `doctors` and `departments`. Each row carries `isPrimary: Boolean default false`; application layer enforces "at most one primary per doctor" (no DB constraint). Unique on `(doctorId, departmentId)`. |
-| `doctor_schedules`            | Weekly recurring availability with `doctorId`, `departmentId` (which department this schedule is for — required, since doctors may span departments), `dayOfWeek`, `startMinute` / `endMinute` (CHECK-validated), optional `breakStartMinute` / `breakEndMinute` (CHECK-validated), `acceptsBooking` flag, `effectiveFrom`, `effectiveUntil?`. Indexed on `(doctorId, departmentId)`. |
+| `doctor_schedules`            | Dated availability window (NOT recurring) with `doctorId`, `departmentId` (which department this schedule is for — required, since doctors may span departments), `startAt` / `endAt` (`timestamptz(3)` UTC, CHECK `end_at > start_at`), optional `breakStartAt` / `breakEndAt` (CHECK-validated), `acceptsBooking` flag. Each row is one specific UTC start/end pair; one-off shifts are first-class. Indexed on `(doctorId, departmentId)` and `(startAt)` for the calendar's date-range fetches. F06 pivoted from minute-based recurring templates to dated windows (the `_init` migration was regenerated). |
 | `appointments`                | `patientId`, `doctorId`, `departmentId` (inherited from the chosen schedule), `appointmentType`, `status`, `startAt` / `endAt` (CHECK `end > start`), `reason?` (Postgres `text`, no length cap), `createdBy` (renamed from `createdByUserId`), `updatedBy?`, `cancelledBy?` (renamed from `cancelledByUserId`) / `cancelledAt?` / `cancellationReason?`, `completedAt?`. **No `deletedAt` / `deletedBy`** — uses `status=CANCELLED` instead. |
 | `roles`                       | RBAC role (`code` unique). Seeded with `ADMIN`, `STAFF`, `DOCTOR`; admins holding `role.manage` may add custom roles at runtime.                                                                     |
 | `permissions`                 | Atomic capability with a stable `code`. **Code-defined**: seeded from a canonical list in `apps/api/prisma/seed/permissions.ts`; adding a new permission requires a code change + migration.         |
@@ -186,12 +189,16 @@ Four raw-SQL CHECK constraints are appended to the init migration (Prisma
 end of this document for SQL.
 
 1. `patients_hn_format` — `hn ~ '^[0-9]{7,9}$'`.
-2. `doctor_schedules_window_valid` — `0 <= start_minute < end_minute <=
-   1440`.
-3. `doctor_schedules_break_valid` — if break minutes set, both must be
-   set and the break window must lie inside the working window with
-   `break_start < break_end`.
+2. `doctor_schedules_end_after_start` — `end_at > start_at` (F06 pivot;
+   replaces the original `doctor_schedules_window_valid` minute bounds).
+3. `doctor_schedules_break_valid` — if either break timestamp is set,
+   both must be set, the break window must lie inside the working
+   window, and `break_start_at < break_end_at`.
 4. `appointments_end_after_start` — `end_at > start_at`.
+
+Past-`startAt` rejection on `DoctorSchedule` writes is **not** a DB CHECK
+(Postgres cannot express `now` in a constraint) — it lives in the
+service-layer guard and surfaces as `400 SCHEDULE_START_IN_PAST`.
 
 ### Notes / assumptions
 
@@ -205,25 +212,34 @@ end of this document for SQL.
 ### Seeded data (development)
 
 The dev seed orchestrator (`apps/api/prisma/seed/index.ts`) produces a
-stable, idempotent baseline. **No DOCTOR users, doctors, doctor schedules,
-or appointments are seeded** — those are created via application
-workflows (admin invite + schedule editor + booking) in later features.
+stable, idempotent baseline. **No appointments are seeded** — those are
+created via application workflows (booking) in later features. F06
+expanded the original baseline (which had no DOCTOR users or schedules)
+with 75 doctors + 2700 dated schedules so directory pagination, the
+doctor picker, and the calendar all have a realistic dataset to stress.
 
 - **3 roles** — `ADMIN`, `STAFF`, `DOCTOR`.
 - **16 permissions** — the canonical catalog above.
 - **17 policies** — 5 + 11 + 1 as listed above.
-- **5 users** — 1 super-admin (nil UUID) + 2 ADMIN
+- **80 users** — 1 super-admin (nil UUID) + 2 ADMIN
   (`admin1@gmail.com`, `admin2@gmail.com`) + 2 STAFF
-  (`staff1@gmail.com`, `staff2@gmail.com`).
+  (`staff1@gmail.com`, `staff2@gmail.com`) + **75 DOCTOR**
+  (`doctor01@gmail.com`…`doctor75@gmail.com`).
 - **10 departments** — Cardiology, Internal Medicine, Pediatrics,
   Orthopedics, Obstetrics & Gynecology, Dermatology, Ophthalmology,
   Otolaryngology (ENT), General Surgery, Emergency Medicine.
-- **35 `department_appointment_types`** — per-department allowed-type
+- **~34 `department_appointment_types`** — per-department allowed-type
   matrix.
 - **10 patients** — HN `26000001`…`26000010`, emails
   `patient1@mailsac.com`…`patient10@mailsac.com`, multilingual names mix
   (about half have Thai names), 5 MALE + 5 FEMALE, blood-group mix
   including `UNKNOWN`.
+- **75 doctors** — 15 hand-crafted + 60 generated, spread across all 10
+  departments. Affiliation distribution: 42 single-dept, 20 two-dept, 13
+  three-dept.
+- **2700 doctor_schedules** — 75 doctors × 3 weekdays × 12 weeks (past 8
+  + next 4) of dated windows. Doctors with multiple affiliations rotate
+  their schedule department across weeks (`weekIdx % affiliations.length`).
 
 ---
 
@@ -474,9 +490,9 @@ one to book with.
   pagination control. Changing the filter resets `page=1` so the user
   doesn't land on an empty page beyond the filtered result set; the
   filter value is preserved as `?departmentId=` across page navigation.
-- A companion `GET /departments/:id/doctors?page=&pageSize=` returns the
-  doctors affiliated with a single department in the same paginated
-  envelope.
+- "Doctors in a department" is served by `GET /doctors?departmentId=:id`
+  — the previous companion `GET /departments/:id/doctors` was retired so
+  there is one canonical lookup for this view.
 
 ### US-4.3 — View doctor detail
 
@@ -498,7 +514,21 @@ can see their department affiliations and upcoming availability summary.
 
 ---
 
-## E5 — Doctor Schedule management
+## E5 — Doctor Schedule management ✅ shipped (F06, `feat/schedules`)
+
+> **Delta from the original AC, captured during F06 implementation:**
+> The schedule model pivoted mid-feature from **recurring weekly
+> templates** (`dayOfWeek + startMinute + endMinute + effectiveFrom +
+> effectiveUntil`) to **concrete dated windows** (`startAt + endAt +
+> breakStartAt? + breakEndAt?`, all `timestamptz(3)` UTC). The `_init`
+> migration was regenerated to land the new column shape. Endpoints
+> moved to the flat `/schedules` namespace (no `/doctors/:id/schedules`
+> nesting). DOCTOR scope behaviour was tightened so foreign GET returns
+> `404 SCHEDULE_NOT_FOUND` (no existence leak) while foreign mutate
+> returns `403 INSUFFICIENT_PERMISSION_SCOPE`. A service-layer
+> past-`startAt` guard (`400 SCHEDULE_START_IN_PAST`) was added because
+> the DB cannot express `now` in a CHECK. Full wire contract in
+> `docs/handoffs/F06-schedules-api.md`.
 
 All endpoints in this epic require the `schedule.manage` permission.
 **STAFF and DOCTOR** both hold it by default; ADMIN does NOT (ADMIN may
@@ -508,8 +538,10 @@ grant it to themselves via `permission.assign` if needed).
 service MUST restrict every mutation and read to schedules where
 `schedule.doctorId === caller.doctor.id` — DOCTOR cannot view or edit
 another doctor's schedule. STAFF gets the unrestricted form of the same
-permission. Calls that violate this scope return `403` with
-`code=INSUFFICIENT_PERMISSION_SCOPE`.
+permission. Foreign **mutate** (create / patch / delete / list with an
+explicit foreign `?doctorId=`) returns `403 INSUFFICIENT_PERMISSION_SCOPE`;
+foreign **GET** of a specific id returns `404 SCHEDULE_NOT_FOUND` so
+probing cannot leak the existence of another doctor's rows.
 
 **Department coupling:** each `DoctorSchedule` row carries a required
 `departmentId`. The chosen department MUST appear in the doctor's
@@ -517,91 +549,123 @@ permission. Calls that violate this scope return `403` with
 `code=DOCTOR_NOT_IN_DEPARTMENT`.
 
 **DB-level CHECK constraints back-stop the validation:**
-`doctor_schedules_window_valid` enforces window math and
-`doctor_schedules_break_valid` enforces break-window math (see the
-Constraints reference). DTOs mirror these checks for fast user feedback.
+`doctor_schedules_end_after_start` enforces `endAt > startAt` and
+`doctor_schedules_break_valid` enforces the break-window invariants (see
+the Constraints reference). DTOs mirror these checks for fast user
+feedback. The past-`startAt` rejection is service-layer only
+(`400 SCHEDULE_START_IN_PAST`).
 
-### US-5.1 — Lists schedules for a doctor
+### US-5.1 — Lists schedules in a date range ✅ shipped
 
 **US-5.1** — As a user with `schedule.manage`, I want to view all schedule
-rows for a chosen doctor, so that I can see and manage their weekly
-availability.
+rows inside a date range (and optionally filtered by doctor / department),
+so that I can see and manage availability across the focused window.
 
 **Acceptance criteria:**
 
-- `GET /doctors/:id/schedules` returns
-  `[{ id, departmentId, dayOfWeek, startMinute, endMinute, breakStartMinute?, breakEndMinute?, acceptsBooking, effectiveFrom, effectiveUntil? }]`
-  ordered by `(effectiveFrom DESC, dayOfWeek ASC, startMinute ASC)`.
+- `GET /schedules?page=&pageSize=&doctorId=&departmentId=&from=&to=`
+  returns the shared `Paginated<ScheduleResponse>` envelope. Each row:
+  `{ id, doctorId, doctor: { id, doctorCode, firstNameEn, lastNameEn, firstNameTh?, lastNameTh? }, departmentId, department: { id, name, description? }, startAt, endAt, breakStartAt?, breakEndAt?, acceptsBooking, createdAt, updatedAt }`.
+  Sort: `startAt ASC` (closest upcoming window first).
+- `from` / `to` are calendar dates (`YYYY-MM-DD`). The service expands
+  them to `[startOfDay(from), endOfDay(to)]` UTC and matches schedules
+  whose `[startAt, endAt)` intersects the range. When BOTH are omitted,
+  the range defaults to the current calendar month UTC.
+- `pageSize=all` (sentinel) is permitted — the calendar uses it bounded
+  by `from` / `to` so a populated month / week fits in one response.
 - Endpoint requires the `schedule.manage` permission; callers without it
   receive `403 INSUFFICIENT_PERMISSION`.
-- **DOCTOR scope:** if `caller.role === DOCTOR`, the response is
-  restricted to schedules where `doctorId === caller.doctor.id`;
-  requesting another doctor's schedules returns
-  `403 INSUFFICIENT_PERMISSION_SCOPE`.
-- The UI page lists schedules grouped by day-of-week with localized
-  weekday labels, with the per-row `departmentId` rendered as the
-  department name.
+- **DOCTOR scope:** the response is auto-restricted to
+  `doctorId === caller.doctor.id`. Explicitly passing a different
+  `?doctorId=` returns `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- The UI renders a calendar with toggleable month / week views.
+  `?view=month|week`, `?month=YYYY-MM`, `?weekStart=YYYY-MM-DD`, and
+  `?departmentId=` are URL state. Schedules render as colored chips
+  (month) or positioned blocks with lane assignment for overlaps (week).
+  Clicking an empty day cell (month view) or an empty area in a column
+  (week view) opens the day-details dialog listing every schedule on that
+  date.
 
-### US-5.2 — Creates a schedule
+### US-5.2 — Creates a schedule ✅ shipped
 
-**US-5.2** — As a user with `schedule.manage`, I want to add a new weekly
-recurring schedule for a doctor, so that the slot finder can offer their
-availability.
+**US-5.2** — As a user with `schedule.manage`, I want to add a new dated
+availability window for a doctor, so that the slot finder can offer their
+availability for booking on that date.
 
 **Acceptance criteria:**
 
-- `POST /doctors/:id/schedules` accepts
-  `{ departmentId, dayOfWeek (0–6), startMinute, endMinute, breakStartMinute?, breakEndMinute?, acceptsBooking?, effectiveFrom, effectiveUntil? }`.
-- Validation: `0 <= startMinute < endMinute <= 1440`, break window (if
-  set) lies fully inside `(startMinute, endMinute)` with
-  `breakStart < breakEnd`, `effectiveFrom <= effectiveUntil` when both
-  set. These DTO checks mirror the DB CHECK constraints.
+- `POST /schedules` accepts
+  `{ doctorId, departmentId, startAt, endAt, breakStartAt?, breakEndAt?, acceptsBooking? }`.
+  All datetimes are ISO 8601 UTC strings.
+- Cross-field validation (DTO, rejected `400 VALIDATION_FAILED` before
+  any DB work): `endAt > startAt`; if either `breakStartAt` or
+  `breakEndAt` is set, BOTH must be set; `breakStartAt < breakEndAt`;
+  `breakStartAt >= startAt` AND `breakEndAt <= endAt`. These mirror the
+  DB CHECK constraints.
+- `startAt` MUST be strictly in the future (`startAt > now`). Past values
+  are rejected `400 SCHEDULE_START_IN_PAST` at the service layer (DB
+  cannot express `now` in a CHECK).
 - `departmentId` must be one of the doctor's affiliations
   (`doctor_departments`); otherwise reject with
-  `code=DOCTOR_NOT_IN_DEPARTMENT`.
-- Backend rejects schedules that overlap an existing active schedule for
-  the same `(doctor, dayOfWeek)` within their effective windows
-  (`code=SCHEDULE_OVERLAP`).
+  `409 DOCTOR_NOT_IN_DEPARTMENT`.
+- Backend rejects schedules whose `[startAt, endAt)` intersects another
+  active schedule for the same `doctorId` (half-open overlap; back-to-back
+  windows do NOT overlap) with `409 SCHEDULE_OVERLAP` and `details:
+  { conflictingScheduleId }`.
 - Endpoint requires the `schedule.manage` permission.
-- **DOCTOR scope:** if `caller.role === DOCTOR`, `:id` MUST equal
+- **DOCTOR scope:** the `doctorId` in the body MUST equal
   `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
-- The UI exposes a "Add schedule" dialog using MUI date pickers, a
-  weekday selector, and a department selector populated from the doctor's
-  affiliations.
+- The UI exposes a `ScheduleFormDialog` reached either from "+ Create
+  schedule" in the page header or from the day-details dialog (which
+  pre-fills the clicked date). The dialog uses MUI date / time pickers,
+  the reusable `SearchableSelect` doctor picker (server-paged), and a
+  department selector populated from the chosen doctor's affiliations.
+  Past dates disable the Create CTA.
 
-### US-5.3 — Edits a schedule
+### US-5.3 — Edits a schedule ✅ shipped
 
 **US-5.3** — As a user with `schedule.manage`, I want to edit an existing
 schedule, so that I can correct mistakes or change hours.
 
 **Acceptance criteria:**
 
-- `PATCH /doctors/:doctorId/schedules/:scheduleId` accepts a partial of
-  the create payload (including `departmentId`).
-- Same window / break / department / overlap validation as US-5.2.
+- `PATCH /schedules/:id` accepts a partial of the create payload
+  EXCLUDING `doctorId` (moving a schedule between doctors is out of
+  scope for F06). `departmentId` IS editable.
+- The service merges the patch over the existing row and re-runs every
+  cross-field invariant AND the affiliation + overlap + past-`startAt`
+  checks against the merged shape. Same error codes as create.
 - Endpoint requires the `schedule.manage` permission.
-- **DOCTOR scope:** if `caller.role === DOCTOR`, the schedule's
-  `doctorId` MUST equal `caller.doctor.id`; else
-  `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- **DOCTOR scope:** the schedule's `doctorId` MUST equal
+  `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
 - Editing a schedule does **not** retroactively cancel appointments
-  already booked outside the new window — those are flagged in the UI but
-  remain `BOOKED`.
+  already booked outside the new window — those remain `BOOKED`. F08
+  will surface affected counts when it ships.
+- The UI opens the same `ScheduleFormDialog` on chip click. Doctor /
+  department / date are non-editable in edit mode (the doctor lock
+  matches the BE which excludes `doctorId` from `UpdateScheduleDto`).
+  Only times + break + `acceptsBooking` are mutable. Past schedules
+  (`endAt <= now`) open in read-only form with a banner; the Save button
+  is hidden.
 
-### US-5.4 — Deletes a schedule
+### US-5.4 — Deletes a schedule ✅ shipped
 
-**US-5.4** — As a user with `schedule.manage`, I want to remove a schedule,
-so that the doctor stops being offered for new bookings on that day/time.
+**US-5.4** — As a user with `schedule.manage`, I want to remove a
+schedule, so that the doctor stops being offered for new bookings inside
+that window.
 
 **Acceptance criteria:**
 
-- `DELETE /doctors/:doctorId/schedules/:scheduleId` removes the row.
+- `DELETE /schedules/:id` soft-deletes the row (sets `deletedAt` +
+  `deletedBy`) and returns `204 No Content`.
+- A follow-up DELETE on the same id returns `404 SCHEDULE_NOT_FOUND` so
+  the FE never thinks "succeeded" for a row that was deleted by someone
+  else in the interim.
 - Endpoint requires the `schedule.manage` permission.
-- **DOCTOR scope:** if `caller.role === DOCTOR`, the schedule's
-  `doctorId` MUST equal `caller.doctor.id`; else
-  `403 INSUFFICIENT_PERMISSION_SCOPE`.
-- Deleting a schedule does NOT cancel existing future appointments inside
-  that window; the UI surfaces a count of affected future appointments
-  before confirming.
+- **DOCTOR scope:** the schedule's `doctorId` MUST equal
+  `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- Deleting a schedule does NOT cancel existing future appointments
+  inside that window; F08 surfaces affected counts when it ships.
 
 ---
 
@@ -973,12 +1037,12 @@ DB-level CHECK constraints, all appended as raw SQL to the init migration
 cannot express CHECK constraints natively). The application layer mirrors
 these in DTO validation for fast user feedback; the DB is the back-stop.
 
-| Constraint                          | Table              | SQL                                                                                                                                                                                                                                                                                                              |
-| ----------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `patients_hn_format`                | `patients`         | `CHECK ("hn" ~ '^[0-9]{7,9}$')`                                                                                                                                                                                                                                                                                  |
-| `doctor_schedules_window_valid`     | `doctor_schedules` | `CHECK ("start_minute" >= 0 AND "end_minute" <= 1440 AND "start_minute" < "end_minute")`                                                                                                                                                                                                                          |
-| `doctor_schedules_break_valid`      | `doctor_schedules` | `CHECK (("break_start_minute" IS NULL AND "break_end_minute" IS NULL) OR ("break_start_minute" IS NOT NULL AND "break_end_minute" IS NOT NULL AND "break_start_minute" >= "start_minute" AND "break_end_minute" <= "end_minute" AND "break_start_minute" < "break_end_minute"))`                                  |
-| `appointments_end_after_start`      | `appointments`     | `CHECK ("end_at" > "start_at")`                                                                                                                                                                                                                                                                                  |
+| Constraint                            | Table              | SQL                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `patients_hn_format`                  | `patients`         | `CHECK ("hn" ~ '^[0-9]{7,9}$')`                                                                                                                                                                                                                                                                                  |
+| `doctor_schedules_end_after_start`    | `doctor_schedules` | `CHECK ("end_at" > "start_at")`                                                                                                                                                                                                                                                                                  |
+| `doctor_schedules_break_valid`        | `doctor_schedules` | `CHECK (("break_start_at" IS NULL AND "break_end_at" IS NULL) OR ("break_start_at" IS NOT NULL AND "break_end_at" IS NOT NULL AND "break_start_at" >= "start_at" AND "break_end_at" <= "end_at" AND "break_start_at" < "break_end_at"))`                                                                          |
+| `appointments_end_after_start`        | `appointments`     | `CHECK ("end_at" > "start_at")`                                                                                                                                                                                                                                                                                  |
 
 **Migration regen flow** (when the schema changes during development):
 1. Drop the local Postgres schema.

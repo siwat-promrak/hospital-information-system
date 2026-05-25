@@ -8,11 +8,14 @@ export {
   DEFAULT_PAGE,
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
+  PAGE_SIZE_ALL,
   PAGINATION_QUERY_PARAM,
 } from './pagination.const';
+export type { PageSizeAll } from './pagination.const';
 export { PaginationQueryDto } from './pagination-query.dto';
+export { IsPageSize } from './decorators/page-size.decorator';
 export { PaginatedDto, PaginatedResponseDto } from './paginated-response.dto';
-export type { Paginated } from './pagination.types';
+export type { Paginated, PaginationParams } from './pagination.types';
 export {
   buildPaginatedResponse,
   resolvePagination,

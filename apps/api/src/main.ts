@@ -1,3 +1,8 @@
+// Load dayjs plugins exactly once before any request handler runs.
+// MUST stay the first project-local import — see `apps/api/src/dayjs.ts`
+// and Rule 9 in `CLAUDE.md`.
+import './dayjs';
+
 import {
   Logger,
   ValidationPipe,

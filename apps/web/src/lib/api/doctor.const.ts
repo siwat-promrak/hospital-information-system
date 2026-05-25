@@ -9,3 +9,12 @@
 export const DOCTOR_QUERY_PARAM = {
   DEPARTMENT_ID: "departmentId",
 } as const;
+
+/**
+ * Page size used by surfaces that page through doctors as the user
+ * scrolls (the schedule form's doctor picker — see `ScheduleFormDialog`).
+ * Kept here so the SSR initial page + the in-dialog `loadMore` calls
+ * stay in lock-step — drift between the two would leak rows or skip rows
+ * at the page boundary.
+ */
+export const DOCTOR_INFINITE_SCROLL_PAGE_SIZE = 20;

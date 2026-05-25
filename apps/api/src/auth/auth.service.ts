@@ -7,8 +7,8 @@ import { ErrorCode } from '../common/errors';
 import { UsersService } from '../users/users.service';
 import type { AuthenticatedUser } from '../users/users.types';
 
-import type { ResolveResult } from './auth.types';
 import type { ResolveDto } from './dto/resolve.dto';
+import { ResolveResponseDto } from './dto/resolve.response.dto';
 import type { PermissionCode } from './permissions';
 import { SIGN_IN_ELIGIBLE_ROLES, type RoleCode } from './roles';
 
@@ -38,7 +38,7 @@ export class AuthService {
    * `auth_logs`. Writes are fire-and-forget — a log failure never breaks
    * the auth response.
    */
-  async resolve(dto: ResolveDto, context: AuthLogContext): Promise<ResolveResult> {
+  async resolve(dto: ResolveDto, context: AuthLogContext): Promise<ResolveResponseDto> {
     if (!dto.emailVerified) {
       await this.authLog.logSignInFailure(dto.email, ErrorCode.EMAIL_UNVERIFIED, context);
 
@@ -91,7 +91,7 @@ export class AuthService {
     return (SIGN_IN_ELIGIBLE_ROLES as readonly string[]).includes(code);
   }
 
-  private toResolveResult(user: AuthenticatedUser): ResolveResult {
+  private toResolveResult(user: AuthenticatedUser): ResolveResponseDto {
     return {
       userId: user.id,
       roleCode: user.roleCode,

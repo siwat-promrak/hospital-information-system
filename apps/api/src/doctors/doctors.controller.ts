@@ -8,10 +8,10 @@ import type { Paginated } from '../common/pagination';
 import { DoctorsService } from './doctors.service';
 import { ApiGetDoctor, ApiListDoctors } from './doctors.swagger';
 import {
-  DoctorDetailDto,
-  DoctorDto,
-  ListDoctorsQueryDto,
-} from './dto/doctor.dto';
+  DoctorDetailResponseDto,
+  DoctorResponseDto,
+} from './dto/doctor.response.dto';
+import { ListDoctorsQueryDto } from './dto/list-doctors.query.dto';
 
 @ApiTags('doctors')
 @Controller('doctors')
@@ -21,11 +21,12 @@ export class DoctorsController {
   @Get()
   @RequirePermission(PERMISSION.DOCTOR_LIST)
   @ApiListDoctors()
-  list(@Query() query: ListDoctorsQueryDto): Promise<Paginated<DoctorDto>> {
+  list(@Query() query: ListDoctorsQueryDto): Promise<Paginated<DoctorResponseDto>> {
     return this.doctors.listAll({
       page: query.page,
       pageSize: query.pageSize,
       departmentId: query.departmentId,
+      q: query.q,
     });
   }
 
@@ -34,7 +35,7 @@ export class DoctorsController {
   @ApiGetDoctor()
   getOne(
     @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<DoctorDetailDto> {
+  ): Promise<DoctorDetailResponseDto> {
     return this.doctors.getById(id);
   }
 }
