@@ -13,6 +13,7 @@ import { DepartmentsModule } from './departments/departments.module';
 import { DoctorsModule } from './doctors/doctors.module';
 import { HealthModule } from './health/health.module';
 import { MedicalRecordsModule } from './medical-records/medical-records.module';
+import { PatientsModule } from './patients/patients.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { SlotsModule } from './slots/slots.module';
@@ -35,6 +36,7 @@ import { UsersModule } from './users/users.module';
     AppointmentTypesModule,
     SlotsModule,
     MedicalRecordsModule,
+    PatientsModule,
     HealthModule,
   ],
   providers: [
