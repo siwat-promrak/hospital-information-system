@@ -1,15 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Gender } from '@prisma/client';
 
-export class DoctorDepartmentAffiliationDto {
+export class DoctorDepartmentRefDto {
   @ApiProperty({ example: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9' })
-  departmentId!: string;
+  id!: string;
 
   @ApiProperty({ example: 'Cardiology' })
-  departmentName!: string;
-
-  @ApiProperty({ example: true })
-  isPrimary!: boolean;
+  name!: string;
 }
 
 const GENDER_VALUES = Object.values(Gender);
@@ -33,8 +30,11 @@ export class DoctorResponseDto {
   @ApiProperty({ example: Gender.FEMALE, enum: GENDER_VALUES, nullable: true })
   gender!: Gender | null;
 
-  @ApiProperty({ type: DoctorDepartmentAffiliationDto, isArray: true })
-  departments!: DoctorDepartmentAffiliationDto[];
+  @ApiProperty({ example: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9' })
+  departmentId!: string;
+
+  @ApiProperty({ type: DoctorDepartmentRefDto })
+  department!: DoctorDepartmentRefDto;
 }
 
 export class DoctorDetailResponseDto extends DoctorResponseDto {

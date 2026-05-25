@@ -16,7 +16,7 @@ import {
 
 interface ScheduleViewToggleProps {
   view: ScheduleView;
-  /** Locale-aware base URL of the page (e.g. `/schedules` or `/me/schedule`). */
+  /** Locale-aware base URL of the page (always `/schedules` post-consolidation). */
   basePath: string;
   /**
    * Other URL params that must survive the toggle (departmentId, month,

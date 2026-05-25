@@ -366,17 +366,20 @@ The `AuthenticatedUser` interface in `users.types.ts` is NOT a wire DTO — it i
 Permission and role codes have a single source of truth in `apps/api/src/auth/`. Application code (guards, decorators, services, DTOs, tests) AND the Prisma seeders MUST import from it — never inline the string literal.
 
 - `apps/api/src/auth/permissions.ts` exports:
-  - `PERMISSION` — typed `as const` map (e.g. `PERMISSION.SCHEDULE_MANAGE === 'schedule.manage'`).
+  - `PERMISSION` — typed `as const` map (e.g. `PERMISSION.SCHEDULE_CREATE_OWN === 'schedule.create.own'`). Codes are **CRUD-verb-shaped + scope-aware**: `<resource>.<create|read|update|delete>.<own|own-department|all>`. The verb tells the route which HTTP method gates it; the scope suffix tells the service layer how to narrow queries.
   - `PermissionCode` — union type of the values.
-  - `PERMISSION_CATALOG` — ordered list with descriptions, consumed by the Prisma seeder.
+  - `PERMISSION_CATALOG` — ordered list (35 entries: user 4 + role 4 + appointment 9 + schedule 9 + patient 4 + doctor 1 + medical_records 4) with descriptions, consumed by the Prisma seeder. The `permissions` table is catalog-only — no audit columns, no admin runtime CRUD.
 - `apps/api/src/auth/roles.ts` exports:
-  - `ROLE` — typed `as const` map (e.g. `ROLE.STAFF === 'STAFF'`).
+  - `ROLE` — typed `as const` map (e.g. `ROLE.NURSE === 'NURSE'`).
   - `RoleCode` — union type.
-  - `ROLE_CATALOG`, `SIGN_IN_ELIGIBLE_ROLES`, and `DEFAULT_ROLE_PERMISSIONS` (the seeded 5/11/1 baseline).
+  - `ROLE_CATALOG`, `SIGN_IN_ELIGIBLE_ROLES`, and `DEFAULT_ROLE_PERMISSIONS` (the seeded 5-role / 50-policy baseline: ADMIN→9, DOCTOR→15, NURSE→14, MEDICAL_RECORDS_OFFICER→9, PHARMACY→3).
+- `apps/api/src/auth/scope.ts` exports per-verb `resolve<Resource><Verb>Scope(user)` helpers (e.g. `resolveScheduleCreateScope`, `resolveAppointmentReadScope`, `resolveMedicalRecordsUpdateScope`) which return the widest scope (`.all` > `.own-department` > `.own`) the caller holds for a given `(resource, verb)` family. Service-layer scope filters MUST go through these helpers, never branch on `roleCode` directly.
+
+`is_deletable` invariant: `roles` AND `policies` carry an `is_deletable` column (default `true`). All seeded baseline rows are pinned to `false` so a future F11 admin UI cannot delete them. The invariant lives in F11's service layer; the schema only persists the column.
 
 ```ts
 // bad
-@RequirePermission('schedule.manage')
+@RequirePermission('schedule.create.own-department')
 async createSchedule() { /* ... */ }
 
 if (user.roleCode === 'DOCTOR') { /* ... */ }
@@ -385,7 +388,10 @@ if (user.roleCode === 'DOCTOR') { /* ... */ }
 import { PERMISSION } from '../auth/permissions';
 import { ROLE } from '../auth/roles';
 
-@RequirePermission(PERMISSION.SCHEDULE_MANAGE)
+@RequirePermission(
+  PERMISSION.SCHEDULE_CREATE_OWN,
+  PERMISSION.SCHEDULE_CREATE_OWN_DEPARTMENT,
+)
 async createSchedule() { /* ... */ }
 
 if (user.roleCode === ROLE.DOCTOR) { /* ... */ }

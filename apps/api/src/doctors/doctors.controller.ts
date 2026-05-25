@@ -19,7 +19,7 @@ export class DoctorsController {
   constructor(private readonly doctors: DoctorsService) {}
 
   @Get()
-  @RequirePermission(PERMISSION.DOCTOR_LIST)
+  @RequirePermission(PERMISSION.DOCTOR_READ)
   @ApiListDoctors()
   list(@Query() query: ListDoctorsQueryDto): Promise<Paginated<DoctorResponseDto>> {
     return this.doctors.listAll({

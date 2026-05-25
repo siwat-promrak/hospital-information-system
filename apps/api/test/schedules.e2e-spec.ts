@@ -42,7 +42,7 @@ import { signTestJwt } from './utils/sign-jwt';
 
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? 'dev-nextauth-secret-change-me';
 
-const STAFF_EMAIL = 'schedule-staff-e2e@gmail.com';
+const NURSE_EMAIL = 'schedule-nurse-e2e@gmail.com';
 const ADMIN_EMAIL = 'schedule-admin-e2e@gmail.com';
 const DOCTOR_USER_EMAIL = 'schedule-doctor-own-e2e@gmail.com';
 const DOCTOR_OTHER_USER_EMAIL = 'schedule-doctor-other-e2e@gmail.com';
@@ -71,7 +71,7 @@ interface UserWithRole {
 }
 
 interface Fixtures {
-  staff: UserWithRole;
+  nurse: UserWithRole;
   admin: UserWithRole;
   doctorOwnUser: UserWithRole;
   doctorOtherUser: UserWithRole;
@@ -117,29 +117,48 @@ async function tryConnect(prisma: PrismaService): Promise<boolean> {
 
 async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
   const adminRole = await prisma.role.findUnique({ where: { code: ROLE.ADMIN } });
-  const staffRole = await prisma.role.findUnique({ where: { code: ROLE.STAFF } });
+  const nurseRole = await prisma.role.findUnique({ where: { code: ROLE.NURSE } });
   const doctorRole = await prisma.role.findUnique({ where: { code: ROLE.DOCTOR } });
   const superAdmin = await prisma.user.findFirst({
     where: { email: 'superadmin@gmail.com' },
   });
 
-  if (!adminRole || !staffRole || !doctorRole || !superAdmin) {
+  if (!adminRole || !nurseRole || !doctorRole || !superAdmin) {
     return null;
   }
 
   await teardownFixturesByNames(prisma);
 
-  const staff: UserWithRole = {
+  // Departments seeded first — scoped users need a non-null departmentId
+  // and the Doctor rows need departmentId too (1:1 with Department).
+  const deptOne = await prisma.department.create({
+    data: {
+      name: DEPT_ONE_NAME,
+      description: 'E2E scratch dept',
+      createdBy: superAdmin.id,
+    },
+  });
+
+  const deptTwo = await prisma.department.create({
+    data: {
+      name: SCHEDULE_E2E_DEPT_TWO_NAME,
+      description: 'E2E scratch dept',
+      createdBy: superAdmin.id,
+    },
+  });
+
+  const nurse: UserWithRole = {
     user: await prisma.user.create({
       data: {
-        email: normalizeEmail(STAFF_EMAIL),
+        email: normalizeEmail(NURSE_EMAIL),
         firstNameEn: 'Sched',
-        lastNameEn: 'Staff',
-        roleId: staffRole.id,
+        lastNameEn: 'Nurse',
+        roleId: nurseRole.id,
+        departmentId: deptOne.id,
         createdBy: superAdmin.id,
       },
     }),
-    roleCode: ROLE.STAFF,
+    roleCode: ROLE.NURSE,
   };
 
   const admin: UserWithRole = {
@@ -167,6 +186,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
         firstNameTh: SEARCH_DOCTOR_FIRST_NAME_TH,
         lastNameTh: SEARCH_DOCTOR_LAST_NAME_TH,
         roleId: doctorRole.id,
+        departmentId: deptOne.id,
         createdBy: superAdmin.id,
       },
     }),
@@ -180,6 +200,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
         firstNameEn: 'Doc',
         lastNameEn: 'Other',
         roleId: doctorRole.id,
+        departmentId: deptTwo.id,
         createdBy: superAdmin.id,
       },
     }),
@@ -190,6 +211,11 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
   // never collide with future seeders).
   const stamp = Date.now().toString(36).slice(-6);
 
+  // doctorOwn is anchored in deptOne; doctorOther in deptTwo. The Doctor
+  // table now carries `departmentId` directly (1:1) — no M:N join row.
+  // Post-Item-3 the doctor's department lives only on `User.departmentId`
+  // (the upserts above already populate it) — `Doctor` no longer carries
+  // its own `department_id` column.
   const doctorOwn = await prisma.doctor.create({
     data: {
       userId: doctorOwnUser.user.id,
@@ -215,44 +241,8 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     },
   });
 
-  const deptOne = await prisma.department.create({
-    data: {
-      name: DEPT_ONE_NAME,
-      description: 'E2E scratch dept',
-      createdBy: superAdmin.id,
-    },
-  });
-
-  const deptTwo = await prisma.department.create({
-    data: {
-      name: SCHEDULE_E2E_DEPT_TWO_NAME,
-      description: 'E2E scratch dept',
-      createdBy: superAdmin.id,
-    },
-  });
-
-  // Affiliate own doctor with deptOne only. doctorOther is affiliated with
-  // deptTwo only — used for the cross-department-rejection test.
-  await prisma.doctorDepartment.create({
-    data: {
-      doctorId: doctorOwn.id,
-      departmentId: deptOne.id,
-      isPrimary: true,
-      createdBy: superAdmin.id,
-    },
-  });
-
-  await prisma.doctorDepartment.create({
-    data: {
-      doctorId: doctorOther.id,
-      departmentId: deptTwo.id,
-      isPrimary: true,
-      createdBy: superAdmin.id,
-    },
-  });
-
   return {
-    staff,
+    nurse,
     admin,
     doctorOwnUser,
     doctorOtherUser,
@@ -266,7 +256,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
 
 async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
   const emails = [
-    normalizeEmail(STAFF_EMAIL),
+    normalizeEmail(NURSE_EMAIL),
     normalizeEmail(ADMIN_EMAIL),
     normalizeEmail(DOCTOR_USER_EMAIL),
     normalizeEmail(DOCTOR_OTHER_USER_EMAIL),
@@ -299,15 +289,6 @@ async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
     },
   });
 
-  await prisma.doctorDepartment.deleteMany({
-    where: {
-      OR: [
-        { doctorId: { in: doctorIds } },
-        { departmentId: { in: departmentIds } },
-      ],
-    },
-  });
-
   await prisma.doctor.deleteMany({ where: { id: { in: doctorIds } } });
 
   await prisma.authLog.deleteMany({
@@ -316,8 +297,10 @@ async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
     },
   });
 
-  await prisma.department.deleteMany({ where: { id: { in: departmentIds } } });
+  // Users carry `departmentId` FK now, so they MUST be deleted before
+  // their department rows. Auth-log rows hold FKs to the test users too.
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  await prisma.department.deleteMany({ where: { id: { in: departmentIds } } });
 }
 
 /**
@@ -394,7 +377,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   // ─── STAFF create + overlap + cross-department rejection ────────────────────
 
   maybe('STAFF creates a schedule (201) and returns ISO ScheduleResponseDto', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
     const startAt = scheduleIso(1, 9);
     const endAt = scheduleIso(1, 12);
     const breakStartAt = scheduleIso(1, 10);
@@ -435,7 +418,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('STAFF cannot create an overlapping schedule (409 SCHEDULE_OVERLAP)', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
     // Overlaps the 09:00–12:00 window created in the previous test (11:00–13:00).
     const res = await request(server)
       .post('/api/v1/schedules')
@@ -452,25 +435,119 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
     expect(res.body.details.conflictingScheduleId).toEqual(expect.any(String));
   });
 
-  maybe('STAFF cannot create a schedule with a foreign department (409 DOCTOR_NOT_IN_DEPARTMENT)', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+  maybe('NURSE cannot create a schedule with a foreign department (403 INSUFFICIENT_PERMISSION_SCOPE)', async () => {
+    const jwt = await jwtFor(fixtures!.nurse);
     // Disjoint day so it cannot collide with anything created earlier.
+    // doctorOwn is anchored in deptOne; the NURSE is also in deptOne.
+    // Submitting `departmentId: deptTwo` trips the NURSE scope guard before
+    // the doctor-department-mismatch check even runs (the scope guard runs
+    // first because it is cheaper than the DB read).
     const res = await request(server)
       .post('/api/v1/schedules')
       .set('Authorization', `Bearer ${jwt}`)
       .send({
         doctorId: fixtures!.doctorOwn.id,
-        departmentId: fixtures!.deptTwo.id, // doctorOwn is NOT in deptTwo
+        departmentId: fixtures!.deptTwo.id,
         startAt: scheduleIso(2, 9),
         endAt: scheduleIso(2, 12),
       });
 
-    expect(res.status).toBe(409);
-    expect(res.body.code).toBe(ErrorCode.DOCTOR_NOT_IN_DEPARTMENT);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
+  });
+
+  // ─── Bug-fix coverage: per-verb scope on POST /schedules ──────────────────
+  //
+  // Pre-fix the scope guard collapsed READ + CREATE permissions into a single
+  // "widest scope" lookup, so a DOCTOR (holds `schedule.read.own-department`
+  // for cross-coverage visibility) could create a schedule for ANOTHER
+  // doctor in the same department. The two cases below pin the per-verb
+  // resolver in place.
+  maybe('DOCTOR cannot create a schedule for ANOTHER doctor (even in their own department) — per-verb scope guard', async () => {
+    // Mint a sibling doctor under the doctorOwn user's own department
+    // (deptOne) so the failure is unambiguously "scope.own", NOT
+    // "DOCTOR_DEPARTMENT_MISMATCH". The fresh row carries its own user
+    // (UNIQUE userId on Doctor) so it survives the per-suite teardown.
+    const stamp = Date.now().toString(36).slice(-6);
+    const peerDoctorUser = await prisma.user.create({
+      data: {
+        email: normalizeEmail(`schedule-doctor-peer-${stamp}@gmail.com`),
+        firstNameEn: 'Peer',
+        lastNameEn: 'Doctor',
+        roleId: fixtures!.doctorOwnUser.user.roleId!,
+        departmentId: fixtures!.deptOne.id,
+        createdBy: fixtures!.superAdminId,
+      },
+    });
+
+    const peerDoctor = await prisma.doctor.create({
+      data: {
+        userId: peerDoctorUser.id,
+        // departmentId removed (Item-3): Doctor inherits via User.departmentId.
+        doctorCode: `E2E-PEER-${stamp}`,
+        identificationNo: `e2e-peer-${stamp}`,
+        medicalLicenseNo: `MED-PEER-${stamp}`,
+        phone: '+66-2-000-0003',
+        createdBy: fixtures!.superAdminId,
+      },
+    });
+
+    try {
+      const jwt = await jwtFor(fixtures!.doctorOwnUser);
+      const res = await request(server)
+        .post('/api/v1/schedules')
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({
+          doctorId: peerDoctor.id,
+          departmentId: fixtures!.deptOne.id,
+          startAt: scheduleIso(15, 9),
+          endAt: scheduleIso(15, 12),
+        });
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
+      expect(res.body.details).toEqual(
+        expect.objectContaining({
+          required: ['schedule.create.own-department'],
+          scope: 'own',
+          requestedDoctorId: peerDoctor.id,
+          ownDoctorId: fixtures!.doctorOwn.id,
+        }),
+      );
+    } finally {
+      // Best-effort cleanup so re-runs of this test do not collide on the
+      // peer rows. Schedules + doctor + user, in that order (FKs).
+      await prisma.doctorSchedule.deleteMany({ where: { doctorId: peerDoctor.id } });
+      await prisma.doctor.deleteMany({ where: { id: peerDoctor.id } });
+      await prisma.user.deleteMany({ where: { id: peerDoctorUser.id } });
+    }
+  });
+
+  maybe('NURSE cannot create a schedule for a doctor in a FOREIGN department (per-verb scope guard)', async () => {
+    // doctorOther is anchored in deptTwo; the NURSE lives in deptOne.
+    // Submitting `departmentId: deptTwo` (the foreign dept) trips the
+    // NURSE write-scope guard. The previous "foreign department" test
+    // submits doctorOwn (deptOne) + deptTwo — i.e. exercises the case
+    // where the body claims a dept the NURSE does not own. THIS test
+    // exercises the case where the body asks to schedule a doctor in
+    // ANOTHER department altogether (the more common attack shape).
+    const jwt = await jwtFor(fixtures!.nurse);
+    const res = await request(server)
+      .post('/api/v1/schedules')
+      .set('Authorization', `Bearer ${jwt}`)
+      .send({
+        doctorId: fixtures!.doctorOther.id,
+        departmentId: fixtures!.deptTwo.id,
+        startAt: scheduleIso(16, 9),
+        endAt: scheduleIso(16, 12),
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
     expect(res.body.details).toEqual(
       expect.objectContaining({
-        doctorId: fixtures!.doctorOwn.id,
-        departmentId: fixtures!.deptTwo.id,
+        required: ['schedule.create.own-department'],
+        scope: 'own-department',
       }),
     );
   });
@@ -478,27 +555,28 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   // ─── List + filter ──────────────────────────────────────────────────────────
 
   maybe('STAFF lists schedules filtered by ?from=&to= range', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     // Seed two more rows on distinct days so we can assert the range filter
-    // actually narrows.
+    // actually narrows. Rows live in the NURSE's own department (deptOne)
+    // so the post-refactor scope guard does not filter them out.
     await prisma.doctorSchedule.create({
       data: {
-        doctorId: fixtures!.doctorOther.id,
-        departmentId: fixtures!.deptTwo.id,
+        doctorId: fixtures!.doctorOwn.id,
+        departmentId: fixtures!.deptOne.id,
         startAt: scheduleDate(5, 9),
         endAt: scheduleDate(5, 12),
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
     await prisma.doctorSchedule.create({
       data: {
-        doctorId: fixtures!.doctorOther.id,
-        departmentId: fixtures!.deptTwo.id,
+        doctorId: fixtures!.doctorOwn.id,
+        departmentId: fixtures!.deptOne.id,
         startAt: scheduleDate(20, 9),
         endAt: scheduleDate(20, 12),
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
@@ -524,7 +602,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('STAFF list with no range defaults to current calendar month', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get('/api/v1/schedules')
@@ -577,7 +655,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
         departmentId: fixtures!.deptTwo.id,
         startAt: scheduleDate(10, 9),
         endAt: scheduleDate(10, 12),
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
@@ -599,7 +677,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
         departmentId: fixtures!.deptTwo.id,
         startAt: scheduleDate(11, 9),
         endAt: scheduleDate(11, 12),
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
@@ -628,7 +706,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   // ─── DELETE then GET ────────────────────────────────────────────────────────
 
   maybe('DELETE then GET /:id returns 404 SCHEDULE_NOT_FOUND', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     // Fresh scratch row on day 25 — well clear of other test windows.
     const created = await prisma.doctorSchedule.create({
@@ -637,7 +715,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
         departmentId: fixtures!.deptOne.id,
         startAt: scheduleDate(25, 9),
         endAt: scheduleDate(25, 12),
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
@@ -658,7 +736,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   // ─── DTO validation ─────────────────────────────────────────────────────────
 
   maybe('DTO validation rejects endAt <= startAt (400 VALIDATION_FAILED)', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .post('/api/v1/schedules')
@@ -675,7 +753,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('DTO validation rejects a break window outside the working window', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .post('/api/v1/schedules')
@@ -694,7 +772,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('DTO validation rejects half-set break fields', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .post('/api/v1/schedules')
@@ -714,7 +792,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   // ─── pageSize=all sentinel ─────────────────────────────────────────────────
 
   maybe('STAFF list with pageSize=all returns the full filtered set in one response', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     // Seed three rows for doctorOwn across distinct days inside a fresh
     // future month so the assertion is independent of other suites' data.
@@ -734,7 +812,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
         departmentId: fixtures!.deptOne.id,
         startAt: dayDate(2, 9),
         endAt: dayDate(2, 12),
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
@@ -744,7 +822,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
         departmentId: fixtures!.deptOne.id,
         startAt: dayDate(10, 9),
         endAt: dayDate(10, 12),
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
@@ -754,7 +832,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
         departmentId: fixtures!.deptOne.id,
         startAt: dayDate(20, 9),
         endAt: dayDate(20, 12),
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
@@ -773,7 +851,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('list rejects pageSize=foo (arbitrary string) with 400', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get('/api/v1/schedules?pageSize=foo')
@@ -783,7 +861,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('list rejects pageSize=0 with 400', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get('/api/v1/schedules?pageSize=0')
@@ -793,7 +871,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('list rejects pageSize=999 (above MAX_PAGE_SIZE) with 400', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get('/api/v1/schedules?pageSize=999')
@@ -805,7 +883,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   // ─── Past-startAt validation (SCHEDULE_START_IN_PAST) ──────────────────────
 
   maybe('STAFF cannot create a schedule whose startAt is in the past (400)', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const yesterdayEnd = new Date(yesterday.getTime() + 3 * 60 * 60 * 1000);
@@ -842,11 +920,11 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
         departmentId: fixtures!.deptOne.id,
         startAt: past,
         endAt: pastEnd,
-        createdBy: fixtures!.staff.user.id,
+        createdBy: fixtures!.nurse.user.id,
       },
     });
 
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
     const res = await request(server)
       .patch(`/api/v1/schedules/${row.id}`)
       .set('Authorization', `Bearer ${jwt}`)
@@ -858,8 +936,12 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
 
   // ─── GET /doctors?departmentId= filter (Item 4 canonical replacement) ──────
 
-  maybe('GET /doctors?departmentId= returns affiliations including isPrimary', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+  maybe('GET /doctors?departmentId= returns the doctor with their single department', async () => {
+    // Post the Item-3 centralisation, Doctor carries exactly one
+    // department (sourced from `User.departmentId`). The wire-side
+    // `DoctorResponseDto` exposes a flat `{ departmentId, department }`
+    // pair — no more `departments[].isPrimary` array.
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get(`/api/v1/doctors?departmentId=${fixtures!.deptOne.id}`)
@@ -872,16 +954,17 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
       (d: { id: string }) => d.id === fixtures!.doctorOwn.id,
     );
     expect(own).toBeDefined();
-    expect(Array.isArray(own.departments)).toBe(true);
-    const aff = own.departments.find(
-      (a: { departmentId: string }) => a.departmentId === fixtures!.deptOne.id,
+    expect(own.departmentId).toBe(fixtures!.deptOne.id);
+    expect(own.department).toEqual(
+      expect.objectContaining({
+        id: fixtures!.deptOne.id,
+        name: DEPT_ONE_NAME,
+      }),
     );
-    expect(aff).toBeDefined();
-    expect(aff.isPrimary).toBe(true);
   });
 
   maybe('GET /doctors?departmentId= excludes doctors not in that department', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get(`/api/v1/doctors?departmentId=${fixtures!.deptOne.id}`)
@@ -895,7 +978,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   // ─── GET /doctors?q= case-insensitive substring filter ─────────────────────
 
   maybe('GET /doctors?q=<firstNameEn> matches the scratch doctor', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get(`/api/v1/doctors?q=${encodeURIComponent(SEARCH_DOCTOR_FIRST_NAME_EN)}`)
@@ -907,7 +990,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('GET /doctors?q=<lowercase> matches case-insensitively', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get(
@@ -921,7 +1004,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('GET /doctors?q=<thai-fragment> matches the Thai name field', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get(`/api/v1/doctors?q=${encodeURIComponent(SEARCH_DOCTOR_FIRST_NAME_TH)}`)
@@ -933,7 +1016,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('GET /doctors?q=<code-prefix> matches by doctorCode', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get(`/api/v1/doctors?q=${encodeURIComponent(SEARCH_DOCTOR_CODE_PREFIX)}`)
@@ -949,7 +1032,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('GET /doctors?q= (empty) is treated as if omitted', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const baseline = await request(server)
       .get('/api/v1/doctors?pageSize=100')
@@ -964,7 +1047,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('GET /doctors?q=<whitespace> is treated as if omitted', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const baseline = await request(server)
       .get('/api/v1/doctors?pageSize=100')
@@ -979,7 +1062,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('GET /doctors?q=ZZZNOMATCH returns an empty page', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
       .get('/api/v1/doctors?q=ZZZNOMATCH')
@@ -992,7 +1075,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('GET /doctors?q=<name>&departmentId= AND-combines both filters', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     // scratch doctorOwn is in deptOne, scratch doctorOther in deptTwo —
     // the unique name only exists on doctorOwn, so combining the same
@@ -1019,7 +1102,7 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
   });
 
   maybe('GET /doctors?q=<too-long> rejects with 400', async () => {
-    const jwt = await jwtFor(fixtures!.staff);
+    const jwt = await jwtFor(fixtures!.nurse);
 
     const tooLong = 'a'.repeat(101);
     const res = await request(server)

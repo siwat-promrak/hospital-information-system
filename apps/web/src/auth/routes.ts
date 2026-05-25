@@ -17,11 +17,13 @@ export const FE_PATH = {
   HOME: "/",
   SIGNIN: "/signin",
   ADMIN: "/admin",
-  STAFF: "/staff",
-  DOCTOR_SCHEDULE: "/me/schedule",
+  NURSE: "/nurse",
+  MEDICAL_RECORDS_OFFICER: "/medical-records-officer",
+  PHARMACY: "/pharmacy",
   DEPARTMENTS: "/departments",
   DOCTORS: "/doctors",
   SCHEDULES: "/schedules",
+  MEDICAL_RECORDS: "/medical-records",
 } as const;
 
 export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];
@@ -35,11 +37,15 @@ export const FE_PATH_BUILDER = {
 } as const;
 
 export const BE_PATH = {
+  APPOINTMENT_TYPES: "/appointment-types",
   AUTH_RESOLVE: "/auth/resolve",
   AUTH_SIGN_OUT: "/auth/signout",
+  ME: "/me",
   DEPARTMENTS: "/departments",
   DOCTORS: "/doctors",
   SCHEDULES: "/schedules",
+  SLOTS: "/slots",
+  MEDICAL_RECORDS: "/medical-records",
 } as const;
 
 export type BePath = (typeof BE_PATH)[keyof typeof BE_PATH];
@@ -51,7 +57,13 @@ export type BePath = (typeof BE_PATH)[keyof typeof BE_PATH];
  * `GET /doctors?departmentId=<uuid>` (single paginated doctors endpoint
  * with a filter param), so the previous `departmentDoctors` entry is
  * gone.
+ *
+ * The slot finder (F07) lives on a flat `GET /slots` (see `BE_PATH.SLOTS`):
+ * the doctor identity moved from a path segment to the required `doctorId`
+ * query param, so no builder is needed — callers concatenate the query
+ * string directly in `slot.api.ts`.
  */
 export const BE_PATH_BUILDER = {
   doctorDetail: (doctorId: string) => `${BE_PATH.DOCTORS}/${doctorId}`,
+  medicalRecord: (id: string) => `${BE_PATH.MEDICAL_RECORDS}/${id}`,
 } as const;

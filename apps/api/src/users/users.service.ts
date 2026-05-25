@@ -22,7 +22,9 @@ const userWithPermissionsInclude = Prisma.validator<Prisma.UserInclude>()({
   },
   // F06 — schedule.scope reads `caller.doctor.id` on every mutation to enforce
   // the DOCTOR own-doctor rule. Joining here keeps the JWT-guard read to a
-  // single round-trip; STAFF/ADMIN simply see `null`.
+  // single round-trip; non-DOCTOR roles simply see `null`. Post-Item-3, the
+  // doctor's department lives on `User.departmentId` only — Doctor no longer
+  // carries a `department_id` column, so the join projects just `id`.
   doctor: {
     where: { deletedAt: null },
     select: { id: true },
@@ -103,9 +105,11 @@ export class UsersService {
       return null;
     }
 
-    const permissionCodes = user.role.policies
-      .filter((policy) => policy.permission.deletedAt === null)
-      .map((policy) => policy.permission.code);
+    // The `permissions` table is catalog-only (no soft-delete column) — every
+    // policy contributes its permission code unconditionally. The active-
+    // policy filter on the `policies` side (`deletedAt: null`) already lives
+    // in `userWithPermissionsInclude`.
+    const permissionCodes = user.role.policies.map((policy) => policy.permission.code);
 
     return {
       id: user.id,
@@ -117,8 +121,20 @@ export class UsersService {
       firstNameTh: user.firstNameTh,
       lastNameTh: user.lastNameTh,
       picture: user.picture,
+      departmentId: user.departmentId,
       permissionCodes,
-      doctor: user.doctor ? { id: user.doctor.id } : null,
+      doctor: user.doctor
+        ? {
+            id: user.doctor.id,
+            // Post-Item-3 the doctor's department is sourced from
+            // `User.departmentId` — Doctor itself no longer carries a
+            // `department_id` column. The wire-side `MeDoctorRefDto.departmentId`
+            // contract is preserved by mirroring the user-side value here.
+            // Empty string fallback should NEVER fire — a DOCTOR row's matching
+            // User row MUST have `departmentId` per the DTO invariant.
+            departmentId: user.departmentId ?? '',
+          }
+        : null,
     };
   }
 }

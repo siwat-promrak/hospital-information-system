@@ -2,9 +2,13 @@ import "server-only";
 
 import { BE_PATH } from "@/auth/routes";
 
-import type { ResolveRequest, ResolveSuccess } from "@/types/auth.types";
+import type {
+  MeResponse,
+  ResolveRequest,
+  ResolveSuccess,
+} from "@/types/auth.types";
 
-import { internalFetch } from "./server-fetch";
+import { internalFetch, userFetch } from "./server-fetch";
 
 /**
  * `POST /auth/resolve` — server-to-server resolve used by NextAuth's
@@ -19,4 +23,16 @@ export function resolveOnBackend(
     method: "POST",
     body: request,
   });
+}
+
+/**
+ * `GET /me` — fetches the caller's authenticated identity, including the
+ * thin `doctor` reference for DOCTOR users (used by the unified
+ * `/schedules` page to drive the "Show mine" toggle).
+ *
+ * Server-side only — forwards the session cookie via `userFetch` so the
+ * BE's `JwtGuard` resolves the same identity the FE already trusted.
+ */
+export function getMe(): Promise<MeResponse> {
+  return userFetch<MeResponse>(BE_PATH.ME);
 }

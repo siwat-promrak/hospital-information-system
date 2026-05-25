@@ -5,16 +5,19 @@ import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { requireSession } from "@/lib/server/session";
 
-interface StaffDashboardPageProps {
+interface MedicalRecordsOfficerDashboardPageProps {
   params: Promise<{ locale: AppLocale }>;
 }
 
 /**
- * Placeholder STAFF landing. Replaced by the real
- * `(staff)/appointments/page.tsx` and `(staff)/patients/page.tsx` when
- * F05 / F08 land.
+ * Placeholder MEDICAL_RECORDS_OFFICER landing. Replaced by the real
+ * medical-records UI (org-wide appointment + patient browsing) when F08
+ * lands. For now it just renders the shared welcome + permission summary
+ * so reviewers can verify the role dispatcher + RBAC plumbing end-to-end.
  */
-export default async function StaffDashboardPage({ params }: StaffDashboardPageProps) {
+export default async function MedicalRecordsOfficerDashboardPage({
+  params,
+}: MedicalRecordsOfficerDashboardPageProps) {
   const { locale } = await params;
 
   setRequestLocale(locale);
@@ -27,7 +30,7 @@ export default async function StaffDashboardPage({ params }: StaffDashboardPageP
       name={session.user.name ?? session.user.email ?? ""}
       roleCode={session.user.roleCode}
       permissionCodes={session.user.permissionCodes}
-      comingSoonMessage={t(K.Dashboard.comingSoonStaff)}
+      comingSoonMessage={t(K.Dashboard.comingSoonMedicalRecordsOfficer)}
     />
   );
 }

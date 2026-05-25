@@ -61,8 +61,6 @@ export default async function DoctorDetailPage({ params }: DoctorDetailPageProps
     notFound();
   }
 
-  const primaryLabel = tDetail(K.Directory.DoctorDetail.departmentsLabel);
-
   return (
     <Stack spacing={3}>
       <Box>
@@ -142,26 +140,15 @@ export default async function DoctorDetailPage({ params }: DoctorDetailPageProps
               <Stack direction="row" spacing={1} alignItems="center">
                 <LocalHospitalIcon color="primary" />
                 <Typography variant="subtitle1" fontWeight={600}>
-                  {tDetail(K.Directory.DoctorDetail.departmentsLabel)}
+                  {tDetail(K.Directory.DoctorDetail.departmentLabel)}
                 </Typography>
               </Stack>
-              {doctor.departments.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  —
-                </Typography>
-              ) : (
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                  {doctor.departments.map((aff) => (
-                    <DepartmentChipLink
-                      key={aff.departmentId}
-                      departmentId={aff.departmentId}
-                      departmentName={aff.departmentName}
-                      isPrimary={aff.isPrimary}
-                      primaryLabel={primaryLabel}
-                    />
-                  ))}
-                </Box>
-              )}
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                <DepartmentChipLink
+                  departmentId={doctor.department.id}
+                  departmentName={doctor.department.name}
+                />
+              </Box>
               <Divider sx={{ my: 1 }} />
               <Stack direction="row" spacing={1} alignItems="center">
                 <CalendarMonthIcon color="primary" />

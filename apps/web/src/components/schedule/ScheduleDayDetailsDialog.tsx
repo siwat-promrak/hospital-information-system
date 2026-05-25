@@ -16,6 +16,7 @@ import Typography from "@mui/material/Typography";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
 
+import { formatScheduleDoctorName } from "@/doctor/format";
 import { K, NS } from "@/i18n/keys.generated";
 import {
   compareISODatetime,
@@ -40,7 +41,19 @@ interface ScheduleDayDetailsDialogProps {
    * empty-state can be consistent with the calendar's chip rendering.
    */
   schedules: readonly ScheduleResponse[];
-  canManage: boolean;
+  /**
+   * Gates the "Create schedule" CTA at the dialog footer. A DOCTOR
+   * viewing `OWN_PLUS_DEPT` + "dept" sees `false` here even though
+   * `canUpdate` may also be `false` — surface the create + click-to-edit
+   * affordances independently.
+   */
+  canCreate: boolean;
+  /**
+   * Gates whether each schedule row in the day list is clickable. When
+   * `false`, the rows render as inert list items so the user can still
+   * inspect the day's content but cannot open the edit dialog.
+   */
+  canUpdate: boolean;
   colorForDepartment: (departmentId: string) => string;
   onClose: () => void;
   onCreate: (date: Date) => void;
@@ -58,7 +71,8 @@ export default function ScheduleDayDetailsDialog({
   open,
   date,
   schedules,
-  canManage,
+  canCreate,
+  canUpdate,
   colorForDepartment,
   onClose,
   onCreate,
@@ -113,7 +127,14 @@ export default function ScheduleDayDetailsDialog({
                 start && end
                   ? `${formatTime(start, locale)} – ${formatTime(end, locale)}`
                   : "";
-              const doctorName = `${schedule.doctor.firstNameEn} ${schedule.doctor.lastNameEn}`.trim();
+              // Use the embedded `schedule.doctor` ref — the BE already
+              // serialises every name field per row, so we never need a
+              // local lookup against the paginated SSR `doctors` list
+              // (which would render blank for off-page doctors).
+              const doctorName = formatScheduleDoctorName(
+                locale,
+                schedule.doctor,
+              );
               // Past rows stay clickable (the modal opens in read-only mode
               // so the user can still inspect them), but the "Past" chip
               // gives a quick visual signal at the list level.
@@ -123,7 +144,7 @@ export default function ScheduleDayDetailsDialog({
                 <ListItemButton
                   key={schedule.id}
                   onClick={() => onEditSchedule(schedule)}
-                  disabled={!canManage}
+                  disabled={!canUpdate}
                   sx={{ py: 1 }}
                 >
                   <Stack
@@ -172,7 +193,7 @@ export default function ScheduleDayDetailsDialog({
 
       <DialogActions>
         <Button onClick={onClose}>{tDay(K.Schedules.DayDetails.close)}</Button>
-        {canManage ? (
+        {canCreate ? (
           // Wrap in Tooltip so the user sees WHY the button is disabled
           // when the focused day is in the past. The Tooltip needs a
           // `<span>` wrapper because MUI strips pointer events from a

@@ -67,15 +67,15 @@ describe('verifySessionToken', () => {
     const token = await sign({
       sub: 'user-1',
       userId: 'user-1',
-      email: 'staff1@gmail.com',
-      roleCode: 'STAFF',
+      email: 'nurse1@gmail.com',
+      roleCode: 'NURSE',
     });
 
     const payload = await verifySessionToken(token, SECRET);
 
     expect(payload.userId).toBe('user-1');
-    expect(payload.roleCode).toBe('STAFF');
-    expect(payload.email).toBe('staff1@gmail.com');
+    expect(payload.roleCode).toBe('NURSE');
+    expect(payload.email).toBe('nurse1@gmail.com');
   });
 
   it('rejects a token signed with a different secret', async () => {
@@ -83,7 +83,7 @@ describe('verifySessionToken', () => {
       sub: 'u',
       userId: 'u',
       email: 'a@b.c',
-      roleCode: 'STAFF',
+      roleCode: 'NURSE',
     });
 
     await expect(verifySessionToken(token, 'wrong-secret')).rejects.toBeDefined();
@@ -97,7 +97,7 @@ describe('verifySessionToken', () => {
 
   it('rejects an expired token', async () => {
     const token = await sign(
-      { sub: 'u', userId: 'u', email: 'a@b.c', roleCode: 'STAFF' },
+      { sub: 'u', userId: 'u', email: 'a@b.c', roleCode: 'NURSE' },
       { expiresIn: '-1s' },
     );
 

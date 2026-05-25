@@ -18,7 +18,7 @@ export class DepartmentsController {
   constructor(private readonly departments: DepartmentsService) {}
 
   @Get()
-  @RequirePermission(PERMISSION.DOCTOR_LIST)
+  @RequirePermission(PERMISSION.DOCTOR_READ)
   @ApiListDepartments()
   list(@Query() query: PaginationQueryDto): Promise<Paginated<DepartmentResponseDto>> {
     return this.departments.listAll({

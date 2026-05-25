@@ -26,10 +26,25 @@
 // ─── RBAC model ──────────────────────────────────────────────────────────────
 // Authorization is data-driven: a `User` belongs to a `Role`, a `Role` is
 // granted zero-or-more `Permission` rows through `Policy` join rows.
-// `Permission` codes are CODE-DEFINED (see `apps/api/prisma/seed/permissions.ts`)
+// `Permission` codes are CODE-DEFINED (see `apps/api/src/auth/permissions.ts`)
 // — new permissions require a code change. `Role` rows are runtime-editable
-// by admins holding `role.manage`, but the seeded ADMIN / STAFF / DOCTOR
-// roles are the canonical baseline.
+// by admins holding `role.update`, but the seeded ADMIN / DOCTOR / NURSE /
+// MEDICAL_RECORDS_OFFICER / PHARMACY roles are the canonical baseline
+// (`is_deletable = false`).
+//
+// Permission codes are SCOPE-AWARE and CRUD-VERB-SHAPED — see
+// `apps/api/src/auth/permissions.ts` for the
+// `<resource>.<create|read|update|delete>.<own|own-department|all>` convention
+// the service layer interprets when narrowing queries.
+//
+// `Permission` is catalog-only: the rows are immutable lookup data with no
+// admin runtime CRUD, so the table omits the project-wide audit cluster
+// (`created_*`, `updated_*`, `deleted_*`).
+//
+// `Role` and `Policy` carry an `is_deletable` column — seeded baseline rows
+// are pinned to `false` so a future F11 admin UI cannot delete them. The
+// invariant lives in the F11 service layer; this schema only persists the
+// column.
 
 generator client {
   provider = "prisma-client-js"
@@ -96,13 +111,16 @@ enum BloodGroup {
 
 // ─── RBAC ────────────────────────────────────────────────────────────────────
 
-/// Named role assigned to users. Seeded with ADMIN / STAFF / DOCTOR (`code`).
-/// Admins holding `role.manage` may add custom roles at runtime.
+/// Named role assigned to users. Seeded with ADMIN / DOCTOR / NURSE /
+/// MEDICAL_RECORDS_OFFICER / PHARMACY (`code`). Admins holding `role.create`
+/// may add custom roles at runtime; `is_deletable = false` rows (the
+/// seeded baseline) cannot be deleted.
 model Role {
   id          String  @id @default(uuid()) @db.Uuid
-  code        String  @unique // 'ADMIN' | 'STAFF' | 'DOCTOR' | future custom
+  code        String  @unique // 'ADMIN' | 'DOCTOR' | 'NURSE' | 'MEDICAL_RECORDS_OFFICER' | 'PHARMACY' | future custom
   name        String // human-readable display label
   description String? @db.Text
+  isDeletable Boolean @default(true) @map("is_deletable")
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
@@ -122,24 +140,17 @@ model Role {
 }
 
 /// Atomic capability. Permissions are CODE-DEFINED — seeded from a canonical
-/// const list (see `apps/api/prisma/seed/permissions.ts`); not user-creatable
+/// const list (see `apps/api/src/auth/permissions.ts`); not user-creatable
 /// at runtime (adding a new permission requires a code change). The table
 /// exists so role↔permission mappings (policies) can be runtime-configurable.
+///
+/// No audit cluster: the table is immutable lookup data with no admin
+/// runtime CRUD. A future permission rename is a migration, not a runtime
+/// edit.
 model Permission {
   id          String  @id @default(uuid()) @db.Uuid
-  code        String  @unique // 'appointment.create', 'patient.read', ...
+  code        String  @unique // 'appointment.create.own', 'patient.read', ...
   description String? @db.Text
-
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  createdBy String    @map("created_by") @db.Uuid
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
-  updatedBy String?   @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
-  deletedBy String?   @map("deleted_by") @db.Uuid
-
-  createdByUser User  @relation("PermissionCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  updatedByUser User? @relation("PermissionUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  deletedByUser User? @relation("PermissionDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   policies Policy[]
 
@@ -149,10 +160,15 @@ model Permission {
 /// Role↔Permission mapping. "Role R has Permission P." A policy is the atom
 /// of authorization grant: deleting (or soft-deleting) a policy revokes the
 /// permission from users of that role.
+///
+/// Seeded baseline rows (49 entries derived from `DEFAULT_ROLE_PERMISSIONS`)
+/// carry `is_deletable = false` so a future F11 admin UI cannot remove the
+/// canonical grants; admin-added grants default to `true`.
 model Policy {
-  id           String @id @default(uuid()) @db.Uuid
-  roleId       String @map("role_id") @db.Uuid
-  permissionId String @map("permission_id") @db.Uuid
+  id           String  @id @default(uuid()) @db.Uuid
+  roleId       String  @map("role_id") @db.Uuid
+  permissionId String  @map("permission_id") @db.Uuid
+  isDeletable  Boolean @default(true) @map("is_deletable")
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
@@ -173,9 +189,9 @@ model Policy {
 
 // ─── Auth principal ──────────────────────────────────────────────────────────
 // Every signed-in identity. DOCTOR users link to a `Doctor` row (1-1) via
-// `Doctor.userId`. ADMIN / STAFF users do not require a clinical record.
-// Patients are pure records (no `User` link); only staff/admin operators
-// register and manage patients.
+// `Doctor.userId`. ADMIN / NURSE / MEDICAL_RECORDS_OFFICER / PHARMACY users
+// do not require a clinical record. Patients are pure records (no `User`
+// link); only staff/admin operators register and manage patients.
 //
 // The super-admin user is seeded at the nil UUID
 // (`00000000-0000-0000-0000-000000000000`) and is the default `created_by`
@@ -187,17 +203,33 @@ model Policy {
 // `apps/api/prisma/seed/super-admin.ts` for the Option C bootstrap flow).
 // All non-bootstrap rows MUST have a non-null `role_id`; DTO-level
 // validation enforces this at the API layer.
+//
+// `department_id` is NULLABLE because role-based scope semantics determine
+// whether it must be set:
+//   - DOCTOR / NURSE  → department_id MUST be NOT NULL (scoped roles).
+//   - ADMIN / MEDICAL_RECORDS_OFFICER / PHARMACY → department_id MUST be
+//     NULL (cross-department or non-clinical roles).
+// Enforcement lives at the DTO / service layer (not as a DB CHECK) because
+// the invariant depends on the joined Role row, which a CHECK cannot read.
+//
+// `User.departmentId` is the SINGLE source of truth for the doctor's
+// home department (post the Item-3 centralisation). The `Doctor` row no
+// longer carries its own `department_id` column — every read goes through
+// `doctor.user.departmentId`. `DoctorSchedule.department_id` stays as a
+// denormalised cache so a doctor moving departments later does not rewrite
+// historical schedules.
 
 model User {
-  id          String  @id @default(uuid()) @db.Uuid
-  email       String  @unique // stored lowercased via normalizeEmail()
-  googleSub   String? @unique @map("google_sub")
-  firstNameEn String  @map("first_name_en")
-  lastNameEn  String  @map("last_name_en")
-  firstNameTh String? @map("first_name_th")
-  lastNameTh  String? @map("last_name_th")
-  roleId      String? @map("role_id") @db.Uuid
-  picture     String?
+  id           String  @id @default(uuid()) @db.Uuid
+  email        String  @unique // stored lowercased via normalizeEmail()
+  googleSub    String? @unique @map("google_sub")
+  firstNameEn  String  @map("first_name_en")
+  lastNameEn   String  @map("last_name_en")
+  firstNameTh  String? @map("first_name_th")
+  lastNameTh   String? @map("last_name_th")
+  roleId       String? @map("role_id") @db.Uuid
+  departmentId String? @map("department_id") @db.Uuid
+  picture      String?
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
@@ -206,7 +238,8 @@ model User {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  role Role? @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  role       Role?       @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  department Department? @relation("UserDepartment", fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   // Self-FK audit relations.
   createdByUser User   @relation("UserCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -231,9 +264,6 @@ model User {
   createdDoctors                    Doctor[]                    @relation("DoctorCreatedBy")
   updatedDoctors                    Doctor[]                    @relation("DoctorUpdatedBy")
   deletedDoctors                    Doctor[]                    @relation("DoctorDeletedBy")
-  createdDoctorDepartments          DoctorDepartment[]          @relation("DoctorDepartmentCreatedBy")
-  updatedDoctorDepartments          DoctorDepartment[]          @relation("DoctorDepartmentUpdatedBy")
-  deletedDoctorDepartments          DoctorDepartment[]          @relation("DoctorDepartmentDeletedBy")
   createdDepartments                Department[]                @relation("DepartmentCreatedBy")
   updatedDepartments                Department[]                @relation("DepartmentUpdatedBy")
   deletedDepartments                Department[]                @relation("DepartmentDeletedBy")
@@ -243,15 +273,14 @@ model User {
   createdRoles                      Role[]                      @relation("RoleCreatedBy")
   updatedRoles                      Role[]                      @relation("RoleUpdatedBy")
   deletedRoles                      Role[]                      @relation("RoleDeletedBy")
-  createdPermissions                Permission[]                @relation("PermissionCreatedBy")
-  updatedPermissions                Permission[]                @relation("PermissionUpdatedBy")
-  deletedPermissions                Permission[]                @relation("PermissionDeletedBy")
   createdPolicies                   Policy[]                    @relation("PolicyCreatedBy")
   updatedPolicies                   Policy[]                    @relation("PolicyUpdatedBy")
   deletedPolicies                   Policy[]                    @relation("PolicyDeletedBy")
   createdDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeCreatedBy")
   updatedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeUpdatedBy")
   deletedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeDeletedBy")
+  createdMedicalRecords             MedicalRecord[]             @relation("MedicalRecordCreatedBy")
+  updatedMedicalRecords             MedicalRecord[]             @relation("MedicalRecordUpdatedBy")
 
   // Auth log inverse — append-only events on the user (sign-in, sign-out,
   // permission denials). Nullable on the AuthLog side because failed
@@ -259,12 +288,14 @@ model User {
   authLogs AuthLog[]
 
   @@index([roleId])
+  @@index([departmentId])
   @@map("users")
 }
 
 // ─── Clinical entities ───────────────────────────────────────────────────────
-// Patients are pure records owned by ADMIN / STAFF operators — there is no
-// `User` link because patients do not sign in (no patient portal in P0).
+// Patients are pure records owned by ADMIN / NURSE / MEDICAL_RECORDS_OFFICER
+// operators — there is no `User` link because patients do not sign in (no
+// patient portal in P0).
 
 model Patient {
   id String @id @default(uuid()) @db.Uuid
@@ -299,7 +330,8 @@ model Patient {
   updatedByUser User? @relation("PatientUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("PatientDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  appointments Appointment[]
+  appointments   Appointment[]
+  medicalRecords MedicalRecord[]
 
   @@map("patients")
 }
@@ -320,10 +352,11 @@ model Department {
   updatedByUser User? @relation("DepartmentUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("DepartmentDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  doctors                 DoctorDepartment[]
+  users                   User[]                      @relation("UserDepartment")
   doctorSchedules         DoctorSchedule[]
   appointments            Appointment[]
   allowedAppointmentTypes DepartmentAppointmentType[]
+  medicalRecords          MedicalRecord[]
 
   @@map("departments")
 }
@@ -353,6 +386,16 @@ model DepartmentAppointmentType {
   @@map("department_appointment_types")
 }
 
+/// Clinical record for a DOCTOR-role user. 1-1 with `User` via `user_id`.
+/// The doctor's home department is sourced from the linked `User.departmentId`
+/// — `User` is the SINGLE source of truth for which department a person is
+/// associated with (post the Item-3 centralisation). Doctor itself no longer
+/// carries a `department_id` column or a `Department` relation; reads go
+/// through `doctor.user.department` / `doctor.user.departmentId`.
+///
+/// `DoctorSchedule.department_id` still carries a denormalised cache so a
+/// doctor moving departments later does not rewrite historical schedules
+/// (that is a per-row column on `doctor_schedules`, not on `doctors`).
 model Doctor {
   id               String  @id @default(uuid()) @db.Uuid
   userId           String  @unique @map("user_id") @db.Uuid
@@ -375,39 +418,11 @@ model Doctor {
   updatedByUser User? @relation("DoctorUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("DoctorDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  departments  DoctorDepartment[]
-  schedules    DoctorSchedule[]
-  appointments Appointment[]
+  schedules      DoctorSchedule[]
+  appointments   Appointment[]
+  medicalRecords MedicalRecord[]
 
   @@map("doctors")
-}
-
-/// Join row declaring which `Department`(s) a `Doctor` belongs to. Doctors
-/// can span multiple departments; the `isPrimary` flag identifies a doctor's
-/// "home" department for HR/display purposes. "At most one primary per
-/// doctor" is enforced at the application layer, not by a DB constraint.
-model DoctorDepartment {
-  id           String  @id @default(uuid()) @db.Uuid
-  doctorId     String  @map("doctor_id") @db.Uuid
-  departmentId String  @map("department_id") @db.Uuid
-  isPrimary    Boolean @default(false) @map("is_primary")
-
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  createdBy String    @map("created_by") @db.Uuid
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
-  updatedBy String?   @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
-  deletedBy String?   @map("deleted_by") @db.Uuid
-
-  doctor        Doctor     @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  department    Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  createdByUser User       @relation("DoctorDepartmentCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  updatedByUser User?      @relation("DoctorDepartmentUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  deletedByUser User?      @relation("DoctorDepartmentDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([doctorId, departmentId])
-  @@index([departmentId])
-  @@map("doctor_departments")
 }
 
 // ─── Schedule ────────────────────────────────────────────────────────────────
@@ -419,6 +434,16 @@ model DoctorDepartment {
 // Schedules are NOT recurring — each row is one specific dated window. The
 // booking flow inherits `departmentId` from the schedule onto the new
 // `Appointment`.
+//
+// `department_id` is denormalised from the doctor's current
+// `User.departmentId` at write time (post the Item-3 centralisation —
+// `Doctor` no longer carries a `department_id` column of its own). On
+// create/update the service layer asserts that the supplied `departmentId`
+// matches the doctor's current `User.departmentId` and rejects mismatches
+// with `400 DOCTOR_DEPARTMENT_MISMATCH`. Carrying the id on the row
+// (rather than always joining through User) preserves the historical
+// record if a doctor later moves departments — past schedules stay
+// attributed to the department where they were actually performed.
 //
 // Time-range invariants enforced via raw-SQL CHECK constraints in the init
 // migration (Prisma 5 cannot express CHECK constraints natively):
@@ -503,10 +528,58 @@ model Appointment {
   updatedByUser   User?      @relation("AppointmentsUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   cancelledByUser User?      @relation("AppointmentsCancelledBy", fields: [cancelledBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  medicalRecords MedicalRecord[]
+
   @@index([doctorId, startAt])
   @@index([patientId, startAt])
   @@index([status])
   @@map("appointments")
+}
+
+// ─── Medical records ─────────────────────────────────────────────────────────
+// Per-appointment clinical note authored by the assigned doctor. Records are
+// PERMANENT — there is no soft-delete cluster, and the catalog does NOT
+// expose a `medical_records.delete` permission. Edits are allowed (with
+// `updated_at` / `updated_by` for the audit trail).
+//
+// `department_id` is denormalised from `Doctor.department_id` at write time
+// (the same convention the schedule + appointment tables use). It preserves
+// the historical attribution if a doctor later moves departments.
+//
+// Scope semantics on the permission side:
+//   - `medical_records.create.own` (DOCTOR) → `doctor_id = caller.doctor.id`.
+//     The service writes `doctor_id` from the JWT, NOT from the request body.
+//   - `medical_records.update.own` (DOCTOR) → row owner must be the caller.
+//   - `medical_records.update.all` (MEDICAL_RECORDS_OFFICER) → no narrowing.
+//   - `medical_records.read.all`   (DOCTOR / NURSE / MEDICAL_RECORDS_OFFICER /
+//     PHARMACY) → no narrowing on reads.
+
+model MedicalRecord {
+  id            String  @id @default(uuid()) @db.Uuid
+  doctorId      String  @map("doctor_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  departmentId  String  @map("department_id") @db.Uuid
+  appointmentId String  @map("appointment_id") @db.Uuid
+  note          String  @db.Text
+  drug          String? @db.Text // free-text for P0; JSONB array later
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  // NO deleted_at / deleted_by — records are permanent.
+
+  doctor        Doctor      @relation(fields: [doctorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patient       Patient     @relation(fields: [patientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  department    Department  @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser User        @relation("MedicalRecordCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?       @relation("MedicalRecordUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([doctorId])
+  @@index([patientId])
+  @@index([appointmentId])
+  @@map("medical_records")
 }
 
 // ─── Audit log ───────────────────────────────────────────────────────────────

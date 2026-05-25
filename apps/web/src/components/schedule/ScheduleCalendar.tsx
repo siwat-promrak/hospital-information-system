@@ -4,7 +4,6 @@ import AddIcon from "@mui/icons-material/Add";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 
@@ -23,6 +22,7 @@ import {
   SCHEDULE_VIEW,
   type ScheduleView,
 } from "@/lib/api/schedule.const";
+import { makeDepartmentColorResolver } from "@/schedule/department-palette";
 import { parseISODatetime, toISODateLocal } from "@/lib/utils/date";
 import { formatMonthParam, isInMonth, type MonthParam } from "@/schedule/month";
 import { CALENDAR_DAY_END_HOUR } from "@/schedule/time";
@@ -88,35 +88,61 @@ interface ScheduleCalendarProps {
    */
   lockedDoctorId?: string;
   /**
-   * Permission gate — when `false` the calendar renders read-only (no
-   * click-to-create on empty cells, no chip click handler, no delete).
+   * `true` when the caller's effective write scope is narrower than the
+   * visible surface (DOCTOR viewing `OWN_PLUS_DEPT` + "dept" with only
+   * `.own` codes). The create dialog locks the doctor picker to the
+   * caller. Per-row Update / Delete buttons hide when the row isn't the
+   * caller's own.
    */
-  canManage: boolean;
+  createsLockedToCaller: boolean;
+  /**
+   * The caller's own `Doctor.id`, when resolvable from `/me`. Needed to
+   * narrow per-row write affordances under `createsLockedToCaller` —
+   * a chip whose `doctorId !== callerDoctorId` becomes read-only in the
+   * edit dialog so the DOCTOR can only update / delete their own rows.
+   */
+  callerDoctorId?: string;
+  /**
+   * Per-action permission gates derived in the page from the active
+   * `(viewMode, scope)` pair. A DOCTOR viewing `OWN_PLUS_DEPT` + "dept"
+   * still sees `true` because they hold `.own` as a fallback — the per-row
+   * narrowing happens inside `ScheduleFormDialog` via `createsLockedToCaller`
+   * + `callerDoctorId`.
+   *
+   * Each affordance gates on the matching verb so a future role with
+   * (say) only `schedule.create.*` still gets the "+ Add" button without
+   * the chip-edit / delete buttons appearing.
+   */
+  canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
+  /**
+   * When `true`, every schedule chip is colour-coded by its
+   * `departmentId` using the shared department palette. When `false`,
+   * chips fall back to a single neutral colour (the MUI primary). The
+   * unified `/schedules` page only enables this in mode `"all"` (MRO),
+   * where surfacing the department from the chip itself is the only way
+   * to disambiguate doctors from different specialties on the same day.
+   */
+  colorByDepartment: boolean;
+  /**
+   * Extra URL params the calendar header (prev / today / next) AND the
+   * view toggle should preserve on navigation. Merged into the
+   * calendar's own internal preserve map. Used by the unified
+   * `/schedules` page to keep `doctorId` / `scope` in the URL when the
+   * user steps through months / flips view mode.
+   */
+  extraPreserveParams?: Readonly<Record<string, string | undefined>>;
 }
 
 /**
- * Visually-distinct department palette. Colours are picked so adjacent
- * entries don't collide on hue, and so the set covers ≥ the seeded
- * department count (10) without modulo wrap-around. Each entry is a
- * literal hex tuned for AA contrast against the chip swatch background
- * rather than an MUI palette token, because palette tokens are sparse
- * (primary/secondary/success/warning/error/info × main/dark) and that
- * is what caused 3-way collisions in the previous version.
+ * Single chip colour used when `colorByDepartment === false`. Drawn from
+ * the MUI palette so the rest of the calendar (today indicator, hover
+ * accents) stays harmonised. `#1976d2` matches `primary.main` in the
+ * default MUI palette and the first slot of the department palette, so
+ * the visual identity stays consistent across modes.
  */
-const DEPARTMENT_COLOR_PALETTE: readonly string[] = [
-  "#1976d2", // blue 700
-  "#388e3c", // green 700
-  "#f57c00", // orange 700
-  "#d32f2f", // red 700
-  "#7b1fa2", // purple 700
-  "#0097a7", // cyan 700
-  "#c2185b", // pink 700
-  "#5d4037", // brown 700
-  "#455a64", // blue grey 700
-  "#fbc02d", // yellow 700
-  "#7cb342", // light green 600
-  "#5c6bc0", // indigo 400
-];
+const SINGLE_CHIP_COLOR = "#1976d2";
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
@@ -147,7 +173,13 @@ export default function ScheduleCalendar({
   basePath,
   currentDepartmentId,
   lockedDoctorId,
-  canManage,
+  createsLockedToCaller,
+  callerDoctorId,
+  canCreate,
+  canUpdate,
+  canDelete,
+  colorByDepartment,
+  extraPreserveParams,
 }: ScheduleCalendarProps) {
   const tSchedules = useTranslations(NS.Schedules);
 
@@ -162,22 +194,24 @@ export default function ScheduleCalendar({
     hour: number | null;
   } | null>(null);
 
-  // Position-indexed (not hash-indexed) so two adjacent departments never
-  // share a swatch when the palette has more entries than departments.
-  // `departments` is the FULL list passed to the calendar (already sorted
-  // by name from the server page), so colour assignment stays stable
-  // across renders for any given department id.
+  // Department-palette resolver shared with the legend (see
+  // `makeDepartmentColorResolver`). When `colorByDepartment === false`,
+  // every chip falls back to the single neutral colour so the calendar
+  // does NOT visually pretend departments are meaningful in modes where
+  // the rendered set is already narrowed to one department / one doctor.
+  const resolveDeptColor = useMemo(
+    () => makeDepartmentColorResolver(departments),
+    [departments],
+  );
   const colorForDepartment = useCallback(
     (departmentId: string): string => {
-      const index = departments.findIndex((d) => d.id === departmentId);
-      const safe = index >= 0 ? index : 0;
+      if (!colorByDepartment) {
+        return SINGLE_CHIP_COLOR;
+      }
 
-      return (
-        DEPARTMENT_COLOR_PALETTE[safe % DEPARTMENT_COLOR_PALETTE.length] ??
-        DEPARTMENT_COLOR_PALETTE[0]!
-      );
+      return resolveDeptColor(departmentId);
     },
-    [departments],
+    [resolveDeptColor, colorByDepartment],
   );
 
   // The set of schedules that fall inside the focused range. Month view
@@ -302,11 +336,18 @@ export default function ScheduleCalendar({
   // Param-preservation map for the header + view-toggle. Each one strips
   // the params it owns (the toggle owns `view`; the header owns the date
   // params) and keeps everything else.
+  //
+  // `extraPreserveParams` lets the unified page inject the new URL state
+  // (`doctorId`, `scope`) the calendar doesn't otherwise know about — the
+  // calendar's own props pre-date the consolidation and only carry
+  // `currentDepartmentId`. Merging both ensures every param survives a
+  // month-step / view-flip.
   const preserveForHeader: Record<string, string | undefined> = {
     [SCHEDULE_QUERY_PARAM.DEPARTMENT_ID]: currentDepartmentId,
     // Keep BOTH date params so flipping views later doesn't lose state.
     [SCHEDULE_QUERY_PARAM.MONTH]: formatMonthParam(month),
     [SCHEDULE_QUERY_PARAM.WEEK_START]: formatWeekStartParam(weekStart),
+    ...(extraPreserveParams ?? {}),
   };
 
   // For the view toggle we drop the date param that DOESN'T match the
@@ -317,6 +358,7 @@ export default function ScheduleCalendar({
     [SCHEDULE_QUERY_PARAM.DEPARTMENT_ID]: currentDepartmentId,
     [SCHEDULE_QUERY_PARAM.MONTH]: formatMonthParam(month),
     [SCHEDULE_QUERY_PARAM.WEEK_START]: formatWeekStartParam(weekStart),
+    ...(extraPreserveParams ?? {}),
   };
 
   return (
@@ -348,7 +390,7 @@ export default function ScheduleCalendar({
             />
           </Stack>
 
-          {canManage ? (
+          {canCreate ? (
             <Button
               variant="contained"
               startIcon={<AddIcon />}
@@ -359,58 +401,6 @@ export default function ScheduleCalendar({
             </Button>
           ) : null}
         </Stack>
-
-        {/* Row 2 — full-width department legend, sourced from the FULL
-            department list (not just departments with schedules in view)
-            so the legend stays informative even when the focused range
-            is empty. */}
-        {departments.length > 1 ? (
-          <Stack
-            direction="row"
-            alignItems="center"
-            flexWrap="wrap"
-            rowGap={0.5}
-            columnGap={1.5}
-            sx={{
-              px: 1,
-              py: 0.5,
-              border: 1,
-              borderColor: "divider",
-              borderRadius: 1,
-              bgcolor: "background.paper",
-            }}
-          >
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ mr: 0.5 }}
-            >
-              {tSchedules(K.Schedules.legendDepartment)}
-            </Typography>
-            {departments.map((dept) => (
-              <Stack
-                key={dept.id}
-                direction="row"
-                alignItems="center"
-                spacing={0.75}
-              >
-                <Box
-                  aria-hidden
-                  sx={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: 0.5,
-                    bgcolor: colorForDepartment(dept.id),
-                    flexShrink: 0,
-                  }}
-                />
-                <Typography variant="caption" sx={{ lineHeight: 1 }}>
-                  {dept.name}
-                </Typography>
-              </Stack>
-            ))}
-          </Stack>
-        ) : null}
       </Stack>
 
       {/* Desktop / tablet — md+ — actual calendar grid.
@@ -436,7 +426,7 @@ export default function ScheduleCalendar({
             month={month}
             colorForDepartment={colorForDepartment}
             onDateSelect={handleMonthDateSelect}
-            onScheduleClick={canManage ? openEdit : () => undefined}
+            onScheduleClick={canUpdate ? openEdit : () => undefined}
           />
         ) : (
           <ScheduleWeekView
@@ -444,7 +434,7 @@ export default function ScheduleCalendar({
             weekStart={weekStart}
             colorForDepartment={colorForDepartment}
             onDateSelect={handleWeekDateSelect}
-            onScheduleClick={canManage ? openEdit : () => undefined}
+            onScheduleClick={canUpdate ? openEdit : () => undefined}
           />
         )}
       </Box>
@@ -454,9 +444,9 @@ export default function ScheduleCalendar({
         <ScheduleDayMobileList
           schedules={focusedSchedules}
           colorForDepartment={colorForDepartment}
-          canCreate={canManage}
+          canCreate={canCreate}
           onCreateForDate={handleMobileCreateForDate}
-          onScheduleClick={canManage ? openEdit : () => undefined}
+          onScheduleClick={canUpdate ? openEdit : () => undefined}
         />
       </Box>
 
@@ -468,6 +458,9 @@ export default function ScheduleCalendar({
         initialDoctorPage={initialDoctorPage}
         doctorDepartmentId={doctorDepartmentId}
         lockedDoctorId={lockedDoctorId}
+        createsLockedToCaller={createsLockedToCaller}
+        callerDoctorId={callerDoctorId}
+        canDelete={canDelete}
         editing={editing}
         prefill={prefill}
       />
@@ -476,7 +469,8 @@ export default function ScheduleCalendar({
         open={dayDetails !== null}
         date={dayDetails?.date ?? null}
         schedules={dayDetailsSchedules}
-        canManage={canManage}
+        canCreate={canCreate}
+        canUpdate={canUpdate}
         colorForDepartment={colorForDepartment}
         onClose={() => setDayDetails(null)}
         onCreate={handleDayDetailsCreate}

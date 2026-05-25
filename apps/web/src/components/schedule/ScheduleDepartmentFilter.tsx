@@ -7,70 +7,60 @@ import Select, { type SelectChangeEvent } from "@mui/material/Select";
 import { useTranslations } from "next-intl";
 import { useTransition } from "react";
 
+import { FE_PATH } from "@/auth/routes";
 import { K, NS } from "@/i18n/keys.generated";
 import { useRouter } from "@/i18n/navigation";
-import {
-  SCHEDULE_QUERY_PARAM,
-  type ScheduleView,
-} from "@/lib/api/schedule.const";
+import { SCHEDULE_QUERY_PARAM } from "@/lib/api/schedule.const";
 import type { DepartmentRow } from "@/types/department.types";
 
-interface ScheduleFilterProps {
+interface ScheduleDepartmentFilterProps {
   departments: readonly DepartmentRow[];
+  /** Currently-active department id (`null` when "All departments" picked). */
   activeDepartmentId: string | null;
-  /** Locale-aware base URL of the page (e.g. `/schedules` or `/me/schedule`). */
-  basePath: string;
-  /** Active calendar view — preserved across filter changes. */
-  view: ScheduleView;
-  /** `?month=YYYY-MM` — preserved when present. */
-  month?: string;
-  /** `?weekStart=YYYY-MM-DD` — preserved when present. */
-  weekStart?: string;
+  /**
+   * URL params the page wants to keep when the filter changes (calendar
+   * view, month / week date params, scope toggle if visible). Re-emitted
+   * verbatim — `undefined` / empty values are stripped so cleared filters
+   * don't linger.
+   */
+  preserveParams: Readonly<Record<string, string | undefined>>;
 }
 
 /**
- * Department selector for the F06 schedule pages. Mirrors `DoctorListFilter`
- * — writes `?departmentId=<uuid>` (or clears it) via `router.replace` so
- * the URL stays the canonical source of truth and the back button retraces
- * filter changes.
+ * Department picker for the unified `/schedules` page — only rendered in
+ * mode `"all"` (MRO with `schedule.read.all`). Picking a department writes
+ * `?departmentId=<uuid>`; picking "All departments" clears it. The page
+ * server-component re-runs the BE list call with the new filter.
  *
- * Preserves the view + date URL state so a filter change keeps the user
- * on the same month / week they were viewing. There is no `page=` reset
- * because the calendar isn't paginated (the page fetches a single large
- * page that captures every schedule for the focused range).
+ * Always routes to `FE_PATH.SCHEDULES` (the page is now unified). The
+ * caller passes `preserveParams` so the calendar's date / view state
+ * survives the filter change.
  */
-export default function ScheduleFilter({
+export default function ScheduleDepartmentFilter({
   departments,
   activeDepartmentId,
-  basePath,
-  view,
-  month,
-  weekStart,
-}: ScheduleFilterProps) {
+  preserveParams,
+}: ScheduleDepartmentFilterProps) {
   const tSchedules = useTranslations(NS.Schedules);
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   function handleChange(event: SelectChangeEvent<string>) {
-    const value = event.target.value;
+    const nextDepartmentId = event.target.value;
     const search = new URLSearchParams();
 
-    search.set(SCHEDULE_QUERY_PARAM.VIEW, view);
-
-    if (month) {
-      search.set(SCHEDULE_QUERY_PARAM.MONTH, month);
+    for (const [key, value] of Object.entries(preserveParams)) {
+      if (value !== undefined && value !== "") {
+        search.set(key, value);
+      }
     }
 
-    if (weekStart) {
-      search.set(SCHEDULE_QUERY_PARAM.WEEK_START, weekStart);
-    }
-
-    if (value) {
-      search.set(SCHEDULE_QUERY_PARAM.DEPARTMENT_ID, value);
+    if (nextDepartmentId) {
+      search.set(SCHEDULE_QUERY_PARAM.DEPARTMENT_ID, nextDepartmentId);
     }
 
     startTransition(() => {
-      router.replace(`${basePath}?${search.toString()}`);
+      router.replace(`${FE_PATH.SCHEDULES}?${search.toString()}`);
     });
   }
 

@@ -10,9 +10,10 @@ import { K } from "@/i18n/keys.generated";
 
 export const BREADCRUMB_SEGMENT_LABEL = {
   admin: K.Breadcrumb.admin,
-  staff: K.Breadcrumb.staff,
-  me: K.Breadcrumb.me,
-  schedule: K.Breadcrumb.schedule,
+  nurse: K.Breadcrumb.nurse,
+  "medical-records-officer": K.Breadcrumb.medicalRecordsOfficer,
+  "medical-records": K.Breadcrumb.medicalRecords,
+  pharmacy: K.Breadcrumb.pharmacy,
   schedules: K.Breadcrumb.schedules,
   departments: K.Breadcrumb.departments,
   doctors: K.Breadcrumb.doctors,

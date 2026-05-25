@@ -7,38 +7,55 @@ features in `feature-roadmap.md`. Story IDs are stable: when a story is
 implemented, reference its ID in commit messages and PR descriptions.
 
 > **Out of scope per the spec interpretation locked in 2026-05-24:** patients
-> do NOT sign in to this system. They are pure records managed by STAFF /
+> do NOT sign in to this system. They are pure records managed by NURSE /
 > ADMIN. The previously-considered patient self-service epics (view / cancel
 > / book own appointments) have been removed entirely. The `Role` enum has
 > also been removed; roles are now DB rows in the `roles` table with
-> permissions granted via `policies`.
+> permissions granted via `policies`. **The original STAFF role was
+> retired** — clinic operations are now split across NURSE
+> (department-scoped front-desk), MEDICAL_RECORDS_OFFICER (cross-department
+> records), PHARMACY (cross-department read-only), and DOCTOR (own-doctor
+> writes + cross-coverage reads).
 
 Roles used in this document (DB rows in the `roles` table — the `Role` enum
 is gone):
 
 - **PATIENT** — **out of scope.** Patients do NOT sign in to this system;
-  they are pure records managed by STAFF / ADMIN (no `User` link).
-- **STAFF** — clinic-side operator (receptionist / coordinator). Pre-created
-  by an ADMIN. Holds all 11 operational permissions: book / cancel / list /
-  read appointments (4), manage doctor schedules (`schedule.manage`),
-  register / read / update / list patients (4), and view doctors
-  (`doctor.read`, `doctor.list`). Cannot manage users or assign
-  permissions. **Ownership filtering is NOT in P0** — every STAFF can act
-  on every patient (no per-staff patient assignment).
-- **ADMIN** — **narrowed to user/role/policy management ONLY** (5
-  permissions): `user.invite`, `user.disable`, `user.list`, `role.manage`,
-  `permission.assign`. Clinic operations (appointment.*, patient.*,
-  doctor.*, schedule.manage) are **NOT granted by default**; ADMIN can
-  grant them to themselves or others at runtime via `permission.assign`
-  (US-11.5).
-- **DOCTOR** — **NOT data-only anymore.** Holds ONE permission:
-  `schedule.manage` (coarse). A `User` with `role.code = DOCTOR` always
-  has a linked `Doctor` row (1:1) and is affiliated with one or more
-  `Department`s via the `doctor_departments` join. **Service-layer scope
-  rule:** when the caller is DOCTOR, the schedule CRUD service MUST
-  restrict mutations to `schedule.doctorId === caller.doctor.id`. STAFF
-  gets the unrestricted form of the same permission. DOCTOR has no other
-  UI surface in P0 — the doctor portal is the schedule editor only.
+  they are pure records managed by NURSE / ADMIN / MEDICAL_RECORDS_OFFICER
+  (no `User` link).
+- **ADMIN** — **user / role / policy management only** (9 permissions:
+  `user.*` 4 + `role.*` 4 + `doctor.read` 1). Clinic operations
+  (`appointment.*`, `patient.*`, `schedule.*`, `medical_records.*`) are
+  **NOT granted by default**; ADMIN can grant them to themselves or others
+  at runtime via `role.update` (US-11.5).
+- **DOCTOR** — first-class clinical role. Holds the full **own-doctor CRUD
+  bundle** (15 permissions): five `schedule.*.own`, five
+  `appointment.*.own`, `patient.read`, `doctor.read`,
+  `medical_records.read.all`, `medical_records.create.own`,
+  `medical_records.update.own`. Also holds `schedule.read.own-department`
+  and `appointment.read.own-department` so doctors can see cross-coverage
+  context within their own department. A `User` with `role.code = DOCTOR`
+  always has a linked `Doctor` row (1:1) and a single home department
+  sourced from `User.departmentId`. **Service-layer scope rule:** every
+  `.own` permission narrows to `resource.doctorId === caller.doctor.id`;
+  the schedule / appointment / medical-records services dispatch per
+  HTTP verb against the widest scope held (per-verb resolvers in
+  `apps/api/src/auth/scope.ts`).
+- **NURSE** — department-scoped front-desk operator (14 permissions): four
+  `schedule.*.own-department`, four `appointment.*.own-department`, full
+  `patient.*` CRUD, `doctor.read`, `medical_records.read.all`. NURSE is
+  the primary booker; every read / write narrows to the NURSE's own
+  `User.departmentId`. Foreign-department mutates return
+  `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- **MEDICAL_RECORDS_OFFICER (MRO)** — cross-department records role (9
+  permissions): full `patient.*` CRUD, `appointment.read.all`,
+  `schedule.read.all`, `doctor.read`, `medical_records.read.all`,
+  `medical_records.update.all`. MRO can read every appointment / schedule
+  / medical record and edit any patient or medical record. No booking, no
+  schedule management.
+- **PHARMACY** — cross-department pharmacy read-only role (3 permissions):
+  `patient.read`, `doctor.read`, `medical_records.read.all`. Read-only
+  access for medication preparation; no writes.
 
 Conventions:
 
@@ -69,14 +86,19 @@ Conventions:
   NO ACTION` so audit history survives user soft-deletes. `appointments`
   has `created_by` / `updated_by` only.
 - **Authorization via RBAC** — every protected endpoint maps to one or more
-  permission codes. The Nest guard loads `user.role.policies[].permission.code`
-  once per request via Prisma (cached on the request context) and checks
-  the required permission against that set. The `Role` Prisma enum is gone:
-  roles are now DB rows (`roles` table), permissions are code-defined
-  (canonical list of 16 in `apps/api/prisma/seed/permissions.ts`), and
-  admins attach permissions to roles at runtime via the `permission.assign`
-  capability (US-11.5). Seeded baseline: ADMIN→5, STAFF→11, DOCTOR→1
-  (`schedule.manage`, with app-layer own-doctor scope restriction).
+  scope-aware permission codes
+  (`<resource>.<create|read|update|delete>.<own|own-department|all>`). The
+  Nest guard loads `user.role.policies[].permission.code` once per request
+  via Prisma (cached on the request context) and checks the required
+  permission against that set. The `Role` Prisma enum is gone: roles are
+  now DB rows (`roles` table), permissions are code-defined (canonical
+  list of **35** in `apps/api/src/auth/permissions.ts`), and admins attach
+  permissions to roles at runtime via `role.update` (US-11.5). Seeded
+  baseline: ADMIN→9, DOCTOR→15, NURSE→14, MEDICAL_RECORDS_OFFICER→9,
+  PHARMACY→3 (50 policies total). Service-layer scope narrows per-verb
+  via the resolvers in `apps/api/src/auth/scope.ts`; a caller holding a
+  permission but at too narrow a scope gets
+  `403 INSUFFICIENT_PERMISSION_SCOPE`.
 - **`Patient.hn` format** — 7–9 digit numeric string (Postgres `VARCHAR(9)`
   with a CHECK constraint `^[0-9]{7,9}$` appended via raw SQL in the init
   migration; Prisma 5 cannot express CHECK natively). Seed format is
@@ -108,11 +130,12 @@ Conventions:
 Purely infrastructural epic. No user-facing stories, but the data model is
 documented here so all downstream stories are grounded.
 
-### Data model (P0) — 13 tables
+### Data model (P0) — 12 tables
 
-The first 12 tables ship with F01 (init migration). `auth_logs` is added by
-F02 as a forward migration (`add_auth_log`) since it is the audit surface
-for the auth core.
+The first 11 tables ship with F01 (init migration; `doctor_departments`
+was retired post-centralisation since Doctor↔Department is now 1:1 via
+`User.departmentId`). `auth_logs` is added by F02 as a forward migration
+(`add_auth_log`), and `medical_records` lands later as part of F08.
 
 | Model                         | Purpose                                                                                                                                                                                              |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -120,13 +143,13 @@ for the auth core.
 | `patients`                    | Pure record (no `User` link). Multilingual names (en required, th nullable); `hn @db.VarChar(9)` with CHECK `^[0-9]{7,9}$`; `identificationNo` (Thai national ID or passport, freeform); `email?` (unique, lowercased); phone; date of birth; gender; blood group (default `UNKNOWN`); emergency-contact triplet; address. |
 | `departments`                 | Clinic department (`name` unique, `description?`). Soft-delete supported.                                                                                                                            |
 | `department_appointment_types`| Per-department allowed `AppointmentType` set (the "department booking rules" from the spec). Unique on `(departmentId, appointmentType)`. Booking validation MUST check the pair exists here.        |
-| `doctors`                     | Practitioner. 1-1 link to a `User` (`role.code = DOCTOR`). Carries `doctorCode` (unique), `medicalLicenseNo` (unique), `identificationNo` (required, freeform — parity with Patient). **No `departmentId` column** — affiliation lives in `doctor_departments`. |
-| `doctor_departments`          | M:N join between `doctors` and `departments`. Each row carries `isPrimary: Boolean default false`; application layer enforces "at most one primary per doctor" (no DB constraint). Unique on `(doctorId, departmentId)`. |
-| `doctor_schedules`            | Dated availability window (NOT recurring) with `doctorId`, `departmentId` (which department this schedule is for — required, since doctors may span departments), `startAt` / `endAt` (`timestamptz(3)` UTC, CHECK `end_at > start_at`), optional `breakStartAt` / `breakEndAt` (CHECK-validated), `acceptsBooking` flag. Each row is one specific UTC start/end pair; one-off shifts are first-class. Indexed on `(doctorId, departmentId)` and `(startAt)` for the calendar's date-range fetches. F06 pivoted from minute-based recurring templates to dated windows (the `_init` migration was regenerated). |
+| `doctors`                     | Practitioner. 1-1 link to a `User` (`role.code = DOCTOR`). Carries `doctorCode` (unique), `medicalLicenseNo` (unique), `identificationNo` (required, freeform — parity with Patient). **No `departmentId` column** — the doctor's home department is sourced from `doctor.user.departmentId` (the linked User row). Doctor↔Department is **1:1** post the department centralisation. |
+| `doctor_schedules`            | Dated availability window (NOT recurring) with `doctorId`, `departmentId` (denormalised from `doctor.user.departmentId` at write time so historical schedules survive a doctor moving departments — service layer rejects mismatches with `400 DOCTOR_DEPARTMENT_MISMATCH`), `startAt` / `endAt` (`timestamptz(3)` UTC, CHECK `end_at > start_at`), optional `breakStartAt` / `breakEndAt` (CHECK-validated), `acceptsBooking` flag. Each row is one specific UTC start/end pair; one-off shifts are first-class. Indexed on `(doctorId, departmentId)` and `(startAt)` for the calendar's date-range fetches. F06 pivoted from minute-based recurring templates to dated windows (the `_init` migration was regenerated). |
 | `appointments`                | `patientId`, `doctorId`, `departmentId` (inherited from the chosen schedule), `appointmentType`, `status`, `startAt` / `endAt` (CHECK `end > start`), `reason?` (Postgres `text`, no length cap), `createdBy` (renamed from `createdByUserId`), `updatedBy?`, `cancelledBy?` (renamed from `cancelledByUserId`) / `cancelledAt?` / `cancellationReason?`, `completedAt?`. **No `deletedAt` / `deletedBy`** — uses `status=CANCELLED` instead. |
-| `roles`                       | RBAC role (`code` unique). Seeded with `ADMIN`, `STAFF`, `DOCTOR`; admins holding `role.manage` may add custom roles at runtime.                                                                     |
-| `permissions`                 | Atomic capability with a stable `code`. **Code-defined**: seeded from a canonical list in `apps/api/prisma/seed/permissions.ts`; adding a new permission requires a code change + migration.         |
-| `policies`                    | `(roleId, permissionId)` join — "role R has permission P". Unique on the pair. Granted / revoked at runtime by admins holding `permission.assign`.                                                   |
+| `medical_records`             | Per-appointment clinical note authored by the assigned doctor. Carries `doctorId`, `patientId`, `departmentId` (denorm cache from the appointment), `appointmentId`, `note`, `drug?` (free-text for P0). Full audit cluster (`created_at/by`, `updated_at/by`). **Permanent — no soft-delete columns** (`deleted_at` / `deleted_by` are intentionally absent) and **no `medical_records.delete` permission** exists. |
+| `roles`                       | RBAC role (`code` unique). Carries `is_deletable` (default `true`; all seeded rows pinned to `false`). Seeded with `ADMIN`, `DOCTOR`, `NURSE`, `MEDICAL_RECORDS_OFFICER`, `PHARMACY`; admins holding `role.create` may add custom roles at runtime. |
+| `permissions`                 | Atomic capability with a stable `code` (`<resource>.<verb>.<scope>`). **Code-defined**: seeded from a canonical list in `apps/api/src/auth/permissions.ts`; adding a new permission requires a code change + seed re-run. **Catalog-only** — no audit columns (`created_by` / `updated_*` / `deleted_*` are absent) since the table never mutates at runtime. |
+| `policies`                    | `(roleId, permissionId)` join — "role R has permission P". Unique on the pair. Carries `is_deletable` (default `true`; all seeded rows pinned to `false`). Granted / revoked at runtime by admins holding `role.update`. |
 | `auth_logs`                   | **Append-only audit log** of auth events — `SIGN_IN_SUCCESS`, `SIGN_IN_FAILED`, `PERMISSION_DENIED`, `SIGN_OUT`. `userId` nullable so failed sign-ins for unknown emails still leave a forensic row; `email` is captured normalised on every event. Carries `requiredPermissions[]` / `heldPermissions[]` for `PERMISSION_DENIED` rows, plus optional `ip` / `userAgent` / `path` / `method`. **No audit cluster** — the table IS the audit trail (no `created_by`, no `deleted_*`); `createdAt` is the event timestamp. Added in F02 via the `add_auth_log` migration. |
 
 There is **no `staff_domains` table** — the staff/admin email-domain
@@ -145,42 +168,50 @@ separate table in P0. `AuthLogEvent` is added in F02 with `auth_logs`.
 
 ### Permission catalog (P0)
 
-The **16** canonical permission codes seeded into `permissions`:
+The **35** canonical permission codes seeded into `permissions`. Codes are
+CRUD-verb-shaped: `<resource>.<create|read|update|delete>.<own|own-department|all>`.
 
-| Code                  | Description                                              |
-| --------------------- | -------------------------------------------------------- |
-| `appointment.create`  | Create new appointments for any patient                  |
-| `appointment.cancel`  | Cancel any appointment                                   |
-| `appointment.list`    | List all appointments with filters                       |
-| `appointment.read`    | View an appointment's detail                             |
-| `schedule.manage`     | Create / update / delete doctor schedules                |
-| `patient.create`      | Register new patients (walk-in)                          |
-| `patient.read`        | View patient details                                     |
-| `patient.update`      | Edit patient demographics                                |
-| `patient.list`        | List all patients                                        |
-| `doctor.read`         | View doctor details                                      |
-| `doctor.list`         | List doctors and departments                             |
-| `user.invite`         | Pre-create a User row by email + role                    |
-| `user.disable`        | Soft-delete a User (block sign-in)                       |
-| `user.list`           | List all Users                                           |
-| `role.manage`         | Create / update / delete / list roles                    |
-| `permission.assign`   | Create / delete policies (assign permissions to roles)   |
+| Family            | Codes                                                                                                                                                                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `user.*` (4)      | `user.create`, `user.read`, `user.update`, `user.delete`                                                                                                                                                                                                                                               |
+| `role.*` (4)      | `role.create`, `role.read`, `role.update`, `role.delete` (`role.update` also covers policy assignment)                                                                                                                                                                                                  |
+| `appointment.*` (9) | `appointment.create.own`, `appointment.create.own-department`, `appointment.read.own`, `appointment.read.own-department`, `appointment.read.all`, `appointment.update.own`, `appointment.update.own-department`, `appointment.delete.own`, `appointment.delete.own-department`                          |
+| `schedule.*` (9)  | `schedule.create.own`, `schedule.create.own-department`, `schedule.read.own`, `schedule.read.own-department`, `schedule.read.all`, `schedule.update.own`, `schedule.update.own-department`, `schedule.delete.own`, `schedule.delete.own-department`                                                     |
+| `patient.*` (4)   | `patient.create`, `patient.read`, `patient.update`, `patient.delete` (scope-less — full access for anyone holding the perm)                                                                                                                                                                            |
+| `doctor.*` (1)    | `doctor.read` (catalog lookups are global)                                                                                                                                                                                                                                                             |
+| `medical_records.*` (4) | `medical_records.read.all`, `medical_records.create.own`, `medical_records.update.own`, `medical_records.update.all` — **no delete permission**: medical records are permanent (no soft-delete column either)                                                                                  |
 
-Default policy grants — **17 rows total** (5 + 11 + 1):
+Default policy grants — **50 rows total** (9 + 15 + 14 + 9 + 3):
 
-- **ADMIN** → **5** permissions (narrowed to user/role/policy management):
-  `user.invite`, `user.disable`, `user.list`, `role.manage`,
-  `permission.assign`. Clinic operations (appointment.*, patient.*,
-  doctor.*, schedule.manage) are NOT granted by default; ADMIN can grant
-  them at runtime via `permission.assign`.
-- **STAFF** → **11** permissions: `appointment.create` / `.cancel` /
-  `.list` / `.read` (4), `schedule.manage` (1), `patient.create` /
-  `.read` / `.update` / `.list` (4), `doctor.read` / `doctor.list` (2).
-- **DOCTOR** → **1** permission: `schedule.manage` (coarse). The schedule
-  CRUD service MUST enforce app-layer own-doctor scope when
-  `caller.role === DOCTOR` — restrict mutations to `schedule.doctorId ===
-  caller.doctor.id`. STAFF gets the unrestricted form of the same
-  permission.
+- **ADMIN** → **9** permissions (user + role management): `user.create`,
+  `user.read`, `user.update`, `user.delete`, `role.create`, `role.read`,
+  `role.update`, `role.delete`, `doctor.read`. Clinic operations are NOT
+  granted by default; ADMIN can grant them at runtime via `role.update`.
+- **DOCTOR** → **15** permissions: `schedule.read.own`,
+  `schedule.read.own-department`, `schedule.create.own`,
+  `schedule.update.own`, `schedule.delete.own`, `appointment.read.own`,
+  `appointment.read.own-department`, `appointment.create.own`,
+  `appointment.update.own`, `appointment.delete.own`, `patient.read`,
+  `doctor.read`, `medical_records.read.all`, `medical_records.create.own`,
+  `medical_records.update.own`. The schedule / appointment / medical
+  records services narrow by `caller.doctor.id`.
+- **NURSE** → **14** permissions (department-scoped front-desk):
+  `schedule.create.own-department`, `schedule.read.own-department`,
+  `schedule.update.own-department`, `schedule.delete.own-department`,
+  `appointment.create.own-department`, `appointment.read.own-department`,
+  `appointment.update.own-department`, `appointment.delete.own-department`,
+  `patient.create`, `patient.read`, `patient.update`, `patient.delete`,
+  `doctor.read`, `medical_records.read.all`.
+- **MEDICAL_RECORDS_OFFICER** → **9** permissions (cross-department
+  records): `patient.create`, `patient.read`, `patient.update`,
+  `patient.delete`, `appointment.read.all`, `schedule.read.all`,
+  `doctor.read`, `medical_records.read.all`, `medical_records.update.all`.
+- **PHARMACY** → **3** permissions (cross-department read-only):
+  `patient.read`, `doctor.read`, `medical_records.read.all`.
+
+The `roles` and `policies` tables carry an `is_deletable` column (default
+`true`); every seeded baseline row is pinned to `false` so a future F11
+admin UI cannot delete them. The invariant lives in F11's service layer.
 
 ### Constraints enforced at DB level
 
@@ -207,7 +238,16 @@ service-layer guard and surfaces as `400 SCHEDULE_START_IN_PAST`.
 - `User.role_id` is nullable **only** to permit the bootstrap insert; every non-bootstrap user MUST have a non-null `role_id` (enforced at the API DTO layer).
 - Soft-delete is supported on every table (full audit cluster `deletedAt` / `deletedBy`) **except** `appointments`, which uses the `status=CANCELLED` transition instead.
 - All timestamps stored as `timestamptz(3)` (UTC), rendered clinic-local in UI.
-- Doctor↔Department is M:N (`doctor_departments`). Each `DoctorSchedule` pins the specific `departmentId` it applies to; the booking flow inherits `Appointment.departmentId` from the chosen schedule (not from the doctor).
+- Doctor↔Department is **1:1**. The doctor's home department is the
+  **single source of truth on `User.departmentId`** (post the department
+  centralisation — `Doctor` no longer carries its own `department_id`
+  column). Every read goes through `doctor.user.departmentId`. Each
+  `DoctorSchedule` denormalises the doctor's current department onto the
+  row at write time (validated to match `doctor.user.departmentId` and
+  surfaced as `400 DOCTOR_DEPARTMENT_MISMATCH` on drift), so historical
+  schedules remain attributed to the department where they were performed
+  even if the doctor later moves. The booking flow inherits
+  `Appointment.departmentId` from the chosen schedule (not from the doctor).
 
 ### Seeded data (development)
 
@@ -218,12 +258,15 @@ expanded the original baseline (which had no DOCTOR users or schedules)
 with 75 doctors + 2700 dated schedules so directory pagination, the
 doctor picker, and the calendar all have a realistic dataset to stress.
 
-- **3 roles** — `ADMIN`, `STAFF`, `DOCTOR`.
-- **16 permissions** — the canonical catalog above.
-- **17 policies** — 5 + 11 + 1 as listed above.
-- **80 users** — 1 super-admin (nil UUID) + 2 ADMIN
-  (`admin1@gmail.com`, `admin2@gmail.com`) + 2 STAFF
-  (`staff1@gmail.com`, `staff2@gmail.com`) + **75 DOCTOR**
+- **5 roles** — `ADMIN`, `DOCTOR`, `NURSE`, `MEDICAL_RECORDS_OFFICER`,
+  `PHARMACY`.
+- **35 permissions** — the canonical catalog above (scope-aware codes).
+- **50 policies** — 9 + 15 + 14 + 9 + 3 as listed above.
+- **81 users** — 1 super-admin (nil UUID) + 2 ADMIN
+  (`admin1@gmail.com`, `admin2@gmail.com`) + 1 NURSE
+  (`nurse1@gmail.com`, anchored in the first seeded department) +
+  1 MEDICAL_RECORDS_OFFICER (`records1@gmail.com`) +
+  1 PHARMACY (`pharmacy1@gmail.com`) + **75 DOCTOR**
   (`doctor01@gmail.com`…`doctor75@gmail.com`).
 - **10 departments** — Cardiology, Internal Medicine, Pediatrics,
   Orthopedics, Obstetrics & Gynecology, Dermatology, Ophthalmology,
@@ -235,11 +278,12 @@ doctor picker, and the calendar all have a realistic dataset to stress.
   (about half have Thai names), 5 MALE + 5 FEMALE, blood-group mix
   including `UNKNOWN`.
 - **75 doctors** — 15 hand-crafted + 60 generated, spread across all 10
-  departments. Affiliation distribution: 42 single-dept, 20 two-dept, 13
-  three-dept.
+  departments. Each doctor is assigned a single home department via the
+  linked `User.departmentId` (Doctor↔Department is 1:1 post the
+  centralisation).
 - **2700 doctor_schedules** — 75 doctors × 3 weekdays × 12 weeks (past 8
-  + next 4) of dated windows. Doctors with multiple affiliations rotate
-  their schedule department across weeks (`weekIdx % affiliations.length`).
+  + next 4) of dated windows. Each schedule's `department_id` denormalises
+  the doctor's current `User.departmentId` at seed time.
 
 ---
 
@@ -390,11 +434,12 @@ onboarding epic is now reduced to staff/admin resolution + the home
 dispatcher; the previous US-3.2 (patient auto-creation) and US-3.3
 (patient onboarding form) are gone.
 
-### US-3.1 — Staff/Admin/Doctor resolution on first sign-in
+### US-3.1 — Role resolution on first sign-in
 
-**US-3.1** — As a STAFF, ADMIN, or DOCTOR whose account was pre-created by
-an ADMIN, I want my Google sign-in to resolve to my existing `User` record,
-so that I land in the right workspace immediately.
+**US-3.1** — As any pre-created user (ADMIN / DOCTOR / NURSE /
+MEDICAL_RECORDS_OFFICER / PHARMACY), I want my Google sign-in to resolve
+to my existing `User` record, so that I land in the right workspace
+immediately.
 
 **Acceptance criteria:**
 
@@ -404,25 +449,23 @@ so that I land in the right workspace immediately.
 - Backend **lowercases** the incoming email via `normalizeEmail()` before
   any lookup.
 - Backend matches an existing `User` by the normalized `email` whose
-  `role.code IN ('ADMIN', 'STAFF', 'DOCTOR')` and whose
-  `disabledAt IS NULL`. **All three roles are sign-in-able** — DOCTOR is
-  no longer a no-op role (it now holds `schedule.manage` for its own
-  schedule).
-- The domain allowlist (`STAFF_ALLOWED_DOMAINS`) governs which email
-  domains may sign in at all; emails outside the allowlist that don't
-  match any pre-created `User` are rejected with `code=NOT_INVITED`
-  (there is no patient fallback).
+  `role.code IN SIGN_IN_ELIGIBLE_ROLES` (`ADMIN`, `DOCTOR`, `NURSE`,
+  `MEDICAL_RECORDS_OFFICER`, `PHARMACY`) and whose `deletedAt IS NULL`.
+- The domain allowlist (`STAFF_ALLOWED_DOMAINS` — name retained for
+  backward compatibility) governs which email domains may sign in at
+  all; emails outside the allowlist that don't match any pre-created
+  `User` are rejected with `code=NOT_INVITED` (there is no patient
+  fallback).
 - On match, backend sets `googleSub` if previously null and returns
   `{ userId, roleCode, permissionCodes[] }` (the permission list is loaded
   from `user.role.policies[].permission.code`).
 - Resolved role and permissions are encoded in the JWT and used by the
   home dispatcher and per-request permission guard.
 
-**Notes / assumptions:** Staff and admins are created via E11
-(`user.invite`); this story assumes the `User` row already exists. DOCTOR
-users are created alongside their `Doctor` clinical record (and their
-`doctor_departments` rows) via the admin invite flow — the take-home
-does not seed any DOCTOR rows.
+**Notes / assumptions:** All five sign-in-eligible roles are created via
+E11 (`user.create`); this story assumes the `User` row already exists.
+DOCTOR users are created alongside their `Doctor` clinical record via
+the admin invite flow — the take-home does not seed any DOCTOR rows.
 
 ### US-3.4 — Home dispatcher routes by role
 
@@ -434,10 +477,15 @@ right workspace, so that I don't have to remember role-specific URLs.
 - `GET /[locale]` reads the session role code:
   - `ADMIN` → renders the admin dashboard (user / role / policy
     management).
-  - `STAFF` → renders the clinic dashboard
-    (appointments / patients / schedules).
-  - `DOCTOR` → renders the doctor schedule editor for their own
-    schedule (the only doctor-facing UI in P0).
+  - `NURSE` → renders the clinic dashboard
+    (appointments / patients / schedules) scoped to the nurse's own
+    department.
+  - `DOCTOR` → renders the unified `/schedules` page (permission-adaptive
+    view of own + own-department schedules).
+  - `MEDICAL_RECORDS_OFFICER` → renders the medical-records landing page
+    with cross-department patient + records access.
+  - `PHARMACY` → renders the pharmacy landing page (read-only patients +
+    records).
   - Unauthenticated → server-side redirect to `/signin`.
 - There is no PATIENT branch — patients cannot authenticate.
 
@@ -448,44 +496,43 @@ right workspace, so that I don't have to remember role-specific URLs.
 > **Delta from the original AC, captured during F05 implementation:**
 > Every list endpoint now returns the shared `Paginated<T>` envelope
 > rather than a flat array — accepts `?page=&pageSize=` (default 1/20,
-> max 100). See CLAUDE.md §8 for the contract. The doctor detail
-> endpoint's 404 envelope uses the generic `NOT_FOUND` code (rather
-> than the originally drafted `DOCTOR_NOT_FOUND`) — code catalog only
-> defines `NOT_FOUND` today.
+> max 500, or the `all` sentinel for date-windowed fetches). See
+> CLAUDE.md §8 for the contract. The doctor detail endpoint's 404
+> envelope uses the generic `NOT_FOUND` code (rather than the originally
+> drafted `DOCTOR_NOT_FOUND`) — code catalog only defines `NOT_FOUND`
+> today.
 
 ### US-4.1 — List departments
 
-**US-4.1** — As a STAFF user, I want to see all departments, so that I can
-filter doctors by specialty.
+**US-4.1** — As any signed-in clinical user (NURSE / DOCTOR / MRO /
+PHARMACY / ADMIN), I want to see all departments, so that I can filter
+doctors by specialty.
 
 **Acceptance criteria:**
 
 - `GET /departments?page=&pageSize=` returns
   `{ data: [{ id, name, description? }], total, page, pageSize, totalPages }`
   ordered by `name`.
-- Endpoint requires the `doctor.list` permission. **STAFF holds it by
-  default; ADMIN does not** (clinic operations are not in ADMIN's seeded
-  baseline). DOCTOR also lacks it; callers without the permission receive
-  `403 INSUFFICIENT_PERMISSION`.
+- Endpoint requires the `doctor.read` permission, which every seeded
+  role except PATIENT (out of scope) holds.
 - Department list page renders the result with localized labels and a
   `<PaginationControl>` at the bottom (hidden when `totalPages <= 1`).
 
 ### US-4.2 — List doctors (optionally filtered by department)
 
-**US-4.2** — As a STAFF user, I want to browse doctors, so that I can pick
-one to book with.
+**US-4.2** — As a NURSE / DOCTOR / MRO / PHARMACY user, I want to browse
+doctors, so that I can pick one to book with or look up a colleague.
 
 **Acceptance criteria:**
 
 - `GET /doctors?departmentId=:id?&page=&pageSize=` returns
-  `{ data: [{ id, firstNameEn, lastNameEn, doctorCode, gender?, departments: [{ departmentId, departmentName, isPrimary }] }], total, page, pageSize, totalPages }`.
-  Doctors may appear with multiple departments since `doctor_departments`
-  is M:N.
+  `{ data: [{ id, firstNameEn, lastNameEn, doctorCode, gender?, department: { id, name } }], total, page, pageSize, totalPages }`.
+  Each doctor has a single home department sourced from
+  `doctor.user.departmentId` (Doctor↔Department is 1:1).
 - Without `departmentId`, returns every active doctor ordered by
-  `doctorCode asc`. With `departmentId`, returns doctors who have any
-  `doctor_departments` row for that department (regardless of
-  `isPrimary`).
-- Endpoint requires the `doctor.list` permission (STAFF only by default).
+  `doctorCode asc`. With `departmentId`, returns doctors whose home
+  department matches it.
+- Endpoint requires the `doctor.read` permission.
 - A `/doctors` page shows the list with a department filter dropdown +
   pagination control. Changing the filter resets `page=1` so the user
   doesn't land on an empty page beyond the filtered result set; the
@@ -496,21 +543,22 @@ one to book with.
 
 ### US-4.3 — View doctor detail
 
-**US-4.3** — As a STAFF user, I want to view a doctor's profile, so that I
-can see their department affiliations and upcoming availability summary.
+**US-4.3** — As a NURSE / DOCTOR / MRO / PHARMACY user, I want to view a
+doctor's profile, so that I can see their home department and upcoming
+availability summary.
 
 **Acceptance criteria:**
 
 - `GET /doctors/:id` returns the doctor record (incl. `doctorCode`,
-  `medicalLicenseNo`, `gender?`, `phone`, `address?`), the list of
-  `doctor_departments` affiliations with `isPrimary` flags, and a thin
+  `medicalLicenseNo`, `gender?`, `phone`, `address?`), the home
+  department (sourced from `doctor.user.departmentId`), and a thin
   schedule count (`scheduleCount`) — the full schedule grid lands in F06.
-- Endpoint requires the `doctor.read` permission (STAFF only by default).
+- Endpoint requires the `doctor.read` permission.
 - `404` with `code=NOT_FOUND` if the doctor does not exist or has been
   soft-deleted.
 - A `/doctors/:id` page renders the detail. A "Book appointment" CTA
-  (gated on the caller also holding `appointment.create`) is deferred to
-  F08 when the booking flow lands.
+  (gated on the caller also holding `appointment.create.*`) is deferred
+  to F09 when the booking flow lands.
 
 ---
 
@@ -530,23 +578,31 @@ can see their department affiliations and upcoming availability summary.
 > the DB cannot express `now` in a CHECK. Full wire contract in
 > `docs/handoffs/F06-schedules-api.md`.
 
-All endpoints in this epic require the `schedule.manage` permission.
-**STAFF and DOCTOR** both hold it by default; ADMIN does NOT (ADMIN may
-grant it to themselves via `permission.assign` if needed).
+All endpoints in this epic are gated by the **scope-aware**
+`schedule.<verb>.<scope>` permission family. Each HTTP verb checks for at
+least one of its scope variants; the service then narrows by the widest
+held. Seeded baseline:
+- **DOCTOR** holds `schedule.{read,create,update,delete}.own` plus
+  `schedule.read.own-department` — full CRUD on own schedules, read-only
+  cross-coverage within their own department.
+- **NURSE** holds `schedule.{create,read,update,delete}.own-department`
+  — every CRUD verb scoped to the nurse's own `User.departmentId`.
+- **MRO** holds `schedule.read.all` — global read, no writes.
+- **ADMIN / PHARMACY** hold no `schedule.*` codes by default.
 
-**Scope rule (app-layer, NOT in the DB):** when the caller is DOCTOR, the
-service MUST restrict every mutation and read to schedules where
-`schedule.doctorId === caller.doctor.id` — DOCTOR cannot view or edit
-another doctor's schedule. STAFF gets the unrestricted form of the same
-permission. Foreign **mutate** (create / patch / delete / list with an
-explicit foreign `?doctorId=`) returns `403 INSUFFICIENT_PERMISSION_SCOPE`;
-foreign **GET** of a specific id returns `404 SCHEDULE_NOT_FOUND` so
-probing cannot leak the existence of another doctor's rows.
+**Per-verb scope dispatch:** the service uses `resolveSchedule<Verb>Scope(user)`
+to compute the widest scope held for the verb at hand. A DOCTOR holding
+`.read.own-department` no longer accidentally widens their WRITE scope —
+each verb is dispatched independently. Foreign-doctor / foreign-department
+mutates return `403 INSUFFICIENT_PERMISSION_SCOPE`; foreign GET of a
+specific id returns `404 SCHEDULE_NOT_FOUND` so probing cannot leak
+existence.
 
 **Department coupling:** each `DoctorSchedule` row carries a required
-`departmentId`. The chosen department MUST appear in the doctor's
-`doctor_departments` affiliations; otherwise the create / update returns
-`code=DOCTOR_NOT_IN_DEPARTMENT`.
+`departmentId`, denormalised from the doctor's current
+`User.departmentId` at write time. The service rejects a request whose
+`departmentId` doesn't match `doctor.user.departmentId` with
+`400 DOCTOR_DEPARTMENT_MISMATCH`.
 
 **DB-level CHECK constraints back-stop the validation:**
 `doctor_schedules_end_after_start` enforces `endAt > startAt` and
@@ -557,9 +613,10 @@ feedback. The past-`startAt` rejection is service-layer only
 
 ### US-5.1 — Lists schedules in a date range ✅ shipped
 
-**US-5.1** — As a user with `schedule.manage`, I want to view all schedule
-rows inside a date range (and optionally filtered by doctor / department),
-so that I can see and manage availability across the focused window.
+**US-5.1** — As a user holding any `schedule.read.*` permission, I want to
+view schedule rows inside a date range (and optionally filtered by doctor
+/ department), so that I can see and manage availability across the
+focused window.
 
 **Acceptance criteria:**
 
@@ -573,11 +630,22 @@ so that I can see and manage availability across the focused window.
   the range defaults to the current calendar month UTC.
 - `pageSize=all` (sentinel) is permitted — the calendar uses it bounded
   by `from` / `to` so a populated month / week fits in one response.
-- Endpoint requires the `schedule.manage` permission; callers without it
-  receive `403 INSUFFICIENT_PERMISSION`.
-- **DOCTOR scope:** the response is auto-restricted to
-  `doctorId === caller.doctor.id`. Explicitly passing a different
-  `?doctorId=` returns `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- Endpoint requires any `schedule.read.{own|own-department|all}`.
+  The service narrows by the widest scope held:
+  - `.all` → no narrowing (MRO).
+  - `.own-department` → `departmentId === caller.user.departmentId`.
+  - `.own` → `doctorId === caller.doctor.id`.
+  A request explicitly setting `?doctorId=` or `?departmentId=` to a
+  value outside the caller's allowed scope returns
+  `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- The FE `/schedules` page is **permission-adaptive** with four view
+  modes resolved at render time from the caller's effective scope:
+  - **mode A — `all`** (MRO `schedule.read.all`): every doctor.
+  - **mode B — `own+dept`** (DOCTOR `read.own` + `read.own-department`):
+    defaults to own; can widen to department via a Switch toggle.
+  - **mode C — `dept`** (NURSE `read.own-department`): auto-narrowed to
+    own department; doctor filter narrows to the department's doctors.
+  - **mode D — `own`** (DOCTOR with only `read.own`): own-doctor only.
 - The UI renders a calendar with toggleable month / week views.
   `?view=month|week`, `?month=YYYY-MM`, `?weekStart=YYYY-MM-DD`, and
   `?departmentId=` are URL state. Schedules render as colored chips
@@ -588,7 +656,8 @@ so that I can see and manage availability across the focused window.
 
 ### US-5.2 — Creates a schedule ✅ shipped
 
-**US-5.2** — As a user with `schedule.manage`, I want to add a new dated
+**US-5.2** — As a user holding `schedule.create.own` (DOCTOR) or
+`schedule.create.own-department` (NURSE), I want to add a new dated
 availability window for a doctor, so that the slot finder can offer their
 availability for booking on that date.
 
@@ -605,26 +674,34 @@ availability for booking on that date.
 - `startAt` MUST be strictly in the future (`startAt > now`). Past values
   are rejected `400 SCHEDULE_START_IN_PAST` at the service layer (DB
   cannot express `now` in a CHECK).
-- `departmentId` must be one of the doctor's affiliations
-  (`doctor_departments`); otherwise reject with
-  `409 DOCTOR_NOT_IN_DEPARTMENT`.
+- `departmentId` MUST match the doctor's current
+  `doctor.user.departmentId`; otherwise reject with
+  `400 DOCTOR_DEPARTMENT_MISMATCH`.
 - Backend rejects schedules whose `[startAt, endAt)` intersects another
   active schedule for the same `doctorId` (half-open overlap; back-to-back
   windows do NOT overlap) with `409 SCHEDULE_OVERLAP` and `details:
   { conflictingScheduleId }`.
-- Endpoint requires the `schedule.manage` permission.
-- **DOCTOR scope:** the `doctorId` in the body MUST equal
-  `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
-- The UI exposes a `ScheduleFormDialog` reached either from "+ Create
+- Endpoint requires any `schedule.create.{own|own-department}`. Scope
+  enforcement (via `resolveScheduleCreateScope`):
+  - DOCTOR (`.own`): the `doctorId` in the body MUST equal
+    `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
+  - NURSE (`.own-department`): the chosen doctor's home department MUST
+    equal `caller.user.departmentId`; else
+    `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- The UI exposes a `ScheduleFormDialog` validated with Zod +
+  react-hook-form (per-field errors), reached either from "+ Create
   schedule" in the page header or from the day-details dialog (which
   pre-fills the clicked date). The dialog uses MUI date / time pickers,
   the reusable `SearchableSelect` doctor picker (server-paged), and a
-  department selector populated from the chosen doctor's affiliations.
-  Past dates disable the Create CTA.
+  department field derived from the chosen doctor's home department.
+  DOCTOR in mode D / locked create flow sees the doctor + dept
+  pre-filled and the picker disabled (matches the BE which only accepts
+  `schedule.create.own` for them). Past dates disable the Create CTA.
 
 ### US-5.3 — Edits a schedule ✅ shipped
 
-**US-5.3** — As a user with `schedule.manage`, I want to edit an existing
+**US-5.3** — As a user holding `schedule.update.own` (DOCTOR) or
+`schedule.update.own-department` (NURSE), I want to edit an existing
 schedule, so that I can correct mistakes or change hours.
 
 **Acceptance criteria:**
@@ -633,13 +710,16 @@ schedule, so that I can correct mistakes or change hours.
   EXCLUDING `doctorId` (moving a schedule between doctors is out of
   scope for F06). `departmentId` IS editable.
 - The service merges the patch over the existing row and re-runs every
-  cross-field invariant AND the affiliation + overlap + past-`startAt`
+  cross-field invariant AND the department + overlap + past-`startAt`
   checks against the merged shape. Same error codes as create.
-- Endpoint requires the `schedule.manage` permission.
-- **DOCTOR scope:** the schedule's `doctorId` MUST equal
-  `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- Endpoint requires any `schedule.update.{own|own-department}`. Scope
+  enforcement (via `resolveScheduleUpdateScope`):
+  - DOCTOR (`.own`): the schedule's `doctorId` MUST equal
+    `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
+  - NURSE (`.own-department`): the schedule's `departmentId` MUST equal
+    `caller.user.departmentId`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
 - Editing a schedule does **not** retroactively cancel appointments
-  already booked outside the new window — those remain `BOOKED`. F08
+  already booked outside the new window — those remain `BOOKED`. F09
   will surface affected counts when it ships.
 - The UI opens the same `ScheduleFormDialog` on chip click. Doctor /
   department / date are non-editable in edit mode (the doctor lock
@@ -650,9 +730,9 @@ schedule, so that I can correct mistakes or change hours.
 
 ### US-5.4 — Deletes a schedule ✅ shipped
 
-**US-5.4** — As a user with `schedule.manage`, I want to remove a
-schedule, so that the doctor stops being offered for new bookings inside
-that window.
+**US-5.4** — As a user holding `schedule.delete.own` (DOCTOR) or
+`schedule.delete.own-department` (NURSE), I want to remove a schedule, so
+that the doctor stops being offered for new bookings inside that window.
 
 **Acceptance criteria:**
 
@@ -661,19 +741,22 @@ that window.
 - A follow-up DELETE on the same id returns `404 SCHEDULE_NOT_FOUND` so
   the FE never thinks "succeeded" for a row that was deleted by someone
   else in the interim.
-- Endpoint requires the `schedule.manage` permission.
-- **DOCTOR scope:** the schedule's `doctorId` MUST equal
-  `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- Endpoint requires any `schedule.delete.{own|own-department}`. Scope
+  enforcement (via `resolveScheduleDeleteScope`):
+  - DOCTOR (`.own`): the schedule's `doctorId` MUST equal
+    `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
+  - NURSE (`.own-department`): the schedule's `departmentId` MUST equal
+    `caller.user.departmentId`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
 - Deleting a schedule does NOT cancel existing future appointments
-  inside that window; F08 surfaces affected counts when it ships.
+  inside that window; F09 surfaces affected counts when it ships.
 
 ---
 
-## E6 — Appointment Types & Slot Finder
+## E6 — Appointment Types & Slot Finder ✅ shipped (F07, `feat/slots`)
 
-### US-6.1 — List appointment types
+### US-6.1 — List appointment types ✅ shipped
 
-**US-6.1** — As a STAFF user, I want to see the available appointment
+**US-6.1** — As a NURSE / DOCTOR, I want to see the available appointment
 types and their durations, so that I can pick the right one when booking.
 
 **Acceptance criteria:**
@@ -681,29 +764,31 @@ types and their durations, so that I can pick the right one when booking.
 - `GET /appointment-types` returns the hardcoded list
   `[{ code, label, durationMinutes }]` for `NEW_PATIENT_VISIT`,
   `FOLLOW_UP`, `CONSULTATION`, `PROCEDURE`.
-- Endpoint requires the `appointment.create` permission (the caller is
-  about to book) — STAFF only by default. (ADMIN does NOT hold
-  `appointment.create` in the seeded baseline; grant it via
-  `permission.assign` if an ADMIN must book.)
+- Endpoint requires `appointment.create.own-department` (NURSE) or
+  `appointment.create.own` (DOCTOR). ADMIN does NOT hold either in the
+  seeded baseline; grant via `role.update` if an ADMIN must book.
 
 ### US-6.2 — Find available slots
 
-**US-6.2** — As a STAFF user, I want to query open slots for a
+**US-6.2** — As a NURSE / DOCTOR, I want to query open slots for a
 `(department, doctor, date, appointmentType)`, so that I can pick a time
 that matches the per-department booking rules.
 
 **Acceptance criteria:**
 
-- `GET /doctors/:id/slots?departmentId=:dept&date=YYYY-MM-DD&type=APPOINTMENT_TYPE`
+- `GET /slots?doctorId=:id&departmentId=:dept&date=YYYY-MM-DD&type=APPOINTMENT_TYPE`
   returns `[{ startAt, endAt, departmentId }]` in chronological order.
-- The `departmentId` query param is **required**: the slot finder only
-  considers `DoctorSchedule` rows whose `departmentId` matches it (since
-  doctors may span multiple departments and each schedule pins one).
+  Note the **flat namespace** — `doctorId` is a peer query param, not a
+  path segment (the earlier `/doctors/:id/slots` shape was retired in
+  F07 so all four required filters are co-equal).
+- All four query params are required peers (validated by the DTO). The
+  slot finder only considers `DoctorSchedule` rows whose
+  `(doctorId, departmentId)` matches the request.
 - The requested `(departmentId, appointmentType)` pair MUST exist in
   `department_appointment_types`; otherwise the endpoint returns
   `400 DEPARTMENT_TYPE_NOT_ALLOWED`.
 - Slots are computed from active `DoctorSchedule` rows for the requested
-  weekday + department and stepped by `AppointmentType.durationMinutes`.
+  date + department and stepped by `AppointmentType.durationMinutes`.
   Slots overlapping the schedule's break window are excluded.
 - Slots overlapping a `BOOKED` or `COMPLETED` appointment for that doctor
   on that day are excluded.
@@ -712,8 +797,11 @@ that matches the per-department booking rules.
 - Returns empty array (not `404`) when no slots are available, **including
   the case of a fully-past `date` parameter** — never `400` (the
   past-date case still returns `200 []`).
-- Endpoint requires the `appointment.create` permission (the slot finder
-  is adjacent to booking; anyone who can book may probe slots).
+- Endpoint requires `appointment.create.own-department` (NURSE) or
+  `appointment.create.own` (DOCTOR). A NURSE probing a doctor whose
+  home department doesn't match the caller's `User.departmentId`
+  returns `403 INSUFFICIENT_PERMISSION_SCOPE`; a DOCTOR probing a
+  foreign doctor returns the same.
 
 **Notes / assumptions:** The slot finder is the single source of truth for
 "is this time bookable?"; the booking endpoints re-validate inside a
@@ -722,17 +810,20 @@ the resulting `Appointment.departmentId` on booking.
 
 ---
 
-## E7 — Staff booking on behalf
+## E7 — Front-desk booking on behalf
 
-**STAFF only** by default. ADMIN does NOT hold `appointment.create` /
-`patient.list` / `patient.create` in the seeded baseline; an ADMIN who
-needs to book must first grant themselves the required permissions via
-`permission.assign` (US-11.5). There is **no ownership filter** in P0 —
-every STAFF can act on every patient.
+**NURSE owns the department-scoped front-desk surface by default**
+(`appointment.create.own-department` + full `patient.*` CRUD). **DOCTOR
+can act on appointments where they are the assigned doctor**
+(`appointment.create.own`). ADMIN does NOT hold any `appointment.*` /
+`patient.*` in the seeded baseline; an ADMIN who needs to book must first
+grant themselves via `role.update` (US-11.5). There is **no per-caller
+ownership filter** on patients — patient records are visible to anyone
+holding `patient.read`.
 
-### US-7.1 — Staff searches for a patient
+### US-7.1 — Searches for a patient
 
-**US-7.1** — As a user with `patient.list`, I want to search for any
+**US-7.1** — As a user with `patient.read`, I want to search for any
 existing patient by name, identification number, or phone, so that I can
 book on their behalf.
 
@@ -742,14 +833,15 @@ book on their behalf.
   `[{ id, firstNameEn, lastNameEn, firstNameTh?, lastNameTh?, dateOfBirth, phone, hn }]`.
 - Search is case-insensitive partial match across name (en + th) / phone
   / identification number / HN.
-- Endpoint requires the `patient.list` permission (STAFF only by
-  default).
+- Endpoint requires the `patient.read` permission (held by NURSE /
+  DOCTOR / MRO / PHARMACY by default).
 - **No ownership filter** — every match is visible to every authorised
   caller.
 
-### US-7.2 — Staff books an appointment for any patient
+### US-7.2 — Books an appointment for any patient
 
-**US-7.2** — As a user with `appointment.create`, I want to book an
+**US-7.2** — As a user holding `appointment.create.own-department`
+(NURSE) or `appointment.create.own` (DOCTOR), I want to book an
 appointment for a patient on a selected doctor, department, type, and
 slot, so that the patient is scheduled.
 
@@ -757,34 +849,37 @@ slot, so that the patient is scheduled.
 
 - `POST /appointments` accepts
   `{ patientId, doctorId, departmentId, appointmentType, startAt, reason? }`.
-- The `departmentId` is **inherited from the chosen `DoctorSchedule`**,
-  NOT looked up from the doctor (because a doctor may span multiple
-  departments). The UI passes back the `departmentId` returned by the
-  slot finder.
+- The `departmentId` is **inherited from the chosen `DoctorSchedule`** —
+  the UI passes back the `departmentId` returned by the slot finder.
 - The requested `(departmentId, appointmentType)` pair MUST exist in
   `department_appointment_types`; otherwise reject with
   `code=DEPARTMENT_TYPE_NOT_ALLOWED`.
-- The chosen `doctorId` MUST have a `doctor_departments` row for
-  `departmentId`; otherwise reject with `code=DOCTOR_NOT_IN_DEPARTMENT`.
-- `reason` is required iff `appointmentType=PROCEDURE` (conditional zod
+- The chosen `doctorId`'s home department (`doctor.user.departmentId`)
+  MUST equal `departmentId`; otherwise reject with
+  `code=DOCTOR_DEPARTMENT_MISMATCH`.
+- `reason` is required iff `appointmentType=PROCEDURE` (conditional Zod
   schema and class-validator DTO). Stored as Postgres `text` (no length
   cap).
-- Endpoint requires the `appointment.create` permission (STAFF only by
-  default).
+- Endpoint requires any `appointment.create.{own|own-department}`.
+  Scope enforcement (via `resolveAppointmentCreateScope`):
+  - NURSE (`.own-department`): `departmentId` MUST equal
+    `caller.user.departmentId`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
+  - DOCTOR (`.own`): `doctorId` MUST equal `caller.doctor.id`; else
+    `403 INSUFFICIENT_PERMISSION_SCOPE`.
 - Backend runs inside a `$transaction` with isolation `Serializable`,
   retrying once on Postgres error `40001`.
 - Transaction verifies the slot is still available against the active
-  schedule (filtered by `departmentId`) and existing appointments;
-  conflicts return `409` with `code=SLOT_TAKEN`.
+  schedule (filtered by `(doctorId, departmentId)`) and existing
+  appointments; conflicts return `409` with `code=SLOT_TAKEN`.
 - On success, persists `Appointment` with `status=BOOKED`,
   `createdBy=<session.userId>`, `endAt = startAt + duration`. The
   `appointments_end_after_start` DB CHECK back-stops the math.
 - Returns the created appointment payload.
 
-### US-7.3 — Staff sees confirmation
+### US-7.3 — Sees confirmation
 
-**US-7.3** — As a STAFF booker, I want a clear confirmation after booking,
-so that I know it succeeded and can share details with the patient.
+**US-7.3** — As a booker, I want a clear confirmation after booking, so
+that I know it succeeded and can share details with the patient.
 
 **Acceptance criteria:**
 
@@ -793,11 +888,11 @@ so that I know it succeeded and can share details with the patient.
   reason.
 - A toast/snackbar confirms creation with a localized message.
 
-### US-7.4 — Staff registers a walk-in patient
+### US-7.4 — Registers a walk-in patient
 
-**US-7.4** — As a user with `patient.create`, I want to quickly register a
-walk-in patient who doesn't yet exist in the system, so that I can book
-them without leaving the booking flow.
+**US-7.4** — As a user with `patient.create` (NURSE or MRO), I want to
+quickly register a walk-in patient who doesn't yet exist in the system,
+so that I can book them without leaving the booking flow.
 
 **Acceptance criteria:**
 
@@ -807,50 +902,59 @@ them without leaving the booking flow.
   match the CHECK `^[0-9]{7,9}$`.
 - `email` (if provided) is lowercased via `normalizeEmail()` and stored
   with the unique constraint.
-- Endpoint requires the `patient.create` permission (STAFF only by
-  default).
-- The created patient row is accessible to every staff/admin caller — no
-  per-creator ownership relation is recorded (no `primary_staff_user_id`).
+- Endpoint requires the `patient.create` permission (NURSE / MRO by
+  default; `patient.*` is scope-less).
+- The created patient row is accessible to every authorised caller — no
+  per-creator ownership relation is recorded.
 - Returns the created patient; the UI then uses it in the booking wizard.
 
 ---
 
-## E8 — Appointment lifecycle (staff)
+## E8 — Appointment lifecycle
 
-**STAFF only** by default. ADMIN does NOT hold any `appointment.*`
-permission in the seeded baseline; an ADMIN who needs lifecycle access
-must first grant the relevant permission(s) via `permission.assign`.
+Per-verb scope-aware permissions:
+- **NURSE** holds `appointment.{read,update,delete}.own-department`.
+- **DOCTOR** holds `appointment.{read,update,delete}.own` plus
+  `appointment.read.own-department` for cross-coverage context.
+- **MRO** holds `appointment.read.all` — global read, no writes.
+- ADMIN / PHARMACY hold nothing by default.
 
-### US-8.1 — Staff lists appointments
+### US-8.1 — Lists appointments
 
-**US-8.1** — As a user with `appointment.list`, I want a filterable list of
-appointments, so that I can find a specific one to manage.
+**US-8.1** — As a user holding any `appointment.read.*`, I want a
+filterable list of appointments, so that I can find a specific one to
+manage.
 
 **Acceptance criteria:**
 
 - `GET /appointments?doctorId=&patientId=&departmentId=&from=&to=&status=`
-  returns a paginated list (default 20 per page, max 100).
+  returns the shared `Paginated<AppointmentResponse>` envelope.
 - Default sort: `startAt ASC` for future, `startAt DESC` for past
   (controlled by `order` query param `asc|desc`).
-- Endpoint requires the `appointment.list` permission (STAFF only by
-  default).
+- Endpoint accepts any `appointment.read.{own|own-department|all}` —
+  service narrows by the widest scope held. A request explicitly setting
+  filters outside the caller's scope returns
+  `403 INSUFFICIENT_PERMISSION_SCOPE`.
 
-### US-8.2 — Staff views appointment detail
+### US-8.2 — Views appointment detail
 
-**US-8.2** — As a user with `appointment.read`, I want to view the full
-detail of one appointment, so that I can confirm fields before any change.
+**US-8.2** — As a user holding any `appointment.read.*`, I want to view
+the full detail of one appointment, so that I can confirm fields before
+any change.
 
 **Acceptance criteria:**
 
 - `GET /appointments/:id` returns the appointment with embedded patient,
   doctor, and department (name).
-- Endpoint requires the `appointment.read` permission (STAFF only by
-  default).
+- Endpoint accepts any `appointment.read.{own|own-department|all}`;
+  the service rejects access to rows outside the caller's scope with
+  `404 APPOINTMENT_NOT_FOUND` (no existence leak).
 - `404` with `code=APPOINTMENT_NOT_FOUND` for missing IDs.
 
-### US-8.3 — Staff cancels an appointment
+### US-8.3 — Cancels an appointment
 
-**US-8.3** — As a user with `appointment.cancel`, I want to cancel any
+**US-8.3** — As a user holding `appointment.delete.own` (DOCTOR) or
+`appointment.delete.own-department` (NURSE), I want to cancel an
 appointment, so that the slot becomes free for reuse.
 
 **Acceptance criteria:**
@@ -858,8 +962,11 @@ appointment, so that the slot becomes free for reuse.
 - `POST /appointments/:id/cancel` sets `status=CANCELLED`,
   `cancelledBy=<session.userId>`, `cancelledAt=now`, and optional
   `cancellationReason` from the request body.
-- Endpoint requires the `appointment.cancel` permission (STAFF only by
-  default).
+- Endpoint requires any `appointment.delete.{own|own-department}`.
+  Scope enforcement (via `resolveAppointmentDeleteScope`):
+  - DOCTOR (`.own`): `appointment.doctorId === caller.doctor.id`.
+  - NURSE (`.own-department`): `appointment.departmentId === caller.user.departmentId`.
+  Mismatch returns `403 INSUFFICIENT_PERMISSION_SCOPE`.
 - Cancelling an already-cancelled appointment returns `409` with
   `code=APPOINTMENT_ALREADY_CANCELLED`.
 - After cancellation, the slot is immediately available to other bookings
@@ -869,29 +976,114 @@ appointment, so that the slot becomes free for reuse.
 
 ---
 
+## E9 — Medical records
+
+Per-appointment clinical note authored by the assigned doctor. **Records
+are permanent** — no soft-delete column and no `medical_records.delete`
+permission. Per-role baseline:
+- **DOCTOR** — `medical_records.read.all` + `.create.own` + `.update.own`.
+- **NURSE** — `medical_records.read.all`.
+- **MRO** — `medical_records.read.all` + `.update.all`.
+- **PHARMACY** — `medical_records.read.all`.
+
+### US-9.1 — Doctor authors a medical record
+
+**US-9.1** — As a DOCTOR with `medical_records.create.own`, I want to
+create a medical record attached to one of my own appointments, so that
+the patient's clinical history is captured.
+
+**Acceptance criteria:**
+
+- `POST /medical-records` accepts
+  `{ appointmentId, doctorId, patientId, note, drug? }`.
+- Service verifies `appointment.doctorId === body.doctorId`, copies
+  `departmentId` from the appointment as a denorm cache, and enforces
+  `doctorId === caller.doctor.id`; mismatch returns
+  `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- Returns the created record with embedded patient / department.
+
+### US-9.2 — Doctor updates their own medical record
+
+**US-9.2** — As a DOCTOR with `medical_records.update.own`, I want to
+update a record I authored, so that I can correct or extend the note.
+
+**Acceptance criteria:**
+
+- `PATCH /medical-records/:id` accepts a partial of the create payload.
+- Scope enforcement (via `resolveMedicalRecordsUpdateScope`): DOCTOR
+  with `.own` may only update records where
+  `record.doctorId === caller.doctor.id`. Foreign records return
+  `403 INSUFFICIENT_PERMISSION_SCOPE`.
+
+### US-9.3 — NURSE reads medical records in their department
+
+**US-9.3** — As a NURSE with `medical_records.read.all`, I want to view
+any medical record (typically scoped by the patient / appointment lookup
+they're already filtering by), so that I can prepare clinical context for
+the booked visit.
+
+**Acceptance criteria:**
+
+- `GET /medical-records?appointmentId=&patientId=&doctorId=` returns the
+  paginated list filtered by the supplied params.
+- NURSE may read any record; the seeded baseline grants `read.all`. (A
+  future tightening could narrow NURSE to `read.own-department`; in the
+  current seed every nurse can read any record.)
+
+### US-9.4 — MRO reads and updates any medical record
+
+**US-9.4** — As an MRO with `medical_records.update.all`, I want to
+correct or annotate any medical record, so that records officers can
+maintain data quality across departments.
+
+**Acceptance criteria:**
+
+- `PATCH /medical-records/:id` accepts the same partial payload as
+  US-9.2. With `.update.all` the service applies no scope narrowing.
+- MRO also holds `medical_records.read.all` for full read access.
+
+### US-9.5 — PHARMACY reads any medical record
+
+**US-9.5** — As a PHARMACY user with `medical_records.read.all`, I want
+to read any medical record (especially the `drug` field) for medication
+preparation, so that I can dispense correctly without booking access.
+
+**Acceptance criteria:**
+
+- `GET /medical-records/:id` returns the full record (incl. `drug`).
+- PHARMACY holds no write permissions on `medical_records` — every
+  mutate attempt returns `403 INSUFFICIENT_PERMISSION`.
+
+---
+
 ## E11 — Admin user management (P1)
 
 ADMIN-only operations to invite, list, and disable other users, plus
-runtime role / permission management via the `permission.assign`
-capability.
+runtime role / permission management via the `role.update` capability.
+Baseline `roles` + `policies` rows are pinned `is_deletable=false` so the
+seeded grants cannot be revoked through the admin UI.
 
-### US-11.1 — Admin invites a STAFF, ADMIN, or DOCTOR user
+### US-11.1 — Admin invites a user
 
-**US-11.1** — As an ADMIN, I want to pre-create a STAFF, ADMIN, or DOCTOR
-`User` by email and role, so that they can sign in via Google immediately.
+**US-11.1** — As an ADMIN, I want to pre-create a `User` of any
+sign-in-eligible role (ADMIN / DOCTOR / NURSE / MRO / PHARMACY) by email
+and role, so that they can sign in via Google immediately.
 
 **Acceptance criteria:**
 
 - `POST /admin/users` accepts
-  `{ email, roleCode ('ADMIN' | 'STAFF' | 'DOCTOR'), firstNameEn, lastNameEn, firstNameTh?, lastNameTh?, doctor? }`.
+  `{ email, roleCode, departmentId?, firstNameEn, lastNameEn, firstNameTh?, lastNameTh?, doctor? }`.
+- `departmentId` MUST be set for `DOCTOR` and `NURSE` (department-scoped
+  roles) and MUST be `null` for `ADMIN`, `MEDICAL_RECORDS_OFFICER`,
+  `PHARMACY` (cross-department / non-clinical). Enforced at the DTO /
+  service layer.
 - For `roleCode = 'DOCTOR'`, the request MUST include a `doctor`
-  sub-object carrying `{ doctorCode, medicalLicenseNo, identificationNo, gender?, phone, address?, departmentIds: string[] (>= 1), primaryDepartmentId? }`.
-  The backend transactionally creates the `User`, the `Doctor` (1-1), and
-  one `doctor_departments` row per `departmentIds` entry, marking
-  `primaryDepartmentId` as `isPrimary = true` (defaults to the first if
-  unspecified). Application layer enforces "at most one primary per
-  doctor".
-- Endpoint requires the `user.invite` permission (ADMIN only by default).
+  sub-object carrying `{ doctorCode, medicalLicenseNo, identificationNo, gender?, phone, address? }`.
+  The backend transactionally creates the `User` (with `departmentId`
+  set as the doctor's home department) and the `Doctor` (1-1).
+  Doctor↔Department is 1:1 via `User.departmentId` — there is no
+  `doctor_departments` join table.
+- Endpoint requires the `user.create` permission (ADMIN only by default).
 - Backend rejects emails whose domain is not in
   `STAFF_ALLOWED_DOMAINS` with `code=STAFF_DOMAIN_NOT_ALLOWED`.
 - Backend rejects duplicate emails with `code=USER_EMAIL_EXISTS`.
@@ -907,10 +1099,10 @@ status, so that I can audit access.
 **Acceptance criteria:**
 
 - `GET /admin/users?roleCode=&disabled=` returns
-  `[{ id, email, firstNameEn, lastNameEn, firstNameTh?, lastNameTh?, roleCode, deletedAt, createdAt }]`.
+  `[{ id, email, firstNameEn, lastNameEn, firstNameTh?, lastNameTh?, roleCode, departmentId?, deletedAt, createdAt }]`.
 - Default returns active users only (`deletedAt IS NULL`); pass
   `disabled=true` to include soft-deleted.
-- Endpoint requires the `user.list` permission (ADMIN only by default).
+- Endpoint requires the `user.read` permission (ADMIN only by default).
 
 ### US-11.3 — Admin soft-revokes a user
 
@@ -922,47 +1114,43 @@ they can no longer sign in while preserving their audit trail.
 - `POST /admin/users/:id/disable` sets `deletedAt = now` and
   `deletedBy = <session.userId>` on the `users` row (the user's "disabled"
   state is its soft-delete cluster).
-- Endpoint requires the `user.disable` permission (ADMIN only by default).
+- Endpoint requires the `user.delete` permission (ADMIN only by default).
 - Disabled users fail `/auth/resolve` (returns `code=USER_DISABLED`);
   their existing `Appointment.createdBy` / `cancelledBy` references
   remain intact (audit FKs use `ON DELETE NO ACTION`).
 - ADMIN cannot disable their own account (`code=CANNOT_DISABLE_SELF`).
 - A reactivation endpoint `POST /admin/users/:id/enable` clears
-  `deletedAt` / `deletedBy`.
+  `deletedAt` / `deletedBy` and requires `user.update`.
 
 ### US-11.5 — Admin assigns permissions to roles
 
 **US-11.5** — As an ADMIN, I want to grant or revoke specific permissions
-on a role, so that I can tune what STAFF (or future custom roles) — or
-even ADMIN itself — can do without code changes.
+on a role (including custom roles, and ADMIN itself), so that I can tune
+the RBAC matrix without code changes.
 
 **Acceptance criteria:**
 
-- `POST /admin/roles/:id/policies` accepts `{ permissionId }` and creates a
-  new `Policy` row linking the role to the permission. Idempotent: a
-  duplicate grant returns the existing policy (or `409 POLICY_EXISTS` —
-  either is acceptable for v1).
-- `DELETE /admin/roles/:id/policies/:permissionId` removes the policy
-  (soft-delete via `deletedAt` / `deletedBy`).
-- Endpoint requires the `permission.assign` permission (ADMIN only by
-  default).
+- `POST /admin/roles/:id/policies` accepts `{ permissionId }` and creates
+  a new `Policy` row linking the role to the permission with
+  `is_deletable=true`. Idempotent: a duplicate grant returns the existing
+  policy (or `409 POLICY_EXISTS` — either is acceptable for v1).
+- `DELETE /admin/roles/:id/policies/:permissionId` removes the policy.
+  Rejects with `409 POLICY_NOT_DELETABLE` if the target row carries
+  `is_deletable=false` (i.e. every seeded baseline grant).
+- Endpoint requires the `role.update` permission (ADMIN only by default).
 - ADMIN can use this endpoint to grant themselves clinic-operations
-  permissions (e.g. `appointment.create`) that are NOT in the seeded
-  baseline. This is the canonical path for an ADMIN who needs to act as
-  a booker.
-- **Lockout guard:** revoking `permission.assign` from the ADMIN role is
-  rejected with `code=CANNOT_REMOVE_LAST_PERMISSION_ASSIGN` whenever doing
-  so would leave zero active users able to manage policies. (Simplest v1:
-  reject the revoke if the target role is ADMIN and the permission is
-  `permission.assign`.)
-- After a grant/revoke, the per-request permission cache is invalidated on
-  the next call from any affected user — practically this means the user's
-  permission set is re-read on each request anyway, so no explicit
-  invalidation is required.
+  permissions (e.g. `appointment.create.own-department`) that are NOT in
+  the seeded baseline. This is the canonical path for an ADMIN who needs
+  to act as a booker.
+- After a grant/revoke, the per-request permission cache is invalidated
+  on the next call from any affected user — practically this means the
+  user's permission set is re-read on each request anyway, so no
+  explicit invalidation is required.
 
-**Notes / assumptions:** The seeded baseline (ADMIN→5, STAFF→11,
-DOCTOR→1) is the starting point. Admins may grant additional permissions
-to ADMIN / STAFF / DOCTOR (or any custom role) via this endpoint.
+**Notes / assumptions:** The seeded baseline (ADMIN→9, DOCTOR→15,
+NURSE→14, MRO→9, PHARMACY→3) is the starting point. Admins may grant
+additional permissions to any role via this endpoint, but cannot revoke
+any seeded baseline policy.
 
 ### US-11.6 — Admin creates a custom role (P2)
 
@@ -973,11 +1161,12 @@ variations without a schema change.
 **Acceptance criteria:**
 
 - `POST /admin/roles` accepts `{ code, name, description? }` and creates a
-  new `Role` row (`code` is unique and conventionally UPPER_SNAKE).
-- Endpoint requires the `role.manage` permission (ADMIN only by default
+  new `Role` row (`code` is unique and conventionally UPPER_SNAKE) with
+  `is_deletable=true`.
+- Endpoint requires the `role.create` permission (ADMIN only by default
   via the seeded baseline).
 - Returns the new role; the admin then attaches policies via US-11.5
-  (which requires `permission.assign`).
+  (which requires `role.update`).
 - **Priority: P2.** Cuttable for the take-home; may ship as data-only with
   no dedicated UI.
 
@@ -1018,12 +1207,13 @@ take-home end-to-end.
 - Repo `README.md` covers: prerequisites (Node, pnpm, Docker), `.env`
   files for `apps/web` and `apps/api`, `pnpm install`, `pnpm db:up`,
   `pnpm prisma migrate dev`, `pnpm db:seed`, `pnpm dev`.
-- Documents the seeded admin and staff emails for sign-in
-  (`admin1@gmail.com`, `admin2@gmail.com`, `staff1@gmail.com`,
-  `staff2@gmail.com`; patients do not sign in; no DOCTOR users are
-  seeded — they are created via admin invite).
-- Documents how to verify the RBAC baseline (seeded roles, 16
-  permissions, and 17 policies — ADMIN→5, STAFF→11, DOCTOR→1).
+- Documents the seeded sign-in emails (`admin1@gmail.com`,
+  `admin2@gmail.com`, `nurse1@gmail.com`, `records1@gmail.com`,
+  `pharmacy1@gmail.com`, and 75 DOCTOR rows `doctor01@gmail.com` …
+  `doctor75@gmail.com`; patients do not sign in).
+- Documents how to verify the RBAC baseline (5 seeded roles, 35
+  permissions, 50 policies — ADMIN→9, DOCTOR→15, NURSE→14,
+  MEDICAL_RECORDS_OFFICER→9, PHARMACY→3).
 - Links to Swagger at `/api/v1/docs` and to the feature roadmap.
 - Calls out known deferred items (`COMPLETED` transition, profile edit,
   notifications, patient self-service).

@@ -4,8 +4,16 @@
  * The page reads `?month=YYYY-MM` from the URL, falls back to the current
  * month in the user's local timezone, and computes:
  *
- *  - `monthRangeISO()`     — `from` / `to` (YYYY-MM-DD) bounds for the BE
- *                             list-schedules query.
+ *  - `monthRangeISO()`     — `from` / `to` (YYYY-MM-DD) bounds covering
+ *                             just the calendar month. Rarely the right
+ *                             choice for the calendar — use
+ *                             `visibleMonthRangeISO()` to cover the full
+ *                             6×7 grid (which includes the prior month's
+ *                             trailing days + the next month's leading
+ *                             days the grid still renders).
+ *  - `visibleMonthRangeISO()` — `from` / `to` bounds for the full month
+ *                             grid (42 cells). What the schedules page
+ *                             passes to the BE list query.
  *  - `buildMonthGrid()`    — six rows of seven `Date`s, padded with the
  *                             trailing days of the prior month and the
  *                             leading days of the next so a full month
@@ -139,6 +147,44 @@ export function monthRangeISO(param: MonthParam): MonthRangeISO {
   return {
     from: first.format("YYYY-MM-DD"),
     to: last.format("YYYY-MM-DD"),
+  };
+}
+
+/**
+ * Visible-grid `from` / `to` strings — same shape as `monthRangeISO`, but
+ * extended to cover EVERY cell the month grid actually renders. The grid
+ * is always 6 rows × 7 columns (see `buildMonthGrid`), so the leading
+ * row pulls trailing days from the previous month and the trailing row
+ * pulls leading days from the next month.
+ *
+ * Use this — NOT `monthRangeISO` — when computing the BE list-schedules
+ * window for the month view. Otherwise schedules on those padding days
+ * never reach the FE and the cells render empty even though the day
+ * actually has rows in the DB.
+ *
+ * `weekStart` defaults to `"monday"` to match `buildMonthGrid`'s default
+ * convention. Pass the same value both helpers see so the visible range
+ * always matches what the grid drew.
+ */
+export function visibleMonthRangeISO(
+  param: MonthParam,
+  weekStart: WeekStart = "monday",
+): MonthRangeISO {
+  const firstOfMonth = dayjsMonthParam(param);
+  // Mirror `buildMonthGrid`'s leading-day math (CLAUDE.md rule 9 — go
+  // through dayjs, not raw Date arithmetic). Keep the two functions in
+  // lock-step so the fetch window never under-covers what the grid draws.
+  const rawDow = firstOfMonth.day();
+  const dowFromWeekStart =
+    weekStart === "monday" ? (rawDow + 6) % 7 : rawDow;
+  const gridStart = firstOfMonth.subtract(dowFromWeekStart, "day");
+  // Six rows × seven columns = 42 cells total; the last cell is 41 days
+  // after `gridStart`.
+  const gridEnd = gridStart.add(MONTH_GRID_ROWS * MONTH_GRID_COLUMNS - 1, "day");
+
+  return {
+    from: gridStart.format("YYYY-MM-DD"),
+    to: gridEnd.format("YYYY-MM-DD"),
   };
 }
 

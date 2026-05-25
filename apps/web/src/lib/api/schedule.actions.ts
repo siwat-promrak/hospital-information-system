@@ -58,8 +58,10 @@ function toActionError(err: unknown): ScheduleActionError {
 }
 
 function revalidateSchedulePages(): void {
+  // Only one schedule surface after the page consolidation — the unified
+  // permission-aware `/schedules` page covers every caller (DOCTOR / NURSE
+  // / MRO). The legacy `/me/schedule` route is gone.
   revalidatePath(FE_PATH.SCHEDULES);
-  revalidatePath(FE_PATH.DOCTOR_SCHEDULE);
 }
 
 export async function createScheduleAction(

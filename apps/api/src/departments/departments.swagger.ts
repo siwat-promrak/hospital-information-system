@@ -15,7 +15,7 @@ const FORBIDDEN_EXAMPLE = {
   statusCode: 403,
   code: ErrorCode.INSUFFICIENT_PERMISSION,
   message: 'Caller is missing the required permission(s).',
-  details: { required: ['doctor.list'], held: [] },
+  details: { required: ['doctor.read'], held: [] },
 };
 
 const PaginatedDepartmentDto = PaginatedDto(DepartmentResponseDto);
@@ -36,7 +36,7 @@ export function ApiListDepartments(): MethodDecorator & ClassDecorator {
       type: PaginatedDepartmentDto,
     }),
     ApiForbiddenResponse({
-      description: 'Caller is missing the `doctor.list` permission.',
+      description: 'Caller is missing the `doctor.read` permission.',
       schema: { example: FORBIDDEN_EXAMPLE },
     }),
   );

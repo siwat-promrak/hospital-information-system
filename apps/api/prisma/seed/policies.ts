@@ -2,24 +2,25 @@
  * Seeds the default role→permission grants from the catalog declared in
  * `src/auth/roles.ts` (`DEFAULT_ROLE_PERMISSIONS`):
  *
- *   - ADMIN : 5 permissions — user/role/policy management only.
- *             (`user.invite`, `user.disable`, `user.list`, `role.manage`,
- *             `permission.assign`). Clinic-operations (appointment.*,
- *             patient.*, doctor.*, schedule.manage) are NOT granted by
- *             default; ADMIN can grant them at runtime via
- *             `permission.assign` if needed.
- *   - STAFF : 11 permissions — appointment.* (4), schedule.manage (1),
- *             patient.create/read/update/list (4), doctor.read,
- *             doctor.list (2).
- *   - DOCTOR: 1 permission — schedule.manage (so doctors can manage their
- *             OWN schedule once they sign in). NOTE: this is the coarse
- *             permission; the schedule CRUD service MUST enforce
- *             `if user.role === DOCTOR, restrict to schedule.doctorId ===
- *             user.doctor.id` at the app layer. STAFF gets the unrestricted
- *             form of the same permission.
+ *   - ADMIN                   : 9  permissions — user / role management +
+ *                                doctor.read.
+ *   - DOCTOR                  : 14 permissions — own-doctor schedules +
+ *                                appointments + medical records, plus
+ *                                patient.read + medical_records.read.all.
+ *   - NURSE                   : 14 permissions — own-department schedules +
+ *                                appointments + patients (full CRUD) +
+ *                                doctor.read + medical_records.read.all.
+ *   - MEDICAL_RECORDS_OFFICER : 9  permissions — cross-department patients
+ *                                + appointment / schedule reads + doctor.read
+ *                                + medical_records read/update.all.
+ *   - PHARMACY                : 3  permissions — patient.read + doctor.read
+ *                                + medical_records.read.all.
  *
- * Total: 5 + 11 + 1 = 17 policy rows. Idempotent: upsert keyed by the
- * `(roleId, permissionId)` unique pair.
+ * Total: 9 + 14 + 14 + 9 + 3 = 49 policy rows. Every seeded row is pinned
+ * to `isDeletable = false` so a future F11 admin UI cannot remove the
+ * baseline grants (the invariant lives in F11's service layer; this seeder
+ * just persists the column). Idempotent: upsert keyed by `(roleId,
+ * permissionId)`.
  */
 import { PrismaClient, type User } from '@prisma/client';
 
@@ -36,8 +37,13 @@ export async function seedPolicies(
 ): Promise<number> {
   const grants: Array<{ roleId: string; codes: readonly string[] }> = [
     { roleId: roles.admin.id, codes: DEFAULT_ROLE_PERMISSIONS[ROLE.ADMIN] },
-    { roleId: roles.staff.id, codes: DEFAULT_ROLE_PERMISSIONS[ROLE.STAFF] },
     { roleId: roles.doctor.id, codes: DEFAULT_ROLE_PERMISSIONS[ROLE.DOCTOR] },
+    { roleId: roles.nurse.id, codes: DEFAULT_ROLE_PERMISSIONS[ROLE.NURSE] },
+    {
+      roleId: roles.medicalRecordsOfficer.id,
+      codes: DEFAULT_ROLE_PERMISSIONS[ROLE.MEDICAL_RECORDS_OFFICER],
+    },
+    { roleId: roles.pharmacy.id, codes: DEFAULT_ROLE_PERMISSIONS[ROLE.PHARMACY] },
   ];
 
   let count = 0;
@@ -57,10 +63,11 @@ export async function seedPolicies(
             permissionId: permission.id,
           },
         },
-        update: {},
+        update: { isDeletable: false },
         create: {
           roleId: grant.roleId,
           permissionId: permission.id,
+          isDeletable: false,
           createdBy: superAdmin.id,
         },
       });

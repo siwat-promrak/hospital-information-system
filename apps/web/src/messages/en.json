@@ -24,12 +24,23 @@
   "SignOut": {
     "label": "Sign out"
   },
+  "Common": {
+    "Role": {
+      "admin": "Administrator",
+      "doctor": "Doctor",
+      "nurse": "Nurse",
+      "medicalRecordsOfficer": "Medical Records Officer",
+      "pharmacy": "Pharmacy"
+    }
+  },
   "Dashboard": {
     "welcome": "Welcome, {name}",
     "roleLabel": "Role",
     "permissionsLabel": "Permissions",
     "comingSoonAdmin": "Admin dashboard — user, role, and policy management ships in F11.",
-    "comingSoonStaff": "Staff dashboard — patient registration, booking, and appointments ship in F08.",
+    "comingSoonNurse": "Nurse dashboard — own-department appointment booking and patient lookup ship in F08.",
+    "comingSoonMedicalRecordsOfficer": "Medical records dashboard — org-wide appointment and patient browsing ship in F08.",
+    "comingSoonPharmacy": "Pharmacy dashboard — org-wide appointment and patient lookups for medication dispensing ship in F08+.",
     "comingSoonDoctor": "Doctor dashboard — own-schedule editor ships in F06.",
     "noPermissions": "No permissions granted yet."
   },
@@ -45,18 +56,19 @@
       "departments": "Departments",
       "doctors": "Doctors",
       "schedules": "Schedules",
-      "mySchedule": "My schedule"
+      "medicalRecords": "Medical records"
     }
   },
   "Breadcrumb": {
     "home": "Home",
     "admin": "Admin",
-    "staff": "Staff",
-    "me": "Me",
-    "schedule": "Schedule",
+    "nurse": "Nurse",
+    "medicalRecordsOfficer": "Medical records",
+    "pharmacy": "Pharmacy",
     "schedules": "Schedules",
     "departments": "Departments",
-    "doctors": "Doctors"
+    "doctors": "Doctors",
+    "medicalRecords": "Medical records"
   },
   "UserMenu": {
     "openMenu": "Open user menu",
@@ -106,12 +118,11 @@
       "filterByDepartment": "Filter by department",
       "allDepartments": "All departments",
       "empty": "No doctors yet. Doctors appear here once they're invited via Admin → Users (F11).",
-      "primary": "Primary",
       "viewDetail": "View"
     },
     "DoctorDetail": {
       "back": "Back to doctors",
-      "departmentsLabel": "Departments",
+      "departmentLabel": "Department",
       "scheduleSummary": "Weekly schedule",
       "scheduleEmpty": "No schedule configured yet. Schedule CRUD ships in F06.",
       "contact": "Contact",
@@ -128,16 +139,21 @@
   "Schedules": {
     "title": "Schedules",
     "subtitle": "Working windows for every doctor — switch between month and week views.",
-    "myTitle": "My schedule",
-    "mySubtitle": "Your working windows.",
+    "allTitle": "All schedules",
+    "allSubtitle": "Every working window across the hospital — colour-coded by department.",
+    "deptTitle": "Department schedules",
+    "deptSubtitle": "Working windows for doctors in your department.",
+    "ownTitle": "My schedule",
+    "ownSubtitle": "Your working windows.",
     "filterByDepartment": "Filter by department",
+    "filterByDoctor": "Filter by doctor",
     "allDepartments": "All departments",
+    "allDoctors": "All doctors",
     "addSchedule": "Add schedule",
     "addForDate": "Add for {date}",
     "moreCount": "+ {count} more",
     "breakLabel": "Break",
     "notAcceptingBookings": "Closed to bookings",
-    "legendDepartment": "Department",
     "today": "Today",
     "prevMonth": "Previous month",
     "nextMonth": "Next month",
@@ -146,6 +162,11 @@
     "viewMonth": "Month",
     "viewWeek": "Week",
     "viewToggleAriaLabel": "Calendar view",
+    "toggleShowMineOnly": "Show mine only",
+    "legendTitle": "Departments",
+    "doctorLoadingMore": "Loading more doctors…",
+    "doctorShowingCount": "Showing {loaded} of {total} doctors — scroll to load more",
+    "doctorSearchScopedHint": "Search only matches doctors already loaded. Scroll to load more.",
     "upcoming": "Upcoming",
     "readOnlyTitle": "Schedule has ended",
     "readOnlyBody": "This schedule's end time has already passed. It cannot be edited or deleted.",
@@ -184,7 +205,29 @@
       "deleteConfirmBody": "This schedule will be removed permanently. Existing appointments are not affected, but no new bookings will be accepted against it.",
       "deleteConfirm": "Delete",
       "deleteCancel": "Cancel",
-      "editLockedNotice": "Doctor, department, and date are locked. To change them, delete this schedule and create a new one."
+      "editLockedNotice": "Doctor, department, and date are locked. To change them, delete this schedule and create a new one.",
+      "lockedToCallerHint": "Locked to your own schedule.",
+      "viewOnlyOtherDoctor": "You can only view this schedule. Saving and deleting are limited to your own rows.",
+      "fieldErrors": {
+        "doctorRequired": "Select a doctor.",
+        "doctorInvalid": "Selected doctor is invalid.",
+        "departmentRequired": "Select a department.",
+        "departmentInvalid": "Selected department is invalid.",
+        "dateRequired": "Select a date.",
+        "dateInvalid": "Date is invalid.",
+        "startTimeRequired": "Enter a start time.",
+        "startTimeInvalid": "Start time must be HH:mm (e.g. 09:00).",
+        "endTimeRequired": "Enter an end time.",
+        "endTimeInvalid": "End time must be HH:mm (e.g. 17:00).",
+        "endBeforeStart": "End time must be after start time.",
+        "startInPast": "Start time must be in the future.",
+        "breakStartRequired": "Enter a break start time.",
+        "breakStartInvalid": "Break start must be HH:mm.",
+        "breakEndRequired": "Enter a break end time.",
+        "breakEndInvalid": "Break end must be HH:mm.",
+        "breakEndBeforeStart": "Break end must be after break start.",
+        "breakOutsideWindow": "Break window must lie inside the start–end window."
+      }
     },
     "Errors": {
       "forbidden": "You don't have permission to manage schedules.",

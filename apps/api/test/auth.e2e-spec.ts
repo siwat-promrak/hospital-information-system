@@ -33,13 +33,13 @@ const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET ?? 'dev-internal-api-sec
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? 'dev-nextauth-secret-change-me';
 
 const DOCTOR_EMAIL = 'doctor-e2e@gmail.com';
-const DISABLED_EMAIL = 'staff-disabled-e2e@gmail.com';
+const DISABLED_EMAIL = 'nurse-disabled-e2e@gmail.com';
 
 interface SeededIds {
   adminId: string;
   adminEmail: string;
-  staffId: string;
-  staffEmail: string;
+  nurseId: string;
+  nurseEmail: string;
   doctorId: string;
   disabledId: string;
 }
@@ -82,24 +82,28 @@ async function ensureFixtures(prisma: PrismaService): Promise<SeededIds | null> 
     where: { email: 'admin1@gmail.com', deletedAt: null },
     include: { role: true },
   });
-  const staff = await prisma.user.findFirst({
-    where: { email: 'staff1@gmail.com', deletedAt: null },
+  const nurse = await prisma.user.findFirst({
+    where: { email: 'nurse1@gmail.com', deletedAt: null },
     include: { role: true },
   });
   const adminRole = await prisma.role.findUnique({ where: { code: ROLE.ADMIN } });
   const doctorRole = await prisma.role.findUnique({ where: { code: ROLE.DOCTOR } });
-  const staffRole = await prisma.role.findUnique({ where: { code: ROLE.STAFF } });
+  const nurseRole = await prisma.role.findUnique({ where: { code: ROLE.NURSE } });
 
-  if (!admin || !staff || !adminRole || !doctorRole || !staffRole) {
+  if (!admin || !nurse || !adminRole || !doctorRole || !nurseRole) {
     return null;
   }
 
+  // Doctor seed users carry `User.departmentId` (scoped role); reuse the
+  // nurse's department so the FK constraint holds without seeding another
+  // department row here.
   const doctor = await prisma.user.upsert({
     where: { email: normalizeEmail(DOCTOR_EMAIL) },
     update: {
       firstNameEn: 'Doctor',
       lastNameEn: 'E2E',
       roleId: doctorRole.id,
+      departmentId: nurse.departmentId,
       deletedAt: null,
       deletedBy: null,
     },
@@ -108,6 +112,7 @@ async function ensureFixtures(prisma: PrismaService): Promise<SeededIds | null> 
       firstNameEn: 'Doctor',
       lastNameEn: 'E2E',
       roleId: doctorRole.id,
+      departmentId: nurse.departmentId,
       createdBy: admin.id,
     },
   });
@@ -117,7 +122,8 @@ async function ensureFixtures(prisma: PrismaService): Promise<SeededIds | null> 
     update: {
       firstNameEn: 'Disabled',
       lastNameEn: 'E2E',
-      roleId: staffRole.id,
+      roleId: nurseRole.id,
+      departmentId: nurse.departmentId,
       deletedAt: new Date(),
       deletedBy: admin.id,
     },
@@ -125,7 +131,8 @@ async function ensureFixtures(prisma: PrismaService): Promise<SeededIds | null> 
       email: normalizeEmail(DISABLED_EMAIL),
       firstNameEn: 'Disabled',
       lastNameEn: 'E2E',
-      roleId: staffRole.id,
+      roleId: nurseRole.id,
+      departmentId: nurse.departmentId,
       createdBy: admin.id,
       deletedAt: new Date(),
       deletedBy: admin.id,
@@ -135,8 +142,8 @@ async function ensureFixtures(prisma: PrismaService): Promise<SeededIds | null> 
   return {
     adminId: admin.id,
     adminEmail: admin.email,
-    staffId: staff.id,
-    staffEmail: staff.email,
+    nurseId: nurse.id,
+    nurseEmail: nurse.email,
     doctorId: doctor.id,
     disabledId: disabled.id,
   };
@@ -148,7 +155,7 @@ async function teardownFixtures(prisma: PrismaService, ids: SeededIds): Promise<
   await prisma.authLog.deleteMany({
     where: {
       OR: [
-        { userId: { in: [ids.adminId, ids.staffId, ids.doctorId, ids.disabledId] } },
+        { userId: { in: [ids.adminId, ids.nurseId, ids.doctorId, ids.disabledId] } },
         { email: { in: [DOCTOR_EMAIL, DISABLED_EMAIL, 'stranger@gmail.com'] } },
       ],
     },
@@ -183,7 +190,7 @@ describe('F02 — Auth core e2e', () => {
     ids = await ensureFixtures(prisma);
 
     if (!ids) {
-      skipReason = 'seeded ADMIN / STAFF / role rows are missing — run pnpm db:seed';
+      skipReason = 'seeded ADMIN / NURSE / role rows are missing — run pnpm db:seed';
     }
   });
 
@@ -245,33 +252,33 @@ describe('F02 — Auth core e2e', () => {
     );
   });
 
-  maybe('resolves a STAFF user with the 11-permission set', async () => {
+  maybe('resolves a NURSE user with the 11-permission set', async () => {
     const res = await request(server)
       .post('/api/v1/auth/resolve')
       .set(INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
       .send({
-        email: ids!.staffEmail,
-        googleSub: 'g-staff-1',
+        email: ids!.nurseEmail,
+        googleSub: 'g-nurse-1',
         emailVerified: true,
         name: 'Pim Sukjai',
       });
 
     expect(res.status).toBe(200);
-    expect(res.body.roleCode).toBe(ROLE.STAFF);
+    expect(res.body.roleCode).toBe(ROLE.NURSE);
     expect(res.body.permissionCodes).toHaveLength(
-      DEFAULT_ROLE_PERMISSIONS[ROLE.STAFF].length,
+      DEFAULT_ROLE_PERMISSIONS[ROLE.NURSE].length,
     );
     expect(res.body.permissionCodes).toEqual(
       expect.arrayContaining([
-        PERMISSION.APPOINTMENT_CREATE,
-        PERMISSION.SCHEDULE_MANAGE,
+        PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+        PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
         PERMISSION.PATIENT_CREATE,
-        PERMISSION.DOCTOR_LIST,
+        PERMISSION.DOCTOR_READ,
       ]),
     );
   });
 
-  maybe('resolves a DOCTOR user with only schedule.manage', async () => {
+  maybe('resolves a DOCTOR user with the full DOCTOR permission set', async () => {
     const res = await request(server)
       .post('/api/v1/auth/resolve')
       .set(INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
@@ -284,7 +291,15 @@ describe('F02 — Auth core e2e', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.roleCode).toBe(ROLE.DOCTOR);
-    expect(res.body.permissionCodes).toEqual([PERMISSION.SCHEDULE_MANAGE]);
+    expect(res.body.permissionCodes).toEqual(
+      expect.arrayContaining([
+        PERMISSION.SCHEDULE_CREATE_OWN,
+        PERMISSION.SCHEDULE_READ_OWN,
+        PERMISSION.APPOINTMENT_CREATE_OWN,
+        PERMISSION.MEDICAL_RECORDS_CREATE_OWN,
+        PERMISSION.PATIENT_READ,
+      ]),
+    );
   });
 
   maybe('rejects unverified Google emails with EMAIL_UNVERIFIED', async () => {
@@ -352,7 +367,7 @@ describe('F02 — Auth core e2e', () => {
 
   maybe('returns the user payload on GET /me with a valid JWT', async () => {
     const jwt = await signTestJwt(
-      { userId: ids!.staffId, roleCode: ROLE.STAFF, email: ids!.staffEmail },
+      { userId: ids!.nurseId, roleCode: ROLE.NURSE, email: ids!.nurseEmail },
       NEXTAUTH_SECRET,
     );
 
@@ -361,8 +376,8 @@ describe('F02 — Auth core e2e', () => {
       .set('Authorization', `Bearer ${jwt}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.id).toBe(ids!.staffId);
-    expect(res.body.roleCode).toBe(ROLE.STAFF);
+    expect(res.body.id).toBe(ids!.nurseId);
+    expect(res.body.roleCode).toBe(ROLE.NURSE);
     expect(Array.isArray(res.body.permissionCodes)).toBe(true);
   });
 
@@ -382,9 +397,9 @@ describe('F02 — Auth core e2e', () => {
     expect(res.body).toEqual({ ok: true });
   });
 
-  maybe('STAFF receives 403 INSUFFICIENT_PERMISSION on the stub', async () => {
+  maybe('NURSE receives 403 INSUFFICIENT_PERMISSION on the stub', async () => {
     const jwt = await signTestJwt(
-      { userId: ids!.staffId, roleCode: ROLE.STAFF, email: ids!.staffEmail },
+      { userId: ids!.nurseId, roleCode: ROLE.NURSE, email: ids!.nurseEmail },
       NEXTAUTH_SECRET,
     );
 
@@ -394,8 +409,8 @@ describe('F02 — Auth core e2e', () => {
 
     expect(res.status).toBe(403);
     expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION);
-    expect(res.body.details.required).toEqual([PERMISSION.PERMISSION_ASSIGN]);
-    expect(res.body.details.held).not.toContain(PERMISSION.PERMISSION_ASSIGN);
+    expect(res.body.details.required).toEqual([PERMISSION.ROLE_UPDATE]);
+    expect(res.body.details.held).not.toContain(PERMISSION.ROLE_UPDATE);
   });
 
   // ─── auth_logs ─────────────────────────────────────────────────────────────
@@ -412,7 +427,7 @@ describe('F02 — Auth core e2e', () => {
       .set(INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
       .set('User-Agent', 'jest-supertest/e2e')
       .send({
-        email: ids!.staffEmail,
+        email: ids!.nurseEmail,
         googleSub: 'g-log-staff',
         emailVerified: true,
         name: 'Pim Sukjai',
@@ -422,14 +437,14 @@ describe('F02 — Auth core e2e', () => {
     const row = await prisma.authLog.findFirst({
       where: {
         event: AUTH_LOG_EVENT.SIGN_IN_SUCCESS,
-        userId: ids!.staffId,
+        userId: ids!.nurseId,
         createdAt: { gte: before },
       },
       orderBy: { createdAt: 'desc' },
     });
 
     expect(row).not.toBeNull();
-    expect(row!.email).toBe(ids!.staffEmail);
+    expect(row!.email).toBe(ids!.nurseEmail);
     expect(row!.reason).toBeNull();
     expect(row!.requiredPermissions).toEqual([]);
     expect(row!.heldPermissions).toEqual([]);
@@ -489,10 +504,10 @@ describe('F02 — Auth core e2e', () => {
     expect(row!.reason).toBe(ErrorCode.USER_DISABLED);
   });
 
-  maybe('PERMISSION_DENIED row captures required + held when STAFF hits an ADMIN-only route', async () => {
+  maybe('PERMISSION_DENIED row captures required + held when NURSE hits an ADMIN-only route', async () => {
     const before = new Date();
     const jwt = await signTestJwt(
-      { userId: ids!.staffId, roleCode: ROLE.STAFF, email: ids!.staffEmail },
+      { userId: ids!.nurseId, roleCode: ROLE.NURSE, email: ids!.nurseEmail },
       NEXTAUTH_SECRET,
     );
 
@@ -504,18 +519,21 @@ describe('F02 — Auth core e2e', () => {
     const row = await prisma.authLog.findFirst({
       where: {
         event: AUTH_LOG_EVENT.PERMISSION_DENIED,
-        userId: ids!.staffId,
+        userId: ids!.nurseId,
         createdAt: { gte: before },
       },
       orderBy: { createdAt: 'desc' },
     });
 
     expect(row).not.toBeNull();
-    expect(row!.requiredPermissions).toEqual([PERMISSION.PERMISSION_ASSIGN]);
+    expect(row!.requiredPermissions).toEqual([PERMISSION.ROLE_UPDATE]);
     expect(row!.heldPermissions).toEqual(
-      expect.arrayContaining([PERMISSION.APPOINTMENT_CREATE, PERMISSION.SCHEDULE_MANAGE]),
+      expect.arrayContaining([
+        PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+        PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+      ]),
     );
-    expect(row!.heldPermissions).not.toContain(PERMISSION.PERMISSION_ASSIGN);
+    expect(row!.heldPermissions).not.toContain(PERMISSION.ROLE_UPDATE);
     expect(row!.path).toContain('/me/permissions-check');
     expect(row!.method).toBe('GET');
   });

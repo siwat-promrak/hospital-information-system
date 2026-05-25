@@ -13,8 +13,10 @@ import type { AuthenticatedUser } from '../users/users.types';
 
 import {
   assertCanActOnDoctor,
+  getScopedDepartmentId,
   getScopedDoctorId,
 } from './schedule.scope';
+import { SCHEDULE_VERB } from './schedule.scope.const';
 import {
   assertDoctorInDepartment,
   assertNoOverlap,
@@ -79,6 +81,7 @@ export class SchedulesService {
     args: ListSchedulesArgs = {},
   ): Promise<Paginated<ScheduleResponseDto>> {
     const scopedDoctorId = getScopedDoctorId(caller);
+    const scopedDepartmentId = getScopedDepartmentId(caller);
 
     if (
       scopedDoctorId !== null &&
@@ -91,6 +94,17 @@ export class SchedulesService {
       );
     }
 
+    if (
+      scopedDepartmentId !== null &&
+      args.departmentId !== undefined &&
+      args.departmentId !== scopedDepartmentId
+    ) {
+      throw AppException.forbidden(
+        ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+        'NURSE users may only list schedules in their own department.',
+      );
+    }
+
     const where: Prisma.DoctorScheduleWhereInput = { deletedAt: null };
 
     const effectiveDoctorId = scopedDoctorId ?? args.doctorId;
@@ -99,8 +113,10 @@ export class SchedulesService {
       where.doctorId = effectiveDoctorId;
     }
 
-    if (args.departmentId) {
-      where.departmentId = args.departmentId;
+    const effectiveDepartmentId = scopedDepartmentId ?? args.departmentId;
+
+    if (effectiveDepartmentId) {
+      where.departmentId = effectiveDepartmentId;
     }
 
     const { rangeStart, rangeEnd } = resolveListRange(args.from, args.to);
@@ -157,6 +173,18 @@ export class SchedulesService {
       );
     }
 
+    const scopedDepartmentId = getScopedDepartmentId(caller);
+
+    if (
+      scopedDepartmentId !== null &&
+      scopedDepartmentId !== row.departmentId
+    ) {
+      throw AppException.notFound(
+        ErrorCode.SCHEDULE_NOT_FOUND,
+        'Schedule not found.',
+      );
+    }
+
     return this.toResponse(row);
   }
 
@@ -174,7 +202,12 @@ export class SchedulesService {
     // error before any scope / affiliation / overlap diagnostic.
     assertStartAtNotInPast(dto.startAt);
 
-    assertCanActOnDoctor(caller, dto.doctorId);
+    assertCanActOnDoctor(
+      caller,
+      SCHEDULE_VERB.CREATE,
+      dto.doctorId,
+      dto.departmentId,
+    );
 
     const startAt = new Date(dto.startAt);
     const endAt = new Date(dto.endAt);
@@ -240,7 +273,12 @@ export class SchedulesService {
       );
     }
 
-    assertCanActOnDoctor(caller, existing.doctorId);
+    assertCanActOnDoctor(
+      caller,
+      SCHEDULE_VERB.UPDATE,
+      existing.doctorId,
+      existing.departmentId,
+    );
 
     const merged = {
       departmentId: dto.departmentId ?? existing.departmentId,
@@ -334,7 +372,7 @@ export class SchedulesService {
   async softDelete(caller: AuthenticatedUser, id: string): Promise<void> {
     const existing = await this.prisma.doctorSchedule.findFirst({
       where: { id, deletedAt: null },
-      select: { id: true, doctorId: true },
+      select: { id: true, doctorId: true, departmentId: true },
     });
 
     if (!existing) {
@@ -344,7 +382,12 @@ export class SchedulesService {
       );
     }
 
-    assertCanActOnDoctor(caller, existing.doctorId);
+    assertCanActOnDoctor(
+      caller,
+      SCHEDULE_VERB.DELETE,
+      existing.doctorId,
+      existing.departmentId,
+    );
 
     await this.prisma.doctorSchedule.update({
       where: { id },

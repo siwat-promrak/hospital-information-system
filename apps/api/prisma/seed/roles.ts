@@ -1,8 +1,13 @@
 /**
- * Seeds the three canonical RBAC roles from the catalog declared in
- * `src/auth/roles.ts` — ADMIN, STAFF, DOCTOR. Returned to the orchestrator
- * so downstream seeders can resolve `role_id` by handle. Re-runnable: upsert
- * by unique `code`.
+ * Seeds the five canonical RBAC roles from the catalog declared in
+ * `src/auth/roles.ts` — ADMIN, DOCTOR, NURSE, MEDICAL_RECORDS_OFFICER,
+ * PHARMACY. Returned to the orchestrator so downstream seeders can resolve
+ * `role_id` by handle. Re-runnable: upsert by unique `code`.
+ *
+ * Every seeded row is pinned to `isDeletable = false` so the future F11
+ * admin UI cannot delete the baseline; rename / description edits remain
+ * allowed. The invariant lives in F11's service layer — this seeder just
+ * persists the column.
  *
  * Bootstrap note: the caller MUST ensure the super-admin User row already
  * exists (with `role_id = NULL`) before invoking this function, because
@@ -15,8 +20,10 @@ import { ROLE, ROLE_CATALOG } from '../../src/auth/roles';
 
 export interface SeededRoles {
   admin: Role;
-  staff: Role;
   doctor: Role;
+  nurse: Role;
+  medicalRecordsOfficer: Role;
+  pharmacy: Role;
 }
 
 export async function seedRoles(
@@ -31,11 +38,13 @@ export async function seedRoles(
       update: {
         name: spec.name,
         description: spec.description,
+        isDeletable: false,
       },
       create: {
         code: spec.code,
         name: spec.name,
         description: spec.description,
+        isDeletable: false,
         createdBy: superAdmin.id,
       },
     });
@@ -44,12 +53,16 @@ export async function seedRoles(
   }
 
   const admin = byCode.get(ROLE.ADMIN);
-  const staff = byCode.get(ROLE.STAFF);
   const doctor = byCode.get(ROLE.DOCTOR);
+  const nurse = byCode.get(ROLE.NURSE);
+  const medicalRecordsOfficer = byCode.get(ROLE.MEDICAL_RECORDS_OFFICER);
+  const pharmacy = byCode.get(ROLE.PHARMACY);
 
-  if (!admin || !staff || !doctor) {
-    throw new Error('seedRoles: failed to load ADMIN/STAFF/DOCTOR after upsert');
+  if (!admin || !doctor || !nurse || !medicalRecordsOfficer || !pharmacy) {
+    throw new Error(
+      'seedRoles: failed to load ADMIN / DOCTOR / NURSE / MEDICAL_RECORDS_OFFICER / PHARMACY after upsert',
+    );
   }
 
-  return { admin, staff, doctor };
+  return { admin, doctor, nurse, medicalRecordsOfficer, pharmacy };
 }

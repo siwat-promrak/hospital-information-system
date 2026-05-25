@@ -609,17 +609,11 @@ export async function seedDoctors(
       throw new Error(`Primary department "${spec.primaryDepartmentName}" not seeded`);
     }
 
-    const additionalDepartments: Department[] = [];
-
-    for (const name of spec.additionalDepartmentNames) {
-      const dept = departmentByName.get(name);
-
-      if (!dept) {
-        throw new Error(`Additional department "${name}" not seeded`);
-      }
-
-      additionalDepartments.push(dept);
-    }
+    // Post-refactor: doctors carry exactly one department (1:1 with
+    // `Department`); the M:N `doctor_departments` table is gone. The
+    // `additionalDepartmentNames` field on `DoctorSpec` is preserved on
+    // disk for reference but ignored by the seed — every doctor is
+    // anchored at `primaryDepartmentName` only.
 
     const email = normalizeEmail(spec.email);
     const user = await prisma.user.upsert({
@@ -630,6 +624,7 @@ export async function seedDoctors(
         firstNameTh: spec.firstNameTh,
         lastNameTh: spec.lastNameTh,
         roleId: roles.doctor.id,
+        departmentId: primary.id,
       },
       create: {
         email,
@@ -638,12 +633,17 @@ export async function seedDoctors(
         firstNameTh: spec.firstNameTh,
         lastNameTh: spec.lastNameTh,
         roleId: roles.doctor.id,
+        departmentId: primary.id,
         createdBy: superAdmin.id,
       },
     });
 
     users.push(user);
 
+    // Post-Item-3 the doctor's department lives solely on `User.departmentId`
+    // (already set on the user upsert above). The `Doctor` row no longer
+    // carries a `department_id` column — both `create` and `update` payloads
+    // drop it.
     const doctor = await prisma.doctor.upsert({
       where: { doctorCode: spec.doctorCode },
       update: {
@@ -664,32 +664,6 @@ export async function seedDoctors(
     });
 
     doctors.push(doctor);
-
-    await prisma.doctorDepartment.upsert({
-      where: { doctorId_departmentId: { doctorId: doctor.id, departmentId: primary.id } },
-      update: { isPrimary: true },
-      create: {
-        doctorId: doctor.id,
-        departmentId: primary.id,
-        isPrimary: true,
-        createdBy: superAdmin.id,
-      },
-    });
-
-    for (const additional of additionalDepartments) {
-      await prisma.doctorDepartment.upsert({
-        where: {
-          doctorId_departmentId: { doctorId: doctor.id, departmentId: additional.id },
-        },
-        update: { isPrimary: false },
-        create: {
-          doctorId: doctor.id,
-          departmentId: additional.id,
-          isPrimary: false,
-          createdBy: superAdmin.id,
-        },
-      });
-    }
   }
 
   return { doctors, users };

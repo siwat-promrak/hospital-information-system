@@ -14,13 +14,16 @@ interface HomePageProps {
  * middleware redirects them to `/[locale]/signin` first. For authed
  * callers we route by `roleCode`:
  *
- *   ADMIN  → `/admin`
- *   STAFF  → `/staff`
- *   DOCTOR → `/me/schedule`
+ *   ADMIN                   → `/admin`
+ *   DOCTOR                  → `/schedules` (unified permission-aware page)
+ *   NURSE                   → `/nurse`
+ *   MEDICAL_RECORDS_OFFICER → `/medical-records-officer`
+ *   PHARMACY                → `/pharmacy`
  *
  * Future custom roles (US-11.6) that are not yet in `DASHBOARD_PATH`
- * fall through to the staff dashboard as a sensible default; admins can
- * adjust as new roles come online.
+ * fall through to the nurse dashboard as a sensible default — admins can
+ * adjust as new roles come online. (NURSE is the closest analog to the
+ * old front-desk default; the BE allow-list keeps this safe.)
  */
 export default async function HomePage({ params }: HomePageProps) {
   const { locale } = await params;
@@ -29,7 +32,7 @@ export default async function HomePage({ params }: HomePageProps) {
 
   const session = await requireSession();
   const destination =
-    DASHBOARD_PATH[session.user.roleCode as RoleCode] ?? DASHBOARD_PATH[ROLE.STAFF];
+    DASHBOARD_PATH[session.user.roleCode as RoleCode] ?? DASHBOARD_PATH[ROLE.NURSE];
 
   redirect({ href: destination, locale });
 }
