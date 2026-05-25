@@ -5,9 +5,6 @@ CREATE TYPE "AppointmentStatus" AS ENUM ('BOOKED', 'CANCELLED', 'COMPLETED');
 CREATE TYPE "AppointmentType" AS ENUM ('NEW_PATIENT_VISIT', 'FOLLOW_UP', 'CONSULTATION', 'PROCEDURE');
 
 -- CreateEnum
-CREATE TYPE "DayOfWeek" AS ENUM ('SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT');
-
--- CreateEnum
 CREATE TYPE "Gender" AS ENUM ('MALE', 'FEMALE');
 
 -- CreateEnum
@@ -179,14 +176,11 @@ CREATE TABLE "doctor_schedules" (
     "id" UUID NOT NULL,
     "doctor_id" UUID NOT NULL,
     "department_id" UUID NOT NULL,
-    "day_of_week" "DayOfWeek" NOT NULL,
-    "start_minute" INTEGER NOT NULL,
-    "end_minute" INTEGER NOT NULL,
-    "break_start_minute" INTEGER,
-    "break_end_minute" INTEGER,
+    "start_at" TIMESTAMPTZ(3) NOT NULL,
+    "end_at" TIMESTAMPTZ(3) NOT NULL,
+    "break_start_at" TIMESTAMPTZ(3),
+    "break_end_at" TIMESTAMPTZ(3),
     "accepts_booking" BOOLEAN NOT NULL DEFAULT true,
-    "effective_from" DATE NOT NULL,
-    "effective_until" DATE,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_by" UUID NOT NULL,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
@@ -266,10 +260,10 @@ CREATE INDEX "doctor_departments_department_id_idx" ON "doctor_departments"("dep
 CREATE UNIQUE INDEX "doctor_departments_doctor_id_department_id_key" ON "doctor_departments"("doctor_id", "department_id");
 
 -- CreateIndex
-CREATE INDEX "doctor_schedules_doctor_id_day_of_week_effective_from_idx" ON "doctor_schedules"("doctor_id", "day_of_week", "effective_from");
+CREATE INDEX "doctor_schedules_doctor_id_department_id_idx" ON "doctor_schedules"("doctor_id", "department_id");
 
 -- CreateIndex
-CREATE INDEX "doctor_schedules_doctor_id_department_id_idx" ON "doctor_schedules"("doctor_id", "department_id");
+CREATE INDEX "doctor_schedules_start_at_idx" ON "doctor_schedules"("start_at");
 
 -- CreateIndex
 CREATE INDEX "appointments_doctor_id_start_at_idx" ON "appointments"("doctor_id", "start_at");
@@ -418,22 +412,22 @@ ALTER TABLE "appointments" ADD CONSTRAINT "appointments_cancelled_by_fkey" FOREI
 -- HN format constraint (numeric 7-9 digits) — Prisma 5 cannot express CHECK natively.
 ALTER TABLE "patients" ADD CONSTRAINT "patients_hn_format" CHECK ("hn" ~ '^[0-9]{7,9}$');
 
--- DoctorSchedule: working window must be valid and within a day.
+-- DoctorSchedule: working window must be valid (end strictly after start).
 ALTER TABLE "doctor_schedules"
-  ADD CONSTRAINT "doctor_schedules_window_valid"
-  CHECK ("start_minute" >= 0 AND "end_minute" <= 1440 AND "start_minute" < "end_minute");
+  ADD CONSTRAINT "doctor_schedules_end_after_start"
+  CHECK ("end_at" > "start_at");
 
--- DoctorSchedule: break window (if set) must be fully inside the working window.
+-- DoctorSchedule: break window (if set) must lie fully inside the working window.
 ALTER TABLE "doctor_schedules"
   ADD CONSTRAINT "doctor_schedules_break_valid"
   CHECK (
-    ("break_start_minute" IS NULL AND "break_end_minute" IS NULL)
+    ("break_start_at" IS NULL AND "break_end_at" IS NULL)
     OR (
-      "break_start_minute" IS NOT NULL
-      AND "break_end_minute" IS NOT NULL
-      AND "break_start_minute" >= "start_minute"
-      AND "break_end_minute" <= "end_minute"
-      AND "break_start_minute" < "break_end_minute"
+      "break_start_at" IS NOT NULL
+      AND "break_end_at" IS NOT NULL
+      AND "break_start_at" < "break_end_at"
+      AND "break_start_at" >= "start_at"
+      AND "break_end_at" <= "end_at"
     )
   );
 

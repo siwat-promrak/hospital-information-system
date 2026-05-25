@@ -39,6 +39,7 @@ function buildUser(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUse
     lastNameTh: null,
     picture: null,
     permissionCodes: [...DEFAULT_ROLE_PERMISSIONS[ROLE.STAFF]],
+    doctor: null,
     ...overrides,
   };
 }

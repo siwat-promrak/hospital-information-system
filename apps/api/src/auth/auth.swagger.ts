@@ -10,9 +10,10 @@ import {
 
 import { ErrorCode } from '../common/errors';
 
-import { ResolveResponseDto } from './dto/resolve.dto';
+import { MeResponseDto } from './dto/me.response.dto';
+import { PermissionCheckResponseDto } from './dto/permission-check.response.dto';
+import { ResolveResponseDto } from './dto/resolve.response.dto';
 import { PERMISSION } from './permissions';
-import { ROLE } from './roles';
 
 const ENVELOPE_EXAMPLE = (code: string, message: string, statusCode: number) => ({
   statusCode,
@@ -97,19 +98,7 @@ export function ApiMe(): MethodDecorator & ClassDecorator {
     ApiOperation({ summary: 'Return the current authenticated user' }),
     ApiOkResponse({
       description: 'Authenticated user payload',
-      schema: {
-        example: {
-          id: '0d6b3f7a-2a40-4f74-9036-7d8ae8e29d33',
-          email: 'staff1@gmail.com',
-          roleCode: ROLE.STAFF,
-          firstNameEn: 'Pim',
-          lastNameEn: 'Sukjai',
-          firstNameTh: 'พิม',
-          lastNameTh: 'สุขใจ',
-          picture: null,
-          permissionCodes: [PERMISSION.APPOINTMENT_CREATE, PERMISSION.PATIENT_LIST],
-        },
-      },
+      type: MeResponseDto,
     }),
     ApiUnauthorizedResponse({
       description: 'Missing or invalid session token',
@@ -164,7 +153,7 @@ export function ApiMePermissionsCheck(): MethodDecorator & ClassDecorator {
     }),
     ApiOkResponse({
       description: `Caller holds ${PERMISSION.PERMISSION_ASSIGN}`,
-      schema: { example: { ok: true } },
+      type: PermissionCheckResponseDto,
     }),
     ApiForbiddenResponse({
       description: `Caller is missing ${PERMISSION.PERMISSION_ASSIGN}`,

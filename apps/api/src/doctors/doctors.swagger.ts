@@ -12,7 +12,10 @@ import {
 import { ErrorCode } from '../common/errors';
 import { PaginatedDto } from '../common/pagination';
 
-import { DoctorDetailDto, DoctorDto } from './dto/doctor.dto';
+import {
+  DoctorDetailResponseDto,
+  DoctorResponseDto,
+} from './dto/doctor.response.dto';
 
 const FORBIDDEN_EXAMPLE = (required: string) => ({
   statusCode: 403,
@@ -27,22 +30,33 @@ const NOT_FOUND_EXAMPLE = {
   message: 'Doctor not found.',
 };
 
-const PaginatedDoctorDto = PaginatedDto(DoctorDto);
+const PaginatedDoctorDto = PaginatedDto(DoctorResponseDto);
 
 export function ApiListDoctors(): MethodDecorator & ClassDecorator {
   return applyDecorators(
-    ApiExtraModels(DoctorDto, PaginatedDoctorDto),
+    ApiExtraModels(DoctorResponseDto, PaginatedDoctorDto),
     ApiOperation({
       summary: 'List active doctors with department affiliations (paginated)',
       description:
         'Sort: `doctorCode asc`. Optional `?departmentId=<uuid>` filters ' +
         'to doctors affiliated with that department (primary or secondary). ' +
+        'Optional `?q=<text>` applies a case-insensitive substring filter ' +
+        'against the EN + TH name fields and `doctorCode` (whitespace ' +
+        'trimmed; empty values ignored). Filters combine via AND. ' +
         'Supports `?page=&pageSize=` (defaults: page=1, pageSize=20, max=100).',
     }),
     ApiQuery({
       name: 'departmentId',
       required: false,
       description: 'Restrict to doctors affiliated with this department.',
+    }),
+    ApiQuery({
+      name: 'q',
+      required: false,
+      description:
+        'Case-insensitive substring filter across the doctor name fields ' +
+        'and doctor code. Whitespace is trimmed; empty / whitespace-only ' +
+        'values are ignored.',
     }),
     ApiOkResponse({
       description: 'Doctors directory page',
@@ -66,7 +80,7 @@ export function ApiGetDoctor(): MethodDecorator & ClassDecorator {
     ApiParam({ name: 'id', description: 'Doctor id (uuid).' }),
     ApiOkResponse({
       description: 'Doctor detail',
-      type: DoctorDetailDto,
+      type: DoctorDetailResponseDto,
     }),
     ApiForbiddenResponse({
       description: 'Caller is missing the `doctor.read` permission.',

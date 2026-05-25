@@ -49,6 +49,14 @@ export class AppException extends HttpException {
     return new AppException(HttpStatus.NOT_FOUND, code, message);
   }
 
+  static conflict(
+    code: ErrorCodeValue | string,
+    message: string,
+    details?: Record<string, unknown>,
+  ): AppException {
+    return new AppException(HttpStatus.CONFLICT, code, message, details);
+  }
+
   static insufficientPermission(required: string[], held: string[]): AppException {
     return new AppException(
       HttpStatus.FORBIDDEN,

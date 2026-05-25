@@ -1,6 +1,5 @@
 import type { JWTPayload } from 'jose';
 
-import type { PermissionCode } from './permissions';
 import type { RoleCode } from './roles';
 
 /**
@@ -19,14 +18,4 @@ export interface SessionTokenPayload extends JWTPayload {
   userId: string;
   email: string;
   roleCode: RoleCode | string;
-}
-
-/**
- * Tuple returned by `AuthService.resolve()` — exactly the fields the FE
- * encodes into the freshly-minted session JWT.
- */
-export interface ResolveResult {
-  userId: string;
-  roleCode: RoleCode | string;
-  permissionCodes: PermissionCode[];
 }

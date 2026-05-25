@@ -21,18 +21,22 @@
  *   - 3 roles (ADMIN, STAFF, DOCTOR)
  *   - 16 permissions
  *   - 16 policies (5 ADMIN + 11 STAFF + 0 DOCTOR)
- *   - 5 users — 1 super-admin + 2 ADMIN + 2 STAFF
+ *   - 80 users — 1 super-admin + 2 ADMIN + 2 STAFF + 75 DOCTOR
  *   - 10 departments
  *   - ~34 department_appointment_types (per-department allowed types)
  *   - 10 patients (5 MALE + 5 FEMALE)
+ *   - 75 doctors with primary + optional additional affiliations
+ *   - 2700 doctor_schedules across the past 8 + next 4 weeks (12-week window)
  *
- * Doctor / DoctorSchedule / Appointment rows are NOT seeded — they are
- * created via application workflows in later features.
+ * Appointment rows are NOT seeded — they are created via application
+ * workflows in later features.
  */
 import { PrismaClient } from '@prisma/client';
 
 import { seedDepartmentAppointmentTypes } from './department-appointment-types';
 import { seedDepartments } from './departments';
+import { seedDoctorSchedules } from './doctor-schedules';
+import { seedDoctors } from './doctors';
 import { seedPatients } from './patients';
 import { seedPermissions } from './permissions';
 import { seedPolicies } from './policies';
@@ -57,16 +61,20 @@ async function main(): Promise<void> {
     superAdmin,
   );
   const patients = await seedPatients(prisma, superAdmin);
+  const seededDoctors = await seedDoctors(prisma, roles, departments, superAdmin);
+  const scheduleCount = await seedDoctorSchedules(prisma, seededDoctors.doctors, superAdmin);
 
   // eslint-disable-next-line no-console
   console.log('Seed complete.', {
     roles: 3,
     permissions: 16,
     policies: policyCount,
-    users: 1 + users.admins.length + users.staff.length,
+    users: 1 + users.admins.length + users.staff.length + seededDoctors.users.length,
     departments: departments.length,
     departmentAppointmentTypes: departmentAppointmentTypeCount,
     patients: patients.length,
+    doctors: seededDoctors.doctors.length,
+    doctorSchedules: scheduleCount,
   });
 }
 
