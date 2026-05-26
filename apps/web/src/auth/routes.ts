@@ -76,4 +76,12 @@ export const BE_PATH_BUILDER = {
   appointmentDetail: (id: string) => `${BE_PATH.APPOINTMENTS}/${id}`,
   appointmentCancel: (id: string) =>
     `${BE_PATH.APPOINTMENTS}/${id}/cancel`,
+  /**
+   * F13 per-(department, type) booking-rule catalog. Returns the
+   * appointment types the department offers along with each pair's
+   * `durationMinutes` and optional booking-window minute-of-day bounds.
+   * Replaces the duration field on the global `GET /appointment-types`.
+   */
+  departmentAppointmentTypes: (departmentId: string) =>
+    `${BE_PATH.DEPARTMENTS}/${departmentId}/appointment-types`,
 } as const;
