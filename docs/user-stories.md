@@ -810,7 +810,7 @@ the resulting `Appointment.departmentId` on booking.
 
 ---
 
-## E7 — Front-desk booking on behalf
+## E7 — Front-desk booking on behalf ✅ shipped (F09, `feat/booking`)
 
 **NURSE owns the department-scoped front-desk surface by default**
 (`appointment.create.own-department` + full `patient.*` CRUD). **DOCTOR
@@ -910,7 +910,7 @@ so that I can book them without leaving the booking flow.
 
 ---
 
-## E8 — Appointment lifecycle
+## E8 — Appointment lifecycle ✅ shipped (F09, `feat/booking`)
 
 Per-verb scope-aware permissions:
 - **NURSE** holds `appointment.{read,update,delete}.own-department`.
