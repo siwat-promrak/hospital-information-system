@@ -872,9 +872,22 @@ slot, so that the patient is scheduled.
 - The chosen `doctorId`'s home department (`doctor.user.departmentId`)
   MUST equal `departmentId`; otherwise reject with
   `code=DOCTOR_DEPARTMENT_MISMATCH`.
-- `reason` is required iff `appointmentType=PROCEDURE` (conditional Zod
-  schema and class-validator DTO). Stored as Postgres `text` (no length
-  cap).
+- `reason` is **optional** for every `appointmentType` (was: required
+  iff `appointmentType=PROCEDURE`; the `@ValidateIf` was removed in F16
+  — clinical narrative belongs on the visit's medical record, not on
+  the appointment row). Stored as Postgres `text` (no length cap).
+- **Standalone vs. continuation partition** (F14 + F16) — the
+  `(previousAppointmentId, appointmentType)` pair forms a clean split:
+  - Standalone booking (`previousAppointmentId` absent): `appointmentType`
+    MUST equal `NEW_PATIENT_VISIT`; any other type returns
+    `400 STANDALONE_APPOINTMENT_TYPE_INVALID`.
+  - Continuation booking (`previousAppointmentId` set): `appointmentType`
+    MUST be `FOLLOW_UP` or `PROCEDURE`; otherwise
+    `400 CONTINUATION_APPOINTMENT_TYPE_INVALID`.
+  - A clinical thread therefore starts with one `NEW_PATIENT_VISIT` and
+    continues with `FOLLOW_UP` / `PROCEDURE` visits. `CONSULTATION` is
+    currently unreachable through this endpoint — it stays in the
+    `AppointmentType` enum for future use.
 - Endpoint requires any `appointment.create.{own|own-department}`.
   Scope enforcement (via `resolveAppointmentCreateScope`):
   - NURSE (`.own-department`): `departmentId` MUST equal

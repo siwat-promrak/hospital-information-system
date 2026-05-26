@@ -435,31 +435,46 @@ export default function BookingWizard({
   // — `departmentTypes` is the per-department-scoped catalog from
   // `GET /departments/:id/appointment-types` and is the authoritative
   // input to `<AppointmentTypeSelect>`.
+  //
+  // F15 exception — when the wizard was opened with a pre-filled slot
+  // (slot-finder deep-link), the appointment type is already locked to
+  // whatever the slot finder chose (e.g. `NEW_PATIENT_VISIT`). Even if
+  // the user subsequently answers "Yes, continues a prior visit" on the
+  // continuation step, we MUST NOT narrow the type catalog or clear the
+  // pre-filled type: the select is disabled, the user cannot change it,
+  // and clearing it would leave the wizard stuck (type = "" AND disabled
+  // select → can never proceed). The BE validates the
+  // (type, previousAppointmentId) pair on submit and will surface a
+  // clear error if the combination is semantically invalid.
   const isContinuationBooking = previousVisit != null;
   const visibleDepartmentTypes = useMemo(() => {
-    if (!isContinuationBooking) {
+    if (!isContinuationBooking || hasPrefilledSlot) {
       return departmentTypes;
     }
 
     return departmentTypes.filter((type) =>
       isContinuationAppointmentType(type.code),
     );
-  }, [departmentTypes, isContinuationBooking]);
+  }, [departmentTypes, isContinuationBooking, hasPrefilledSlot]);
 
   // Write-side cascade matching the read-side narrowing above. If the
   // user picks "Yes, continues" AFTER having already picked
   // `NEW_PATIENT_VISIT` or `CONSULTATION`, drop the now-forbidden choice
   // so the user re-picks from the narrowed catalog (instead of
   // submitting an invalid pair).
+  //
+  // F15 exception — skip when `hasPrefilledSlot`: the pre-filled type
+  // must never be cleared by this cascade (see the comment on
+  // `visibleDepartmentTypes` above for the full rationale).
   useEffect(() => {
-    if (!isContinuationBooking || !appointmentType) {
+    if (hasPrefilledSlot || !isContinuationBooking || !appointmentType) {
       return;
     }
 
     if (!isContinuationAppointmentType(appointmentType)) {
       setAppointmentType("");
     }
-  }, [isContinuationBooking, appointmentType]);
+  }, [hasPrefilledSlot, isContinuationBooking, appointmentType]);
 
   // True when the wizard is on a continuation flow AND the picked
   // department offers neither `FOLLOW_UP` nor `PROCEDURE`. The

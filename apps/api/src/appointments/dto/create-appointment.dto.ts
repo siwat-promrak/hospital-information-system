@@ -8,7 +8,6 @@ import {
   IsUUID,
   MaxLength,
   MinLength,
-  ValidateIf,
 } from 'class-validator';
 
 /**
@@ -16,10 +15,8 @@ import {
  * uuid from the F07 slot finder; the BE re-validates inside a
  * serializable transaction.
  *
- * `reason` is required iff `appointmentType === PROCEDURE` — the
- * `@ValidateIf` guard skips the string checks for the other types so
- * the wizard does not have to default an empty value for non-procedure
- * bookings.
+ * `reason` is fully optional for every appointment type. When omitted
+ * the BE stores `null`.
  */
 export class CreateAppointmentDto {
   @ApiProperty({ example: '4f3e2a10-1234-5678-9abc-deadbeef9999' })
@@ -59,18 +56,11 @@ export class CreateAppointmentDto {
   @ApiPropertyOptional({
     example: 'Routine pacemaker check-up',
     description:
-      'Free-text reason. REQUIRED when `appointmentType === PROCEDURE`; ' +
-      'optional otherwise (when omitted the BE stores `null`).',
+      'Free-text reason. Fully optional for every appointment type. ' +
+      'When omitted the BE stores `null`.',
     nullable: true,
   })
-  // ValidateIf gates the validation chain: when the value is undefined AND
-  // the type is NOT PROCEDURE, all subsequent validators are skipped (the
-  // field is treated as optional). When the type IS PROCEDURE the chain
-  // always runs — `@IsString @MinLength(1)` rejects both `undefined` and
-  // empty-string, surfacing as `400 VALIDATION_FAILED`.
-  @ValidateIf((o: CreateAppointmentDto) =>
-    o.appointmentType === AppointmentType.PROCEDURE || o.reason !== undefined,
-  )
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(4000)

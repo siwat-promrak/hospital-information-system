@@ -55,3 +55,20 @@ export const CONTINUATION_APPOINTMENT_TYPES = [
 
 export type ContinuationAppointmentType =
   (typeof CONTINUATION_APPOINTMENT_TYPES)[number];
+
+/**
+ * Standalone visits (booking WITHOUT `previousAppointmentId`) MUST carry
+ * `NEW_PATIENT_VISIT`. Follow-ups, consultations and procedures all
+ * presuppose an existing clinical thread and therefore require a
+ * `previousAppointmentId`.
+ *
+ * The check fires inside `AppointmentsService.createInTransaction` in the
+ * `!dto.previousAppointmentId` branch (after `resolveGrouping` returns),
+ * surfacing as `400 STANDALONE_APPOINTMENT_TYPE_INVALID`.
+ */
+export const STANDALONE_APPOINTMENT_TYPES = [
+  AppointmentType.NEW_PATIENT_VISIT,
+] as const;
+
+export type StandaloneAppointmentType =
+  (typeof STANDALONE_APPOINTMENT_TYPES)[number];
