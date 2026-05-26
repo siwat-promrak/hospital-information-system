@@ -71,4 +71,17 @@ export class ListAppointmentsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(Object.values(APPOINTMENT_LIST_ORDER))
   order?: AppointmentListOrder;
+
+  @ApiPropertyOptional({
+    example: 'bb3d2f17-3c0b-4b4f-a3e8-31f2bbb55ccc',
+    description:
+      'F14 pending-referral filter. When set, narrows to rows with ' +
+      '`referredToDepartmentId = <param>` AND ' +
+      '`referralFulfilledByAppointmentId IS NULL` so the destination ' +
+      "department's NURSE sees the still-open pickup queue. Composes " +
+      'with the existing `appointment.read.*` scope.',
+  })
+  @IsOptional()
+  @IsUUID()
+  pendingReferralToDepartmentId?: string;
 }

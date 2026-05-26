@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 
+import { AppointmentGroupsModule } from './appointment-groups/appointment-groups.module';
 import { AppointmentTypesModule } from './appointment-types/appointment-types.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { AuthLogModule } from './auth-log/auth-log.module';
@@ -39,6 +40,7 @@ import { UsersModule } from './users/users.module';
     MedicalRecordsModule,
     PatientsModule,
     AppointmentsModule,
+    AppointmentGroupsModule,
     HealthModule,
   ],
   providers: [

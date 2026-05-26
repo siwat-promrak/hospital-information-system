@@ -3,6 +3,7 @@ import { AppointmentType } from '@prisma/client';
 import {
   IsEnum,
   IsISO8601,
+  IsOptional,
   IsString,
   IsUUID,
   MaxLength,
@@ -74,4 +75,17 @@ export class CreateAppointmentDto {
   @MinLength(1)
   @MaxLength(4000)
   reason?: string | null;
+
+  @ApiPropertyOptional({
+    example: '7c8e2a10-1234-5678-9abc-deadbeefcafe',
+    description:
+      'Optional id of the previous appointment in the same clinical thread (F14). ' +
+      'When set, the booking transaction validates the link, lazily materialises an ' +
+      '`AppointmentGroup` if one does not exist, sets `visitNumber` on the new row, ' +
+      'and (when the previous row carries a referral matching the new department) ' +
+      "back-links the previous row's `referralFulfilledByAppointmentId`.",
+  })
+  @IsOptional()
+  @IsUUID()
+  previousAppointmentId?: string;
 }

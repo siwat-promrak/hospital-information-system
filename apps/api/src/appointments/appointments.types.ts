@@ -19,4 +19,11 @@ export interface ListAppointmentsArgs extends PaginationParams {
   to?: string;
   status?: AppointmentStatus;
   order?: AppointmentListOrder;
+  /**
+   * F14 pending-referral filter. When set, the service narrows to rows
+   * where `referredToDepartmentId = <param>` AND
+   * `referralFulfilledByAppointmentId IS NULL` — i.e. the still-open
+   * pickup queue at the destination department.
+   */
+  pendingReferralToDepartmentId?: string;
 }

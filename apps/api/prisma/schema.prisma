@@ -283,6 +283,8 @@ model User {
   deletedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeDeletedBy")
   createdMedicalRecords             MedicalRecord[]             @relation("MedicalRecordCreatedBy")
   updatedMedicalRecords             MedicalRecord[]             @relation("MedicalRecordUpdatedBy")
+  createdAppointmentGroups          AppointmentGroup[]          @relation("AppointmentGroupCreatedBy")
+  updatedAppointmentGroups          AppointmentGroup[]          @relation("AppointmentGroupUpdatedBy")
 
   // Auth log inverse — append-only events on the user (sign-in, sign-out,
   // permission denials). Nullable on the AuthLog side because failed
@@ -332,8 +334,9 @@ model Patient {
   updatedByUser User? @relation("PatientUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deletedByUser User? @relation("PatientDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  appointments   Appointment[]
-  medicalRecords MedicalRecord[]
+  appointments      Appointment[]
+  medicalRecords    MedicalRecord[]
+  appointmentGroups AppointmentGroup[]
 
   @@map("patients")
 }
@@ -359,6 +362,7 @@ model Department {
   appointments            Appointment[]
   allowedAppointmentTypes DepartmentAppointmentType[]
   medicalRecords          MedicalRecord[]
+  referredAppointments    Appointment[]               @relation("AppointmentReferredToDepartment")
 
   @@map("departments")
 }
@@ -557,6 +561,27 @@ model Appointment {
 
   completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
 
+  // F14 — appointment group + referral columns (all nullable / additive).
+  //
+  // `appointmentGroupId` + `visitNumber` are set together when a row joins
+  // a multi-visit clinical thread. Pre-F14 rows stay both-NULL. Partial
+  // unique index `(group_id, visit_number)` enforced via raw SQL.
+  //
+  // `referredToDepartmentId` + `referredAt` are set atomically by
+  // `POST /appointments/:id/refer`. The pair is set exactly once per row
+  // (a second refer attempt rejects with `409 APPOINTMENT_ALREADY_REFERRED`).
+  //
+  // `referralFulfilledByAppointmentId` is the back-link from the source
+  // referral to the appointment that picked it up. Set inside the
+  // `POST /appointments` transaction when the new row's department
+  // matches the source's referred-to department. `@unique` so a single
+  // pending referral is fulfilled by at most one downstream booking.
+  appointmentGroupId               String?   @map("appointment_group_id") @db.Uuid
+  visitNumber                      Int?      @map("visit_number")
+  referredToDepartmentId           String?   @map("referred_to_department_id") @db.Uuid
+  referredAt                       DateTime? @map("referred_at") @db.Timestamptz(3)
+  referralFulfilledByAppointmentId String?   @unique @map("referral_fulfilled_by_appointment_id") @db.Uuid
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
   updatedBy String?  @map("updated_by") @db.Uuid
@@ -569,13 +594,64 @@ model Appointment {
   updatedByUser   User?          @relation("AppointmentsUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
   cancelledByUser User?          @relation("AppointmentsCancelledBy", fields: [cancelledBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  // F14 — appointment group (nullable; only set when the appointment
+  // joins a multi-visit case).
+  appointmentGroup AppointmentGroup? @relation(fields: [appointmentGroupId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // F14 — destination department for a referral (nullable; set by
+  // `POST /appointments/:id/refer`).
+  referredToDepartment Department? @relation("AppointmentReferredToDepartment", fields: [referredToDepartmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // F14 — self-FK to the appointment that picked up this row's referral.
+  // The back-side relation is also `Appointment` (the receiver carries
+  // the FK; the source carries this `@unique` link).
+  referralFulfilledByAppointment Appointment?  @relation("AppointmentReferralFulfillment", fields: [referralFulfilledByAppointmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  fulfilledReferralFor           Appointment[] @relation("AppointmentReferralFulfillment")
+
   medicalRecords MedicalRecord[]
 
   @@index([doctorId, startAt])
   @@index([patientId, startAt])
   @@index([status])
   @@index([scheduleId, status])
+  @@index([appointmentGroupId])
   @@map("appointments")
+}
+
+// ─── Appointment groups (F14) ────────────────────────────────────────────────
+// A clinical thread linking multiple `Appointment` rows for the same
+// patient. Groups are materialised lazily by `POST /appointments` when the
+// caller supplies a `previousAppointmentId`; there is NO standalone "open
+// group" endpoint.
+//
+// `openedAt` is the clinical source-of-truth for case start (distinct
+// from audit `createdAt`). `closedAt` is set by
+// `POST /appointment-groups/:id/close`; once non-NULL the group rejects
+// further continuation attempts with `400 APPOINTMENT_GROUP_CLOSED`.
+//
+// Audit cluster mirrors `Appointment` — `created_*` + `updated_*` only,
+// no `deleted_*` (groups are not soft-deletable; their lifecycle is
+// open → closed).
+
+model AppointmentGroup {
+  id        String    @id @default(uuid()) @db.Uuid
+  patientId String    @map("patient_id") @db.Uuid
+  openedAt  DateTime  @default(now()) @map("opened_at") @db.Timestamptz(3)
+  closedAt  DateTime? @map("closed_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  patient       Patient @relation(fields: [patientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser User    @relation("AppointmentGroupCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?   @relation("AppointmentGroupUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  appointments Appointment[]
+
+  @@index([patientId, closedAt])
+  @@map("appointment_groups")
 }
 
 // ─── Medical records ─────────────────────────────────────────────────────────
