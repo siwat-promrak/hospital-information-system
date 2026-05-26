@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "turbo run dev",
-    "build": "turbo run build",
+    "build": "pnpm --filter @hospital/api build",
+    "start": "npx prisma migrate deploy && node apps/api/dist/main.js",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "type-check": "turbo run type-check",
