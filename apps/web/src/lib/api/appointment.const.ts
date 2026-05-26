@@ -40,13 +40,17 @@ export const APPOINTMENT_QUERY_PARAM = {
   /** BE-bound — sort direction for `startAt`. `asc` (default) or `desc`. */
   ORDER: "order",
   /**
-   * F14 — restrict to appointments whose `referredToDepartmentId` matches
-   * AND that are still pending (no follow-up booked yet). Powers the
-   * referrals pickup queue page; the BE auto-narrows to caller-readable
-   * rows on top so a NURSE only sees referrals their own department can
-   * act on.
+   * F14 — request the pending-referral pickup queue. When `true`, narrows
+   * to `status=COMPLETED` + `referredToDepartmentId IS NOT NULL` +
+   * `referralFulfilledByAppointmentId IS NULL`. The destination-dept
+   * narrowing comes from the caller's permission scope: `.own-department`
+   * sees referrals to their own dept; `.all` (MRO) sees referrals to every
+   * dept. No client-supplied department arg — the previous
+   * `pendingReferralToDepartmentId` filter was unsafe for `.all` callers
+   * (an undefined value collapsed the entire filter and leaked unreferred
+   * rows into the queue).
    */
-  PENDING_REFERRAL_TO_DEPARTMENT_ID: "pendingReferralToDepartmentId",
+  PENDING_REFERRAL_ONLY: "pendingReferralOnly",
   /**
    * F14 — booking-wizard continuation step pre-fill. Surfaced as a URL
    * param so the referrals queue's "Book follow-up" link can deep-link

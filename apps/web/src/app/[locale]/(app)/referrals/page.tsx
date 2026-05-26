@@ -64,18 +64,17 @@ export default async function ReferralsPage({
     );
   }
 
-  const callerDepartmentId = session.user.departmentId ?? undefined;
-
   // `.own-department` callers without a department code can't have any
   // referrals routed to them — short-circuit to the empty card rather
-  // than firing a BE call that would either return nothing or 4xx.
+  // than firing a BE call that would 403. `.all` (MRO) callers have no
+  // department but legitimately see every department's queue.
   const hasAllScope = hasPermission(
     session,
     PERMISSION_CODE.APPOINTMENT_READ_ALL,
   );
-  const queueDepartmentId = callerDepartmentId ?? undefined;
+  const callerDepartmentId = session.user.departmentId ?? undefined;
 
-  if (!queueDepartmentId && !hasAllScope) {
+  if (!callerDepartmentId && !hasAllScope) {
     return (
       <Card variant="outlined" sx={{ p: 4, textAlign: "center" }}>
         <Typography variant="body2" color="text.secondary">
@@ -89,7 +88,7 @@ export default async function ReferralsPage({
   const result = await listAppointments({
     page,
     pageSize: DEFAULT_PAGE_SIZE,
-    pendingReferralToDepartmentId: queueDepartmentId,
+    pendingReferralOnly: true,
   });
 
   return (

@@ -42,11 +42,13 @@ interface ListAppointmentsParams extends PaginationParams {
   status?: AppointmentStatus;
   order?: AppointmentListOrder;
   /**
-   * F14 — restrict to appointments whose `referredToDepartmentId`
-   * matches AND that are still pending (no follow-up booked yet).
-   * Powers the referrals pickup queue page.
+   * F14 — request the pending-referral pickup queue. When `true`, narrows
+   * to `status=COMPLETED` + `referredToDepartmentId IS NOT NULL` +
+   * `referralFulfilledByAppointmentId IS NULL`. Destination-dept narrowing
+   * is driven by the caller's permission scope (`.own-department` → caller
+   * dept; `.all` → every dept).
    */
-  pendingReferralToDepartmentId?: string;
+  pendingReferralOnly?: boolean;
 }
 
 export function listAppointments(
@@ -60,8 +62,8 @@ export function listAppointments(
     [APPOINTMENT_QUERY_PARAM.TO]: params?.to,
     [APPOINTMENT_QUERY_PARAM.STATUS]: params?.status,
     [APPOINTMENT_QUERY_PARAM.ORDER]: params?.order,
-    [APPOINTMENT_QUERY_PARAM.PENDING_REFERRAL_TO_DEPARTMENT_ID]:
-      params?.pendingReferralToDepartmentId,
+    [APPOINTMENT_QUERY_PARAM.PENDING_REFERRAL_ONLY]:
+      params?.pendingReferralOnly === true ? "true" : undefined,
   });
 
   return userFetch<Paginated<AppointmentResponse>>(

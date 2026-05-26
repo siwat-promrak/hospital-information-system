@@ -156,7 +156,7 @@ interface ListAppointmentsActionArgs {
   to?: string;
   status?: AppointmentStatus;
   order?: AppointmentListOrder;
-  pendingReferralToDepartmentId?: string;
+  pendingReferralOnly?: boolean;
 }
 
 /**

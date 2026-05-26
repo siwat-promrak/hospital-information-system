@@ -67,7 +67,7 @@ export class AppointmentsController {
       to: query.to,
       status: query.status,
       order: query.order,
-      pendingReferralToDepartmentId: query.pendingReferralToDepartmentId,
+      pendingReferralOnly: query.pendingReferralOnly,
     });
   }
 

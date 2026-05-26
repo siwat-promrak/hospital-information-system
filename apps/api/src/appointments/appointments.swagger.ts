@@ -383,12 +383,14 @@ export function ApiListAppointments(): MethodDecorator & ClassDecorator {
       enum: Object.values(APPOINTMENT_LIST_ORDER),
     }),
     ApiQuery({
-      name: 'pendingReferralToDepartmentId',
+      name: 'pendingReferralOnly',
       required: false,
+      type: Boolean,
       description:
-        'F14 — pending referral pickup queue filter. Narrows to rows ' +
-        'with `referredToDepartmentId = <param>` AND ' +
-        '`referralFulfilledByAppointmentId IS NULL`.',
+        'F14 — when `true`, narrows to the pending-referral pickup queue: ' +
+        '`status = COMPLETED` AND `referredToDepartmentId IS NOT NULL` AND ' +
+        '`referralFulfilledByAppointmentId IS NULL`. The destination-dept ' +
+        'narrowing comes from the caller\'s permission scope.',
     }),
     ApiOkResponse({
       description: 'Appointments page',

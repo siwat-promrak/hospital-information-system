@@ -704,9 +704,9 @@ export class AppointmentsService {
     // queue, the source rows live in OTHER departments (whoever made
     // the referral), so narrowing by `departmentId = ownDept` would
     // hide them. Instead, the scope must allow rows where
-    // `referredToDepartmentId = ownDept`. The query param itself is
-    // pinned to the caller's own dept for `.own-department` scope.
-    const pickupQueueRequested = args.pendingReferralToDepartmentId !== undefined;
+    // `referredToDepartmentId = ownDept`. MRO (`.all`) sees referrals
+    // to every destination department.
+    const pickupQueueRequested = args.pendingReferralOnly === true;
 
     if (scope === SCOPE.OWN) {
       if (!caller.doctor) {
@@ -744,20 +744,10 @@ export class AppointmentsService {
 
       if (pickupQueueRequested) {
         // Pickup queue mode: the destination axis replaces the standard
-        // `departmentId = ownDept` narrowing. The query parameter MUST
-        // match the caller's own department — peeking into another
-        // dept's queue is forbidden.
-        if (args.pendingReferralToDepartmentId !== caller.departmentId) {
-          throw AppException.forbidden(
-            ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
-            "Caller may only view their own department's pending referral queue.",
-            {
-              callerDepartmentId: caller.departmentId,
-              requestedDestinationDepartmentId:
-                args.pendingReferralToDepartmentId,
-            },
-          );
-        }
+        // `departmentId = ownDept` narrowing. BE auto-narrows by the
+        // caller's own department — the user cannot peek into another
+        // dept's queue.
+        where.referredToDepartmentId = caller.departmentId;
       } else {
         where.departmentId = caller.departmentId;
       }
@@ -788,8 +778,19 @@ export class AppointmentsService {
       where.status = args.status;
     }
 
-    if (args.pendingReferralToDepartmentId !== undefined) {
-      where.referredToDepartmentId = args.pendingReferralToDepartmentId;
+    if (pickupQueueRequested) {
+      // Strict pickup-queue filter: only COMPLETED visits that carry a
+      // pending referral (referred to a department + not yet fulfilled).
+      // For `.own-department` the scope branch above already pinned
+      // `referredToDepartmentId = caller.departmentId`; for `.all` MRO,
+      // we narrow to "any non-null destination" so unreferred rows
+      // don't leak into the queue.
+      where.status = AppointmentStatus.COMPLETED;
+
+      if (where.referredToDepartmentId === undefined) {
+        where.referredToDepartmentId = { not: null };
+      }
+
       where.referralFulfilledByAppointmentId = null;
     }
 

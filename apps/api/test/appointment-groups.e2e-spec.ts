@@ -589,7 +589,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const queueRes = await request(server)
       .get('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseBJwt}`)
-      .query({ pendingReferralToDepartmentId: f.deptB.id });
+      .query({ pendingReferralOnly: 'true' });
 
     expect(queueRes.status).toBe(200);
     const queueIds = (queueRes.body.data as Array<{ id: string }>).map(
@@ -630,7 +630,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const queueAfterRes = await request(server)
       .get('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseBJwt}`)
-      .query({ pendingReferralToDepartmentId: f.deptB.id });
+      .query({ pendingReferralOnly: 'true' });
     expect(queueAfterRes.status).toBe(200);
     const queueAfterIds = (
       queueAfterRes.body.data as Array<{ id: string }>

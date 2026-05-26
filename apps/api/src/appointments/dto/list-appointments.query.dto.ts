@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { AppointmentStatus } from '@prisma/client';
-import { IsEnum, IsIn, IsOptional, IsUUID, Matches } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsEnum, IsIn, IsOptional, IsUUID, Matches } from 'class-validator';
 
 import { PaginationQueryDto } from '../../common/pagination';
 import { SCHEDULE_ISO_DATE_PATTERN } from '../../schedules/schedules.const';
@@ -73,15 +74,17 @@ export class ListAppointmentsQueryDto extends PaginationQueryDto {
   order?: AppointmentListOrder;
 
   @ApiPropertyOptional({
-    example: 'bb3d2f17-3c0b-4b4f-a3e8-31f2bbb55ccc',
+    example: true,
     description:
-      'F14 pending-referral filter. When set, narrows to rows with ' +
-      '`referredToDepartmentId = <param>` AND ' +
-      '`referralFulfilledByAppointmentId IS NULL` so the destination ' +
-      "department's NURSE sees the still-open pickup queue. Composes " +
-      'with the existing `appointment.read.*` scope.',
+      'F14 pending-referral pickup queue. When `true`, narrows the result ' +
+      'to rows with `status = COMPLETED` AND `referredToDepartmentId IS NOT NULL` ' +
+      'AND `referralFulfilledByAppointmentId IS NULL`. The destination-dept ' +
+      'narrowing is driven by the caller\'s scope: `.own-department` callers ' +
+      'see referrals routed to their own department; `.all` callers (MRO) ' +
+      'see referrals to every department.',
   })
   @IsOptional()
-  @IsUUID()
-  pendingReferralToDepartmentId?: string;
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true')
+  pendingReferralOnly?: boolean;
 }
