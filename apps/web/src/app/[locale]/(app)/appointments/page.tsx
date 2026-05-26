@@ -140,19 +140,16 @@ export default async function AppointmentsPage({
   //  - `ALL`           : department + doctor pickers both editable. MRO
   //                       (no seeded role today, but future F11 ADMIN
   //                       lands here).
-  //  - `OWN_DEPARTMENT`: department EDITABLE + prefilled to caller's
-  //                       home on first load (no URL `?departmentId=`),
+  //  - `OWN_DEPARTMENT`: department PINNED to caller's home + DISABLED,
   //                       doctor picker EDITABLE (NURSE / DOCTOR — DOCTOR
   //                       holds both `.own` AND `.own-department` in the
   //                       seeded baseline, so they fall into this branch
   //                       and can browse colleagues for cross-coverage).
-  //                       The BE auto-narrows to the caller's dept
-  //                       regardless of what the picker shows, so the
-  //                       prefill is pure UX — the chip reflects the
-  //                       active narrowing without making the user
-  //                       guess. Clearing / changing the picker writes
-  //                       to the URL; the URL is the source of truth as
-  //                       soon as the user interacts.
+  //                       The BE auto-narrows reads to the caller's dept,
+  //                       so letting the user clear the picker just lands
+  //                       them on a UI that disagrees with the BE
+  //                       response. Mirrors F06's DEPT-view treatment of
+  //                       the same scope.
   //  - `OWN`           : department disabled + pinned + doctor disabled
   //                       + pinned to caller's `me.doctor.id`. No seeded
   //                       role today; a custom role with only `.own`
@@ -161,12 +158,11 @@ export default async function AppointmentsPage({
   const isReadOwnOnly = readScope === APPOINTMENT_READ_SCOPE.OWN;
   const isReadOwnDepartment =
     readScope === APPOINTMENT_READ_SCOPE.OWN_DEPARTMENT;
-  // First-load prefill for `.own-department`-only callers: pre-select
-  // the caller's home department in the filter when no explicit
-  // `?departmentId=` is in the URL. Skipped (`undefined`) when the URL
-  // already carries an explicit value, or when the session has no
-  // department (shouldn't happen for NURSE post PR #11 — guard
-  // defensively).
+  // Pin the department filter to the caller's home for
+  // `.own-department`-only callers when no explicit `?departmentId=` is
+  // in the URL. Skipped (`undefined`) when the URL already carries an
+  // explicit value, or when the session has no department (shouldn't
+  // happen for NURSE post PR #11 — guard defensively).
   const prefilledDepartmentId =
     isReadOwnDepartment && !departmentIdParam && callerDepartmentId
       ? callerDepartmentId
@@ -176,6 +172,13 @@ export default async function AppointmentsPage({
   // load, otherwise nothing.
   const effectiveDepartmentId =
     departmentIdParam ?? prefilledDepartmentId ?? null;
+  // The department picker is locked (disabled + pinned) when the caller
+  // is `.own`-only (no dept editing makes sense — pinned to caller's
+  // home) OR `.own-department`-only with a known caller department (BE
+  // auto-narrows; letting the user clear the picker desyncs the UI
+  // from the response).
+  const departmentFilterDisabled =
+    isReadOwnOnly || (isReadOwnDepartment && Boolean(callerDepartmentId));
   // Fetch `/me` only when we genuinely need the caller's doctor id to
   // pin the picker — saves a round-trip for the common DOCTOR / NURSE /
   // MRO cases that don't lock the doctor field.
@@ -264,7 +267,7 @@ export default async function AppointmentsPage({
         activeOrder={order}
         activeFrom={fromParam ?? ""}
         activeTo={toParam ?? ""}
-        departmentFilterDisabled={isReadOwnOnly}
+        departmentFilterDisabled={departmentFilterDisabled}
         forcedDoctorId={forcedDoctorId}
       />
 
