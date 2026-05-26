@@ -4,20 +4,33 @@ import Typography from "@mui/material/Typography";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { PERMISSION_CODE } from "@/auth/permissions";
-import BookingWizard from "@/components/appointment/BookingWizard";
+import BookingWizard, {
+  type PrefilledSlot,
+} from "@/components/appointment/BookingWizard";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { getAppointment } from "@/lib/api/appointment.api";
 import { APPOINTMENT_ERROR_CODE } from "@/lib/api/appointment.const";
 import { getMe } from "@/lib/api/auth.api";
+import { getDepartmentAppointmentTypes } from "@/lib/api/department.api";
 import { listDepartments } from "@/lib/api/department.api";
 import { fetchDoctorPickerSeed } from "@/lib/api/doctor.actions";
 import { getDoctor } from "@/lib/api/doctor.api";
 import { isApiError } from "@/lib/api/errors";
 import { DEFAULT_PAGE, MAX_PAGE_SIZE } from "@/lib/api/pagination.const";
+import { getSchedule } from "@/lib/api/schedule.api";
 import { hasPermission, requireSession } from "@/lib/server/session";
+import { dayjs } from "@/lib/dayjs";
 import type { AppointmentResponse } from "@/types/appointment.types";
+import type { AppointmentType } from "@/types/appointment-type.types";
 import type { DoctorListRow } from "@/types/doctor.types";
+
+const APPOINTMENT_TYPE_VALUES: readonly AppointmentType[] = [
+  "NEW_PATIENT_VISIT",
+  "FOLLOW_UP",
+  "CONSULTATION",
+  "PROCEDURE",
+];
 
 interface BookingWizardPageProps {
   params: Promise<{ locale: AppLocale }>;
@@ -31,7 +44,36 @@ interface BookingWizardPageProps {
      * 4xx-ing the entire page.
      */
     previousAppointmentId?: string;
+    /**
+     * F15 — slot finder deep-link. The four params arrive together (the
+     * "Book this slot" CTA emits them as a tuple) and are resolved into
+     * the `prefilledSlot` prop on the wizard so every step-2 input is
+     * pre-filled + locked. Any missing or invalid field degrades
+     * gracefully — the wizard mounts as a fresh booking, with no F15
+     * lock.
+     */
+    doctorScheduleId?: string;
+    startAt?: string;
+    appointmentType?: string;
+    departmentId?: string;
   }>;
+}
+
+/**
+ * Coerce a raw query-string value to a known `AppointmentType` code.
+ * Returns `null` on missing / unknown input — the F15 prefill path
+ * degrades gracefully when any single field doesn't parse.
+ */
+function parseAppointmentType(raw: string | undefined): AppointmentType | null {
+  if (!raw) {
+    return null;
+  }
+
+  if (APPOINTMENT_TYPE_VALUES.includes(raw as AppointmentType)) {
+    return raw as AppointmentType;
+  }
+
+  return null;
 }
 
 /**
@@ -53,7 +95,13 @@ export default async function BookingWizardPage({
   searchParams,
 }: BookingWizardPageProps) {
   const { locale } = await params;
-  const { previousAppointmentId } = await searchParams;
+  const {
+    previousAppointmentId,
+    doctorScheduleId: f15ScheduleId,
+    startAt: f15StartAt,
+    appointmentType: f15AppointmentTypeRaw,
+    departmentId: f15DepartmentId,
+  } = await searchParams;
 
   setRequestLocale(locale);
 
@@ -164,6 +212,64 @@ export default async function BookingWizardPage({
     }
   }
 
+  // F15 — slot finder deep-link prefill. All four params must arrive
+  // together (the "Book this slot" CTA emits them as a tuple); any
+  // missing field degrades gracefully into a fresh booking. Per-field
+  // resolution:
+  //   - schedule  → `getSchedule(id)` resolves the schedule's owning
+  //                  doctorId. Failure (404 / 403 — schedule moved
+  //                  tenants, deleted) drops the prefill silently.
+  //   - doctor    → `getDoctor(scheduleDoctorId)` resolves the full row
+  //                  shape the wizard's picker needs.
+  //   - duration  → from the per-(department, type) catalog — we need
+  //                  it to compute `endAt` (the deep-link only carries
+  //                  `startAt`).
+  // All three lookups happen sequentially because each depends on the
+  // previous response.
+  let prefilledSlot: PrefilledSlot | undefined;
+  const f15AppointmentType = parseAppointmentType(f15AppointmentTypeRaw);
+
+  if (
+    f15ScheduleId &&
+    f15StartAt &&
+    f15AppointmentType &&
+    f15DepartmentId &&
+    dayjs(f15StartAt).isValid()
+  ) {
+    try {
+      const schedule = await getSchedule(f15ScheduleId);
+      const f15Doctor = await getDoctor(schedule.doctorId);
+      const departmentTypes = await getDepartmentAppointmentTypes(
+        f15DepartmentId,
+      );
+      const typeRow = departmentTypes.find(
+        (row) => row.code === f15AppointmentType,
+      );
+
+      if (typeRow) {
+        const endAt = dayjs
+          .utc(f15StartAt)
+          .add(typeRow.durationMinutes, "minute")
+          .toISOString();
+
+        prefilledSlot = {
+          doctorScheduleId: f15ScheduleId,
+          startAt: f15StartAt,
+          endAt,
+          appointmentType: f15AppointmentType,
+          departmentId: f15DepartmentId,
+          doctor: f15Doctor,
+        };
+      }
+    } catch (err) {
+      if (isApiError(err) && (err.status === 404 || err.status === 403)) {
+        prefilledSlot = undefined;
+      } else {
+        throw err;
+      }
+    }
+  }
+
   const [departments, doctorSeed] = await Promise.all([
     listDepartments({ page: DEFAULT_PAGE, pageSize: MAX_PAGE_SIZE }),
     fetchDoctorPickerSeed({ departmentId: callerDepartmentId }),
@@ -187,6 +293,7 @@ export default async function BookingWizardPage({
         lockedDoctor={lockedDoctor}
         canRegisterPatient={canRegisterPatient}
         referralSourceAppointment={referralSourceAppointment}
+        prefilledSlot={prefilledSlot}
       />
     </Stack>
   );

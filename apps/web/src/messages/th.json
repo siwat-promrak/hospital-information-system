@@ -132,7 +132,8 @@
       "appointmentsNew": "จองนัดหมาย",
       "patientsNew": "ลงทะเบียนผู้ป่วย",
       "appointmentGroups": "เคส",
-      "referrals": "การส่งต่อ"
+      "referrals": "การส่งต่อ",
+      "findSlot": "ค้นหาช่วงเวลา"
     }
   },
   "Breadcrumb": {
@@ -150,7 +151,8 @@
     "patients": "ผู้ป่วย",
     "patientsNew": "ลงทะเบียน",
     "appointmentGroups": "เคส",
-    "referrals": "การส่งต่อ"
+    "referrals": "การส่งต่อ",
+    "findSlot": "ค้นหาช่วงเวลา"
   },
   "UserMenu": {
     "openMenu": "เปิดเมนูผู้ใช้",
@@ -654,6 +656,37 @@
     },
     "Errors": {
       "forbidden": "คุณไม่มีสิทธิ์ดูคิวรับการส่งต่อ"
+    }
+  },
+  "FindSlot": {
+    "title": "ค้นหาช่วงเวลา",
+    "subtitle": "ดูช่วงเวลาที่ว่างของแพทย์หนึ่งท่านหรือหลายท่าน เลือกประเภทนัดและวันที่ จากนั้นคลิกช่วงเวลาเพื่อเข้าสู่หน้าจองนัด",
+    "filterCard": {
+      "departmentLabel": "แผนก",
+      "doctorLabel": "แพทย์",
+      "appointmentTypeLabel": "ประเภทนัดหมาย",
+      "dateLabel": "วันที่",
+      "searchButton": "ค้นหา",
+      "typeRequiredHelper": "เลือกประเภทนัดหมายเพื่อเปิดใช้ปุ่มค้นหา",
+      "departmentLockedHelper": "ระบบจำกัดอยู่ในแผนกของคุณ"
+    },
+    "scopeToggle": {
+      "mine": "ของฉัน",
+      "dept": "ของแผนก"
+    },
+    "results": {
+      "title": "ช่วงเวลาที่ว่าง",
+      "timeRange": "{start} – {end}",
+      "doctorHeading": "{name} ({code})",
+      "emptyTitle": "ไม่มีช่วงเวลาว่าง",
+      "emptyDescription": "ไม่มีช่วงเวลาที่จองได้ตามตัวกรองที่เลือก ลองเลือกวันอื่นหรือเปลี่ยนประเภทนัดหมาย",
+      "notReadyTitle": "เลือกตัวกรองเพื่อค้นหา",
+      "notReadyDescription": "เลือกประเภทนัดหมาย (และตัวกรองอื่นหากต้องการ) แล้วกดค้นหาเพื่อดูช่วงเวลาที่ว่าง",
+      "bookSlotButton": "จองช่วงเวลานี้",
+      "slotCountLabel": "{count, plural, =0 {ไม่มี} other {# ช่วงเวลา}}"
+    },
+    "Errors": {
+      "forbidden": "คุณไม่มีสิทธิ์ใช้ตัวค้นหาช่วงเวลา"
     }
   }
 }

@@ -22,6 +22,7 @@ export const BREADCRUMB_SEGMENT_LABEL = {
   new: K.Breadcrumb.appointmentsNew,
   "appointment-groups": K.Breadcrumb.appointmentGroups,
   referrals: K.Breadcrumb.referrals,
+  "find-slot": K.Breadcrumb.findSlot,
 } as const;
 
 export type BreadcrumbSegment = keyof typeof BREADCRUMB_SEGMENT_LABEL;

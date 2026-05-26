@@ -17,6 +17,11 @@ import { ApiProperty } from '@nestjs/swagger';
  * `POST /appointments` so the new `Appointment.scheduleId` FK is
  * populated (the schedule is the single source of truth for whether a
  * slot is bookable; F09's transactional re-check loads the row by id).
+ *
+ * F15 — `doctorId`, `doctorCode`, and `doctorName` are echoed on every
+ * slot so the multi-doctor fan-out response (when the caller omits
+ * `doctorId`) can be grouped + rendered without a second lookup. The
+ * fields are populated on every slot, single-doctor and fan-out alike.
  */
 export class SlotResponseDto {
   @ApiProperty({
@@ -47,4 +52,30 @@ export class SlotResponseDto {
       'back to `POST /appointments` (populates `Appointment.scheduleId`).',
   })
   scheduleId!: string;
+
+  @ApiProperty({
+    example: '4f3e2a10-1234-5678-9abc-deadbeef1234',
+    description:
+      'Owning doctor id (F15). Echoed so the multi-doctor fan-out ' +
+      'response can be grouped by doctor without a second lookup, AND ' +
+      'so the booker UI can pass it back to `POST /appointments`.',
+  })
+  doctorId!: string;
+
+  @ApiProperty({
+    example: 'MD-0001',
+    description:
+      'Owning doctor\'s `doctorCode` (F15). Surfaced for display ' +
+      '("Dr. X — MD-0001 — 09:00") without a second lookup.',
+  })
+  doctorCode!: string;
+
+  @ApiProperty({
+    example: 'Jane Doe',
+    description:
+      'Owning doctor\'s display name — `firstNameEn lastNameEn` from ' +
+      'the linked `User` row (F15). The FE uses this verbatim; localisation ' +
+      'happens at render time in the viewer\'s locale.',
+  })
+  doctorName!: string;
 }

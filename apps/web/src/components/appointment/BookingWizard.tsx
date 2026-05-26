@@ -20,6 +20,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from "react";
@@ -105,6 +106,44 @@ interface BookingWizardProps {
    *   3. Shows a notice on step 1 explaining the pre-fill.
    */
   referralSourceAppointment?: AppointmentResponse;
+  /**
+   * F15 — when the wizard is opened from the slot finder
+   * (`/find-slot` → `/appointments/new?doctorScheduleId=…&startAt=…
+   * &appointmentType=…&departmentId=…`), the page resolves the picked
+   * doctor + duration server-side and threads them in here. The wizard
+   * then:
+   *   1. Pre-fills `departmentId`, `doctor`, `appointmentType`, `date`,
+   *      and `slot` from the deep-link tuple.
+   *   2. Locks (disables) every step-2 input — the slot picker is the
+   *      output of the slot finder, not something the user re-picks.
+   *   3. Lands the user on the patient picker (the only remaining
+   *      user-actionable step). After patient + continuation, the user
+   *      reaches the locked slot step and clicks Confirm.
+   */
+  prefilledSlot?: PrefilledSlot;
+}
+
+/**
+ * F15 deep-link payload — the slot finder's "Book this slot" CTA threads
+ * this through the page server-component into the wizard. Every field is
+ * resolved server-side so the wizard never blocks on a fetch to render
+ * the locked state.
+ */
+export interface PrefilledSlot {
+  doctorScheduleId: string;
+  /** ISO 8601 UTC datetime — the picked slot's `startAt`. */
+  startAt: string;
+  /** ISO 8601 UTC datetime — `startAt + durationMinutes`, computed on the
+   * page. The BE never echoed `endAt` on the deep-link query string; we
+   * compute it from the per-(department, type) duration so the wizard's
+   * confirm step has a stable summary without a follow-up slot-finder
+   * round-trip. */
+  endAt: string;
+  appointmentType: AppointmentType;
+  departmentId: string;
+  /** Full doctor row (resolved on the page via `getDoctor()`) so the
+   * picker can render the locked selection without a follow-up fetch. */
+  doctor: DoctorListRow;
 }
 
 /**
@@ -163,6 +202,7 @@ export default function BookingWizard({
   lockedDoctor,
   canRegisterPatient,
   referralSourceAppointment,
+  prefilledSlot,
 }: BookingWizardProps) {
   const tPatient = useTranslations(NS.BookingWizardPatient);
   const tContinuation = useTranslations(NS.BookingWizardContinuation);
@@ -223,18 +263,44 @@ export default function BookingWizard({
     referralSourceAppointment ?? null,
   );
 
-  // Step 2 state
+  // Step 2 state. F15 — the slot-finder deep-link pre-fills every step-2
+  // dimension (department / doctor / type / date / slot) from the picked
+  // tuple; otherwise we fall back to the forced / locked props (referrals
+  // / DOCTOR self-booking) and finally to a blank state.
   const [departmentId, setDepartmentId] = useState<string>(
-    forcedDepartmentId ?? "",
+    prefilledSlot?.departmentId ?? forcedDepartmentId ?? "",
   );
   const [doctor, setDoctor] = useState<DoctorListRow | null>(
-    lockedDoctor ?? null,
+    prefilledSlot?.doctor ?? lockedDoctor ?? null,
   );
   const [appointmentType, setAppointmentType] = useState<
     AppointmentType | ""
-  >("");
-  const [date, setDate] = useState<string>(todayLocalISODate());
-  const [slot, setSlot] = useState<SlotResponse | null>(null);
+  >(prefilledSlot?.appointmentType ?? "");
+  const [date, setDate] = useState<string>(
+    prefilledSlot
+      ? dayjs(prefilledSlot.startAt).format("YYYY-MM-DD")
+      : todayLocalISODate(),
+  );
+  const [slot, setSlot] = useState<SlotResponse | null>(
+    prefilledSlot
+      ? {
+          startAt: prefilledSlot.startAt,
+          endAt: prefilledSlot.endAt,
+          departmentId: prefilledSlot.departmentId,
+          scheduleId: prefilledSlot.doctorScheduleId,
+          doctorId: prefilledSlot.doctor.id,
+          doctorCode: prefilledSlot.doctor.doctorCode,
+          doctorName: prefilledSlot.doctor.fullName,
+        }
+      : null,
+  );
+
+  // F15 — when the wizard is opened with a fully-resolved slot tuple,
+  // every step-2 input is locked (the slot finder IS the picker; the
+  // user shouldn't re-pick anything here). Computed once on mount —
+  // `prefilledSlot` never changes after the page server-component
+  // threads it through.
+  const hasPrefilledSlot = prefilledSlot !== undefined;
 
   // Step 3 state
   const [reason, setReason] = useState<string>("");
@@ -253,7 +319,23 @@ export default function BookingWizard({
   // is no longer valid (the slot grid is dimension-locked on the
   // `(doctor, department, date, type)` tuple). Drop it so the user
   // re-picks.
+  //
+  // F15 — `hasPrefilledSlot` skips the first-render run that would
+  // otherwise stamp `null` over the prefilled slot. The deep-link's tuple
+  // is by construction valid (the user just clicked it in the slot
+  // finder), so we don't need the cascade to fire on mount. The effect
+  // still runs on dependency CHANGES, but in the prefilled flow every
+  // dimension is locked so no change can happen — the only way back to
+  // an empty slot in that flow is the page reload.
+  const slotResetSkipRef = useRef<boolean>(hasPrefilledSlot);
+
   useEffect(() => {
+    if (slotResetSkipRef.current) {
+      slotResetSkipRef.current = false;
+
+      return;
+    }
+
     setSlot(null);
   }, [departmentId, doctor, appointmentType, date]);
 
@@ -757,7 +839,7 @@ export default function BookingWizard({
                   departments={departments}
                   label={tSlot(K.BookingWizard.Slot.departmentLabel)}
                   required
-                  disabled={Boolean(forcedDepartmentId)}
+                  disabled={Boolean(forcedDepartmentId) || hasPrefilledSlot}
                   helperText={
                     forcedDepartmentId
                       ? tSlot(K.BookingWizard.Slot.departmentLockedHelper)
@@ -775,7 +857,7 @@ export default function BookingWizard({
                       K.BookingWizard.Slot.doctorPlaceholder,
                     )}
                     required
-                    disabled={Boolean(lockedDoctor)}
+                    disabled={Boolean(lockedDoctor) || hasPrefilledSlot}
                     helperText={
                       lockedDoctor
                         ? tSlot(K.BookingWizard.Slot.doctorLockedHelper)
@@ -802,7 +884,11 @@ export default function BookingWizard({
                   types={visibleDepartmentTypes}
                   label={tSlot(K.BookingWizard.Slot.typeLabel)}
                   required
-                  disabled={!departmentId || showContinuationTypeUnavailable}
+                  disabled={
+                    !departmentId ||
+                    showContinuationTypeUnavailable ||
+                    hasPrefilledSlot
+                  }
                   error={showContinuationTypeUnavailable}
                   helperText={
                     showContinuationTypeUnavailable
@@ -820,19 +906,47 @@ export default function BookingWizard({
                   helperText={tSlot(K.BookingWizard.Slot.dateHelper)}
                   value={date}
                   onChange={(event) => setDate(event.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{ min: todayLocalISODate() }}
+                  disabled={hasPrefilledSlot}
+                  slotProps={{
+                    inputLabel: { shrink: true },
+                    htmlInput: { min: todayLocalISODate() },
+                  }}
                 />
               </Box>
-              <SlotPicker
-                doctorId={doctor?.id ?? null}
-                departmentId={departmentId || null}
-                date={date}
-                type={(appointmentType || null) as AppointmentType | null}
-                value={slot}
-                onChange={handlePickSlot}
-                locale={locale}
-              />
+              {hasPrefilledSlot && slot ? (
+                <Box
+                  sx={{
+                    border: 1,
+                    borderColor: "primary.light",
+                    borderRadius: 1,
+                    bgcolor: "primary.50",
+                    p: 2,
+                  }}
+                >
+                  <Stack spacing={0.5}>
+                    <Typography variant="caption" color="text.secondary">
+                      {tSlot(K.BookingWizard.Slot.selectedSlot)}
+                    </Typography>
+                    <Typography variant="body1" fontWeight={600}>
+                      {dayjs(slot.startAt)
+                        .locale(locale)
+                        .format("ddd, D MMM YYYY HH:mm")}
+                      {" – "}
+                      {dayjs(slot.endAt).locale(locale).format("HH:mm")}
+                    </Typography>
+                  </Stack>
+                </Box>
+              ) : (
+                <SlotPicker
+                  doctorId={doctor?.id ?? null}
+                  departmentId={departmentId || null}
+                  date={date}
+                  type={(appointmentType || null) as AppointmentType | null}
+                  value={slot}
+                  onChange={handlePickSlot}
+                  locale={locale}
+                />
+              )}
               <Stack
                 direction={{ xs: "column-reverse", sm: "row" }}
                 spacing={1.5}

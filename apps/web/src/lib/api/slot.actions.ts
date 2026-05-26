@@ -45,7 +45,12 @@ function toActionError(err: unknown): SlotActionError {
 }
 
 interface LoadSlotsArgs {
-  doctorId: string;
+  /**
+   * Optional (F15). When omitted, the BE fans out across every doctor with
+   * an active schedule on `(departmentId, date)` and merges their slot
+   * grids — the slot finder's "any doctor in this department" workflow.
+   */
+  doctorId?: string;
   departmentId: string;
   date: string;
   type: AppointmentType;

@@ -3,6 +3,7 @@ import { AppointmentStatus, AppointmentType } from '@prisma/client';
 
 import { PERMISSION } from '../auth/permissions';
 import { ROLE } from '../auth/roles';
+import { SCOPE } from '../auth/scope';
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '../common/errors';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,6 +11,7 @@ import type { AuthenticatedUser } from '../users/users.types';
 
 import {
   SlotsService,
+  computeFreeIntervals,
   computeSchedulesSlots,
   overlapsHalfOpen,
   resolveDayBounds,
@@ -75,6 +77,14 @@ describe('computeSchedulesSlots', () => {
   const FAR_FUTURE_NOW = dt('2026-05-25T00:00:00.000Z');
   const SCHEDULE_DEPT_ID = 'dept-abc';
   const SCHEDULE_ID = 'sched-abc';
+  // F15 — every ScheduleWindow now carries the owning doctor's identity
+  // triplet so the pure grid step can echo it onto each emitted slot
+  // without a Prisma round-trip.
+  const DOCTOR_REF = {
+    id: 'doctor-abc',
+    doctorCode: 'MD-0001',
+    name: 'Jane Doe',
+  } as const;
 
   describe('grid step matches duration', () => {
     it('produces 09:00-09:20, 09:20-09:40, ... for CONSULTATION (20 min)', () => {
@@ -86,6 +96,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-06-15T10:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
         bookingWindowStartMinute: null,
@@ -100,18 +111,27 @@ describe('computeSchedulesSlots', () => {
           endAt: '2026-06-15T09:20:00.000Z',
           departmentId: SCHEDULE_DEPT_ID,
           scheduleId: SCHEDULE_ID,
+          doctorId: DOCTOR_REF.id,
+          doctorCode: DOCTOR_REF.doctorCode,
+          doctorName: DOCTOR_REF.name,
         },
         {
           startAt: '2026-06-15T09:20:00.000Z',
           endAt: '2026-06-15T09:40:00.000Z',
           departmentId: SCHEDULE_DEPT_ID,
           scheduleId: SCHEDULE_ID,
+          doctorId: DOCTOR_REF.id,
+          doctorCode: DOCTOR_REF.doctorCode,
+          doctorName: DOCTOR_REF.name,
         },
         {
           startAt: '2026-06-15T09:40:00.000Z',
           endAt: '2026-06-15T10:00:00.000Z',
           departmentId: SCHEDULE_DEPT_ID,
           scheduleId: SCHEDULE_ID,
+          doctorId: DOCTOR_REF.id,
+          doctorCode: DOCTOR_REF.doctorCode,
+          doctorName: DOCTOR_REF.name,
         },
       ]);
     });
@@ -125,6 +145,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-06-15T10:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
         bookingWindowStartMinute: null,
@@ -149,6 +170,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-06-15T10:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 25,
         bookingWindowStartMinute: null,
@@ -178,6 +200,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-06-15T12:00:00Z'),
           breakStartAt: dt('2026-06-15T10:00:00Z'),
           breakEndAt: dt('2026-06-15T11:00:00Z'),
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
         bookingWindowStartMinute: null,
@@ -209,6 +232,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-06-15T11:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
         bookingWindowStartMinute: null,
@@ -235,6 +259,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-06-15T10:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
         bookingWindowStartMinute: null,
@@ -258,6 +283,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-05-01T12:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
         bookingWindowStartMinute: null,
@@ -267,6 +293,116 @@ describe('computeSchedulesSlots', () => {
       });
 
       expect(slots).toEqual([]);
+    });
+  });
+
+  describe('sliding-window re-anchor (gap reclamation)', () => {
+    it("re-anchors after a non-grid-aligned blocker — 15-min booking at 09:00 surfaces a 60-min slot at 09:15", () => {
+      // The motivating case: schedule 09:00–12:00, an existing 15-min
+      // booking of a different type occupies 09:00–09:15, and the caller
+      // searches for a 60-min slot. The previous fixed-grid algorithm
+      // anchored at the schedule start (09:00 / 10:00 / 11:00), dropping
+      // 09:00–10:00 because it overlapped the 09:15 blocker — leaving the
+      // 09:15–10:15 capacity unreclaimed. The sliding-window algorithm
+      // re-anchors at the free interval's start (09:15), so 09:15–10:15
+      // AND 10:15–11:15 both surface (11:15–12:15 would spill past
+      // schedule end, so it's dropped).
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          startAt: dt('2026-06-15T09:00:00Z'),
+          endAt: dt('2026-06-15T12:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
+        blockingAppointments: [
+          {
+            startAt: dt('2026-06-15T09:00:00Z'),
+            endAt: dt('2026-06-15T09:15:00Z'),
+          },
+        ],
+        now: FAR_FUTURE_NOW,
+      });
+
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2026-06-15T09:15:00.000Z',
+        '2026-06-15T10:15:00.000Z',
+      ]);
+    });
+
+    it('re-anchors after each blocker independently (two non-aligned blockers fragment the day)', () => {
+      // Schedule 09:00–13:00, 60-min type. Blockers 09:00–09:15 (15 min)
+      // and 11:30–11:45 (15 min) leave two free intervals:
+      //   [09:15, 11:30) → 09:15–10:15, 10:15–11:15 (11:15–12:15 spills
+      //                    past 11:30, drop)
+      //   [11:45, 13:00) → 11:45–12:45 (12:45–13:45 spills past 13:00,
+      //                    drop)
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          startAt: dt('2026-06-15T09:00:00Z'),
+          endAt: dt('2026-06-15T13:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
+        blockingAppointments: [
+          {
+            startAt: dt('2026-06-15T09:00:00Z'),
+            endAt: dt('2026-06-15T09:15:00Z'),
+          },
+          {
+            startAt: dt('2026-06-15T11:30:00Z'),
+            endAt: dt('2026-06-15T11:45:00Z'),
+          },
+        ],
+        now: FAR_FUTURE_NOW,
+      });
+
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2026-06-15T09:15:00.000Z',
+        '2026-06-15T10:15:00.000Z',
+        '2026-06-15T11:45:00.000Z',
+      ]);
+    });
+
+    it('re-anchors at the post-break boundary when the break is not grid-aligned', () => {
+      // Schedule 09:00–13:00, 60-min type, break 11:30–12:00 (off-grid).
+      // Free intervals: [09:00, 11:30), [12:00, 13:00).
+      //   [09:00, 11:30) → 09:00–10:00, 10:00–11:00 (11:00–12:00 spills
+      //                    past 11:30, drop)
+      //   [12:00, 13:00) → 12:00–13:00 (fits exactly).
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          startAt: dt('2026-06-15T09:00:00Z'),
+          endAt: dt('2026-06-15T13:00:00Z'),
+          breakStartAt: dt('2026-06-15T11:30:00Z'),
+          breakEndAt: dt('2026-06-15T12:00:00Z'),
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
+        blockingAppointments: [],
+        now: FAR_FUTURE_NOW,
+      });
+
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2026-06-15T09:00:00.000Z',
+        '2026-06-15T10:00:00.000Z',
+        '2026-06-15T12:00:00.000Z',
+      ]);
     });
   });
 
@@ -280,6 +416,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-06-15T10:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
         bookingWindowStartMinute: null,
@@ -309,6 +446,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2026-06-15T10:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
         bookingWindowStartMinute: null,
@@ -336,6 +474,7 @@ describe('computeSchedulesSlots', () => {
         endAt: dt('2026-06-15T09:00:00Z'),
         breakStartAt: null,
         breakEndAt: null,
+        doctor: DOCTOR_REF,
       },
       durationMinutes: 20,
       bookingWindowStartMinute: null,
@@ -356,6 +495,7 @@ describe('computeSchedulesSlots', () => {
         endAt: dt('2026-06-15T10:00:00Z'),
         breakStartAt: null,
         breakEndAt: null,
+        doctor: DOCTOR_REF,
       },
       durationMinutes: 20,
       bookingWindowStartMinute: null,
@@ -378,6 +518,7 @@ describe('computeSchedulesSlots', () => {
         endAt: dt('2026-06-15T10:00:00Z'),
         breakStartAt: null,
         breakEndAt: null,
+        doctor: DOCTOR_REF,
       },
       durationMinutes: 20,
       bookingWindowStartMinute: null,
@@ -423,6 +564,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2099-06-15T05:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
         bookingWindowStartMinute: null,
@@ -450,6 +592,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2099-06-15T05:00:00Z'),
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
         bookingWindowStartMinute: 600,
@@ -461,6 +604,52 @@ describe('computeSchedulesSlots', () => {
       expect(slots.map((s) => s.startAt)).toEqual([
         '2099-06-15T03:00:00.000Z',
         '2099-06-15T04:00:00.000Z',
+      ]);
+    });
+
+    it('drops a slot whose START fits the window but whose END spills past windowEnd', () => {
+      // Bug scenario: schedule 09:00–17:00 local with prior bookings at
+      // 09:30–10:00, 10:00–10:20, 10:20–10:40 leaves free intervals
+      // [09:00, 09:30) and [10:40, 17:00). Booking window end = 660
+      // (= 11:00 local). For a 30-min type:
+      //   [09:00, 09:30): 09:00–09:30 (slotEndMin = 570 ≤ 660 → kept)
+      //   [10:40, 17:00): 10:40–11:10 (slotEndMin = 670 > 660 → DROPPED)
+      //   The previous "start-only" check incorrectly kept 10:40–11:10.
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          // 02:00 UTC = 09:00 Asia/Bangkok.
+          startAt: dt('2099-06-15T02:00:00Z'),
+          endAt: dt('2099-06-15T10:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 30,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: 660,
+        blockingAppointments: [
+          {
+            startAt: dt('2099-06-15T02:30:00Z'),
+            endAt: dt('2099-06-15T03:00:00Z'),
+          },
+          {
+            startAt: dt('2099-06-15T03:00:00Z'),
+            endAt: dt('2099-06-15T03:20:00Z'),
+          },
+          {
+            startAt: dt('2099-06-15T03:20:00Z'),
+            endAt: dt('2099-06-15T03:40:00Z'),
+          },
+        ],
+        now: dt('2099-01-01T00:00:00Z'),
+      });
+
+      // Expect ONLY 09:00–09:30 local (02:00–02:30 UTC). 10:40 local
+      // would spill to 11:10 local, past the 11:00 window end.
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2099-06-15T02:00:00.000Z',
       ]);
     });
 
@@ -476,6 +665,7 @@ describe('computeSchedulesSlots', () => {
           endAt: dt('2099-06-15T05:00:00Z'),   // 12:00 local
           breakStartAt: null,
           breakEndAt: null,
+          doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
         bookingWindowStartMinute: 540,
@@ -493,6 +683,100 @@ describe('computeSchedulesSlots', () => {
         '2099-06-15T04:00:00.000Z',
       ]);
     });
+  });
+});
+
+describe('computeFreeIntervals', () => {
+  it('returns the full window when there are no blockers', () => {
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T12:00:00Z'),
+      },
+      [],
+    );
+
+    expect(out).toEqual([
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T12:00:00Z'),
+      },
+    ]);
+  });
+
+  it('returns [] for a zero-length window', () => {
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T09:00:00Z'),
+      },
+      [{ startAt: dt('2026-06-15T08:00:00Z'), endAt: dt('2026-06-15T10:00:00Z') }],
+    );
+
+    expect(out).toEqual([]);
+  });
+
+  it('clamps a blocker that pokes out the left edge of the window', () => {
+    // Blocker 08:30–09:15 with window 09:00–10:00 → effective
+    // blocker 09:00–09:15 → free interval [09:15, 10:00).
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T10:00:00Z'),
+      },
+      [{ startAt: dt('2026-06-15T08:30:00Z'), endAt: dt('2026-06-15T09:15:00Z') }],
+    );
+
+    expect(out).toEqual([
+      {
+        startAt: dt('2026-06-15T09:15:00Z'),
+        endAt: dt('2026-06-15T10:00:00Z'),
+      },
+    ]);
+  });
+
+  it('merges overlapping blockers without emitting zero-length intervals', () => {
+    // Blockers 09:15–09:45 and 09:30–10:00 overlap → effective single
+    // blocker 09:15–10:00 → free interval [09:00, 09:15) only (the
+    // post-blocker tail is empty since 10:00 is the window end).
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T10:00:00Z'),
+      },
+      [
+        { startAt: dt('2026-06-15T09:15:00Z'), endAt: dt('2026-06-15T09:45:00Z') },
+        { startAt: dt('2026-06-15T09:30:00Z'), endAt: dt('2026-06-15T10:00:00Z') },
+      ],
+    );
+
+    expect(out).toEqual([
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T09:15:00Z'),
+      },
+    ]);
+  });
+
+  it('emits an interval between two non-touching blockers', () => {
+    // Schedule 09:00–12:00, blockers 09:30–09:45 and 11:00–11:15 →
+    // free intervals [09:00, 09:30), [09:45, 11:00), [11:15, 12:00).
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T12:00:00Z'),
+      },
+      [
+        { startAt: dt('2026-06-15T09:30:00Z'), endAt: dt('2026-06-15T09:45:00Z') },
+        { startAt: dt('2026-06-15T11:00:00Z'), endAt: dt('2026-06-15T11:15:00Z') },
+      ],
+    );
+
+    expect(out).toEqual([
+      { startAt: dt('2026-06-15T09:00:00Z'), endAt: dt('2026-06-15T09:30:00Z') },
+      { startAt: dt('2026-06-15T09:45:00Z'), endAt: dt('2026-06-15T11:00:00Z') },
+      { startAt: dt('2026-06-15T11:15:00Z'), endAt: dt('2026-06-15T12:00:00Z') },
+    ]);
   });
 });
 
@@ -541,7 +825,44 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
 
   const FAR_FUTURE_DATE = '2026-05-25';
   const DOCTOR_ID = '4f3e2a10-1234-5678-9abc-deadbeef1234';
+  const DOCTOR_CODE = 'MD-0001';
+  const DOCTOR_FIRST_NAME = 'Jane';
+  const DOCTOR_LAST_NAME = 'Doe';
+  const DOCTOR_DISPLAY_NAME = `${DOCTOR_FIRST_NAME} ${DOCTOR_LAST_NAME}`;
   const DEPARTMENT_ID = 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9';
+
+  // F15 — every mocked `doctorSchedule.findMany` row carries the doctor
+  // include shape (`doctorId` + nested `doctor: { doctorCode, user }`).
+  // Centralising the literal here keeps the mocks readable.
+  function scheduleRow(overrides: {
+    id: string;
+    startAt: Date;
+    endAt: Date;
+    breakStartAt?: Date | null;
+    breakEndAt?: Date | null;
+    doctorId?: string;
+    doctorCode?: string;
+    firstNameEn?: string;
+    lastNameEn?: string;
+    departmentId?: string;
+  }): Record<string, unknown> {
+    return {
+      id: overrides.id,
+      doctorId: overrides.doctorId ?? DOCTOR_ID,
+      departmentId: overrides.departmentId ?? DEPARTMENT_ID,
+      startAt: overrides.startAt,
+      endAt: overrides.endAt,
+      breakStartAt: overrides.breakStartAt ?? null,
+      breakEndAt: overrides.breakEndAt ?? null,
+      doctor: {
+        doctorCode: overrides.doctorCode ?? DOCTOR_CODE,
+        user: {
+          firstNameEn: overrides.firstNameEn ?? DOCTOR_FIRST_NAME,
+          lastNameEn: overrides.lastNameEn ?? DOCTOR_LAST_NAME,
+        },
+      },
+    };
+  }
 
   const NURSE_CALLER: AuthenticatedUser = {
     id: 'user-nurse',
@@ -672,14 +993,11 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
     const prisma = buildPrisma({
       doctorSchedule: {
         findMany: jest.fn().mockResolvedValue([
-          {
+          scheduleRow({
             id: 'sched-1',
-            departmentId: DEPARTMENT_ID,
             startAt: new Date('2099-06-15T09:00:00.000Z'),
             endAt: new Date('2099-06-15T10:00:00.000Z'),
-            breakStartAt: null,
-            breakEndAt: null,
-          },
+          }),
         ]),
       },
       appointment: { findMany: apptFindMany },
@@ -699,18 +1017,27 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
         endAt: '2099-06-15T09:20:00.000Z',
         departmentId: DEPARTMENT_ID,
         scheduleId: 'sched-1',
+        doctorId: DOCTOR_ID,
+        doctorCode: DOCTOR_CODE,
+        doctorName: DOCTOR_DISPLAY_NAME,
       },
       {
         startAt: '2099-06-15T09:20:00.000Z',
         endAt: '2099-06-15T09:40:00.000Z',
         departmentId: DEPARTMENT_ID,
         scheduleId: 'sched-1',
+        doctorId: DOCTOR_ID,
+        doctorCode: DOCTOR_CODE,
+        doctorName: DOCTOR_DISPLAY_NAME,
       },
       {
         startAt: '2099-06-15T09:40:00.000Z',
         endAt: '2099-06-15T10:00:00.000Z',
         departmentId: DEPARTMENT_ID,
         scheduleId: 'sched-1',
+        doctorId: DOCTOR_ID,
+        doctorCode: DOCTOR_CODE,
+        doctorName: DOCTOR_DISPLAY_NAME,
       },
     ]);
 
@@ -738,22 +1065,16 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
       },
       doctorSchedule: {
         findMany: jest.fn().mockResolvedValue([
-          {
+          scheduleRow({
             id: 'sched-pm',
-            departmentId: DEPARTMENT_ID,
             startAt: new Date('2099-06-15T14:00:00.000Z'),
             endAt: new Date('2099-06-15T15:00:00.000Z'),
-            breakStartAt: null,
-            breakEndAt: null,
-          },
-          {
+          }),
+          scheduleRow({
             id: 'sched-am',
-            departmentId: DEPARTMENT_ID,
             startAt: new Date('2099-06-15T09:00:00.000Z'),
             endAt: new Date('2099-06-15T10:00:00.000Z'),
-            breakStartAt: null,
-            breakEndAt: null,
-          },
+          }),
         ]),
       },
     });
@@ -785,14 +1106,11 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
     const prisma = buildPrisma({
       doctorSchedule: {
         findMany: jest.fn().mockResolvedValue([
-          {
+          scheduleRow({
             id: 'sched-boundary',
-            departmentId: DEPARTMENT_ID,
             startAt: new Date('2099-06-15T23:00:00.000Z'),
             endAt: new Date('2099-06-16T01:00:00.000Z'),
-            breakStartAt: null,
-            breakEndAt: null,
-          },
+          }),
         ]),
       },
       appointment: { findMany: apptFindMany },
@@ -823,14 +1141,11 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
     const prisma = buildPrisma({
       doctorSchedule: {
         findMany: jest.fn().mockResolvedValue([
-          {
+          scheduleRow({
             id: 'sched-past',
-            departmentId: DEPARTMENT_ID,
             startAt: new Date('2020-01-01T09:00:00.000Z'),
             endAt: new Date('2020-01-01T12:00:00.000Z'),
-            breakStartAt: null,
-            breakEndAt: null,
-          },
+          }),
         ]),
       },
     });
@@ -845,6 +1160,406 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
     });
 
     expect(slots).toEqual([]);
+  });
+
+  // ─── F15 — multi-doctor fan-out + widened permission gate ─────────────
+
+  /**
+   * F15 — when `doctorId` is omitted the finder fans out across every
+   * doctor with an active schedule in `departmentId` on `date` and merges
+   * the resulting grids. The slot stream is sorted by `startAt`.
+   */
+  it('F15: merges slots from multiple doctors when doctorId is omitted', async () => {
+    const DOCTOR_A_ID = '11111111-1111-4111-8111-111111111111';
+    const DOCTOR_B_ID = '22222222-2222-4222-8222-222222222222';
+
+    const prisma = buildPrisma({
+      doctorSchedule: {
+        findMany: jest.fn().mockResolvedValue([
+          scheduleRow({
+            id: 'sched-a',
+            startAt: new Date('2099-06-15T14:00:00.000Z'),
+            endAt: new Date('2099-06-15T15:00:00.000Z'),
+            doctorId: DOCTOR_A_ID,
+            doctorCode: 'MD-AAA',
+            firstNameEn: 'Alice',
+            lastNameEn: 'Anderson',
+          }),
+          scheduleRow({
+            id: 'sched-b',
+            startAt: new Date('2099-06-15T09:00:00.000Z'),
+            endAt: new Date('2099-06-15T10:00:00.000Z'),
+            doctorId: DOCTOR_B_ID,
+            doctorCode: 'MD-BBB',
+            firstNameEn: 'Bob',
+            lastNameEn: 'Brown',
+          }),
+        ]),
+      },
+      departmentAppointmentType: {
+        findFirst: jest.fn().mockResolvedValue({
+          durationMinutes: 60,
+          bookingWindowStartMinute: null,
+          bookingWindowEndMinute: null,
+        }),
+      },
+    });
+    const service = await buildService(prisma);
+
+    const slots = await service.findSlots(NURSE_CALLER, {
+      doctorId: undefined,
+      departmentId: DEPARTMENT_ID,
+      date: '2099-06-15',
+      type: AppointmentType.PROCEDURE,
+    });
+
+    // Merged + sorted: Bob's 09:00 first, then Alice's 14:00.
+    expect(slots).toHaveLength(2);
+    expect(slots[0].startAt).toBe('2099-06-15T09:00:00.000Z');
+    expect(slots[0].doctorId).toBe(DOCTOR_B_ID);
+    expect(slots[0].doctorCode).toBe('MD-BBB');
+    expect(slots[0].doctorName).toBe('Bob Brown');
+    expect(slots[0].scheduleId).toBe('sched-b');
+
+    expect(slots[1].startAt).toBe('2099-06-15T14:00:00.000Z');
+    expect(slots[1].doctorId).toBe(DOCTOR_A_ID);
+    expect(slots[1].doctorCode).toBe('MD-AAA');
+    expect(slots[1].doctorName).toBe('Alice Anderson');
+    expect(slots[1].scheduleId).toBe('sched-a');
+  });
+
+  /**
+   * F15 — a `.own`-only caller (synthetic DOCTOR fixture with ONLY
+   * `appointment.create.own` — no `schedule.read.*` codes) MUST pin
+   * their own `doctorId`. Omitting it falls into
+   * `INSUFFICIENT_PERMISSION_SCOPE` because `.own` cannot probe
+   * multiple doctors. NOTE: the seeded baseline DOCTOR also holds
+   * `schedule.read.own-department`, which short-circuits to
+   * `OWN_DEPARTMENT` before this branch — see the
+   * `F15: DOCTOR with own-dept read scope fans out` case below for the
+   * realistic-DOCTOR path.
+   */
+  it('F15: .own-only caller omitting doctorId is rejected with INSUFFICIENT_PERMISSION_SCOPE', async () => {
+    const OWN_DOCTOR_ID = '99999999-9999-4999-8999-999999999999';
+    const DOCTOR_CALLER: AuthenticatedUser = {
+      ...NURSE_CALLER,
+      id: 'user-doctor',
+      email: 'doctor@example.com',
+      roleId: 'role-doctor',
+      roleCode: ROLE.DOCTOR,
+      permissionCodes: [PERMISSION.APPOINTMENT_CREATE_OWN],
+      doctor: { id: OWN_DOCTOR_ID, departmentId: DEPARTMENT_ID },
+    };
+    const prisma = buildPrisma();
+    const service = await buildService(prisma);
+
+    try {
+      await service.findSlots(DOCTOR_CALLER, {
+        doctorId: undefined,
+        departmentId: DEPARTMENT_ID,
+        date: FAR_FUTURE_DATE,
+        type: AppointmentType.CONSULTATION,
+      });
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(
+        ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+      );
+      expect((err as AppException).getStatus()).toBe(403);
+      expect((err as AppException).details).toEqual(
+        expect.objectContaining({
+          required: [
+            PERMISSION.SCHEDULE_READ_OWN,
+            PERMISSION.APPOINTMENT_CREATE_OWN,
+          ],
+          scope: SCOPE.OWN,
+          ownDoctorId: OWN_DOCTOR_ID,
+        }),
+      );
+    }
+  });
+
+  /**
+   * F15 — the realistic seeded DOCTOR caller holds
+   * `schedule.read.own-department` + `schedule.read.own` +
+   * `appointment.create.own`. The widest-scope-wins resolver promotes
+   * them to `OWN_DEPARTMENT` for the slot finder, so omitting `doctorId`
+   * (the F15 fan-out path) succeeds when the requested `departmentId`
+   * matches the caller's home. US-15.2 — DOCTOR in
+   * `OWN_PLUS_DEPT + dept` scope sees every doctor in their dept.
+   */
+  it('F15: DOCTOR with own-dept read scope fans out across own department', async () => {
+    const OWN_DOCTOR_ID = '99999999-9999-4999-8999-999999999999';
+    const DOCTOR_CALLER: AuthenticatedUser = {
+      ...NURSE_CALLER,
+      id: 'user-doctor-realistic',
+      email: 'doctor-realistic@example.com',
+      roleId: 'role-doctor',
+      roleCode: ROLE.DOCTOR,
+      permissionCodes: [
+        PERMISSION.APPOINTMENT_CREATE_OWN,
+        PERMISSION.SCHEDULE_READ_OWN,
+        PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+      ],
+      doctor: { id: OWN_DOCTOR_ID, departmentId: DEPARTMENT_ID },
+    };
+    const prisma = buildPrisma({
+      doctorSchedule: {
+        findMany: jest.fn().mockResolvedValue([
+          scheduleRow({
+            id: 'sched-doctor-realistic-1',
+            startAt: new Date('2099-06-15T09:00:00.000Z'),
+            endAt: new Date('2099-06-15T10:00:00.000Z'),
+          }),
+        ]),
+      },
+    });
+    const service = await buildService(prisma);
+
+    const slots = await service.findSlots(DOCTOR_CALLER, {
+      doctorId: undefined,
+      departmentId: DEPARTMENT_ID,
+      date: '2099-06-15',
+      type: AppointmentType.CONSULTATION,
+    });
+
+    expect(slots).toHaveLength(3);
+    expect(slots[0]).toEqual(
+      expect.objectContaining({
+        startAt: '2099-06-15T09:00:00.000Z',
+        doctorId: DOCTOR_ID,
+        doctorCode: DOCTOR_CODE,
+        doctorName: DOCTOR_DISPLAY_NAME,
+      }),
+    );
+  });
+
+  /**
+   * F15 — when the realistic DOCTOR caller probes a department OUTSIDE
+   * their home, the `OWN_DEPARTMENT` branch's dept gate fails. The
+   * caller falls through to `OWN`, which requires a pinned own
+   * `doctorId`. With `doctorId` omitted the fall-through also fails,
+   * and the resolver throws an `OWN_DEPARTMENT`-flavoured
+   * `INSUFFICIENT_PERMISSION_SCOPE` (dept-gate failure outranks
+   * doctor-gate failure as the widest applicable scope).
+   */
+  it('F15: DOCTOR probing a foreign dept WITHOUT pinning own doctorId is rejected with INSUFFICIENT_PERMISSION_SCOPE', async () => {
+    const OWN_DOCTOR_ID = '99999999-9999-4999-8999-999999999999';
+    const FOREIGN_DEPARTMENT_ID = 'bb1d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9';
+    const DOCTOR_CALLER: AuthenticatedUser = {
+      ...NURSE_CALLER,
+      id: 'user-doctor-realistic',
+      email: 'doctor-realistic@example.com',
+      roleId: 'role-doctor',
+      roleCode: ROLE.DOCTOR,
+      permissionCodes: [
+        PERMISSION.APPOINTMENT_CREATE_OWN,
+        PERMISSION.SCHEDULE_READ_OWN,
+        PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+      ],
+      doctor: { id: OWN_DOCTOR_ID, departmentId: DEPARTMENT_ID },
+    };
+    const prisma = buildPrisma();
+    const service = await buildService(prisma);
+
+    try {
+      await service.findSlots(DOCTOR_CALLER, {
+        doctorId: undefined,
+        departmentId: FOREIGN_DEPARTMENT_ID,
+        date: FAR_FUTURE_DATE,
+        type: AppointmentType.CONSULTATION,
+      });
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(
+        ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+      );
+      expect((err as AppException).details).toEqual(
+        expect.objectContaining({
+          required: [
+            PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+            PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+          ],
+          scope: SCOPE.OWN_DEPARTMENT,
+          requestedDepartmentId: FOREIGN_DEPARTMENT_ID,
+        }),
+      );
+    }
+  });
+
+  /**
+   * F15 — cross-coverage path: a realistic DOCTOR probing a NON-home
+   * department WITH their own `doctorId` pinned falls through from
+   * `OWN_DEPARTMENT` (dept gate fails) to `OWN` (doctor gate passes
+   * because the request pinned `caller.doctor.id`). This keeps the
+   * existing F09 cross-coverage workflow intact even though
+   * `schedule.read.own-department` would otherwise have rejected the
+   * foreign-dept probe.
+   */
+  it('F15: DOCTOR probing own doctorId in a non-home dept succeeds via OWN fall-through', async () => {
+    const OWN_DOCTOR_ID = DOCTOR_ID;
+    const FOREIGN_DEPARTMENT_ID = 'bb1d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9';
+    const DOCTOR_CALLER: AuthenticatedUser = {
+      ...NURSE_CALLER,
+      id: 'user-doctor-realistic',
+      email: 'doctor-realistic@example.com',
+      roleId: 'role-doctor',
+      roleCode: ROLE.DOCTOR,
+      permissionCodes: [
+        PERMISSION.APPOINTMENT_CREATE_OWN,
+        PERMISSION.SCHEDULE_READ_OWN,
+        PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+      ],
+      doctor: { id: OWN_DOCTOR_ID, departmentId: DEPARTMENT_ID },
+    };
+    const prisma = buildPrisma({
+      doctorSchedule: {
+        findMany: jest.fn().mockResolvedValue([
+          scheduleRow({
+            id: 'sched-doctor-cross-coverage',
+            departmentId: FOREIGN_DEPARTMENT_ID,
+            startAt: new Date('2099-06-15T09:00:00.000Z'),
+            endAt: new Date('2099-06-15T10:00:00.000Z'),
+          }),
+        ]),
+      },
+    });
+    const service = await buildService(prisma);
+
+    const slots = await service.findSlots(DOCTOR_CALLER, {
+      doctorId: OWN_DOCTOR_ID,
+      departmentId: FOREIGN_DEPARTMENT_ID,
+      date: '2099-06-15',
+      type: AppointmentType.CONSULTATION,
+    });
+
+    expect(slots).toHaveLength(3);
+    expect(slots[0].doctorId).toBe(OWN_DOCTOR_ID);
+    expect(slots[0].departmentId).toBe(FOREIGN_DEPARTMENT_ID);
+  });
+
+  /**
+   * F15 / US-15.3 — an MRO holding only `schedule.read.all` (no
+   * `appointment.create.*`) can use the slot finder as a read-only
+   * visibility tool. The scope guard short-circuits on
+   * `schedule.read.all` so no doctor / department narrowing applies.
+   */
+  it('F15: schedule.read.all caller (MRO) succeeds with no doctor/department narrowing', async () => {
+    const MRO_CALLER: AuthenticatedUser = {
+      ...NURSE_CALLER,
+      id: 'user-mro',
+      email: 'mro@example.com',
+      roleId: 'role-mro',
+      roleCode: ROLE.MEDICAL_RECORDS_OFFICER,
+      // MRO holds schedule.read.all but NOT appointment.create.*. Cross-
+      // dept too: departmentId is null in production for MRO.
+      departmentId: null,
+      permissionCodes: [PERMISSION.SCHEDULE_READ_ALL],
+      doctor: null,
+    };
+
+    const prisma = buildPrisma({
+      doctorSchedule: {
+        findMany: jest.fn().mockResolvedValue([
+          scheduleRow({
+            id: 'sched-mro-1',
+            startAt: new Date('2099-06-15T09:00:00.000Z'),
+            endAt: new Date('2099-06-15T10:00:00.000Z'),
+          }),
+        ]),
+      },
+    });
+    const service = await buildService(prisma);
+
+    const slots = await service.findSlots(MRO_CALLER, {
+      // Note: doctorId omitted to prove the MRO path also covers fan-out.
+      doctorId: undefined,
+      departmentId: DEPARTMENT_ID,
+      date: '2099-06-15',
+      type: AppointmentType.CONSULTATION,
+    });
+
+    expect(slots).toHaveLength(3);
+    expect(slots[0]).toEqual(
+      expect.objectContaining({
+        startAt: '2099-06-15T09:00:00.000Z',
+        doctorId: DOCTOR_ID,
+        doctorCode: DOCTOR_CODE,
+        doctorName: DOCTOR_DISPLAY_NAME,
+      }),
+    );
+  });
+
+  /**
+   * F15 — blocking appointments must be grouped by `doctorId` so a
+   * BOOKED appointment on doctor A does not block a candidate slot on
+   * doctor B in the multi-doctor fan-out. Asserts that the per-schedule
+   * grid step only sees its own doctor's blockers.
+   */
+  it('F15: blocking appointments are grouped by doctorId (cross-doctor isolation)', async () => {
+    const DOCTOR_A_ID = '11111111-1111-4111-8111-111111111111';
+    const DOCTOR_B_ID = '22222222-2222-4222-8222-222222222222';
+
+    const prisma = buildPrisma({
+      doctorSchedule: {
+        findMany: jest.fn().mockResolvedValue([
+          scheduleRow({
+            id: 'sched-a',
+            startAt: new Date('2099-06-15T09:00:00.000Z'),
+            endAt: new Date('2099-06-15T10:00:00.000Z'),
+            doctorId: DOCTOR_A_ID,
+            doctorCode: 'MD-AAA',
+            firstNameEn: 'Alice',
+            lastNameEn: 'Anderson',
+          }),
+          scheduleRow({
+            id: 'sched-b',
+            startAt: new Date('2099-06-15T09:00:00.000Z'),
+            endAt: new Date('2099-06-15T10:00:00.000Z'),
+            doctorId: DOCTOR_B_ID,
+            doctorCode: 'MD-BBB',
+            firstNameEn: 'Bob',
+            lastNameEn: 'Brown',
+          }),
+        ]),
+      },
+      appointment: {
+        // Block ONLY doctor A's 09:20–09:40 — doctor B's matching slot
+        // must remain open.
+        findMany: jest.fn().mockResolvedValue([
+          {
+            doctorId: DOCTOR_A_ID,
+            startAt: new Date('2099-06-15T09:20:00.000Z'),
+            endAt: new Date('2099-06-15T09:40:00.000Z'),
+          },
+        ]),
+      },
+    });
+    const service = await buildService(prisma);
+
+    const slots = await service.findSlots(NURSE_CALLER, {
+      doctorId: undefined,
+      departmentId: DEPARTMENT_ID,
+      date: '2099-06-15',
+      type: AppointmentType.CONSULTATION,
+    });
+
+    // Doctor A: 09:00–09:20 (kept), 09:20–09:40 (blocked), 09:40–10:00 (kept).
+    // Doctor B: all three slots kept — A's blocker does not affect B.
+    const slotsByDoctor = (id: string): typeof slots =>
+      slots.filter((s) => s.doctorId === id);
+
+    expect(slotsByDoctor(DOCTOR_A_ID).map((s) => s.startAt)).toEqual([
+      '2099-06-15T09:00:00.000Z',
+      '2099-06-15T09:40:00.000Z',
+    ]);
+    expect(slotsByDoctor(DOCTOR_B_ID).map((s) => s.startAt)).toEqual([
+      '2099-06-15T09:00:00.000Z',
+      '2099-06-15T09:20:00.000Z',
+      '2099-06-15T09:40:00.000Z',
+    ]);
   });
 });
 
