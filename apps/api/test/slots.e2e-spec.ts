@@ -42,7 +42,9 @@ import {
 import type { Server } from 'node:http';
 import request from 'supertest';
 
+import { PERMISSION } from '../src/auth/permissions';
 import { ROLE } from '../src/auth/roles';
+import { SCOPE } from '../src/auth/scope';
 import { AppModule } from '../src/app.module';
 import { ErrorCode } from '../src/common/errors';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
@@ -57,6 +59,14 @@ const NEXTAUTH_SECRET =
 const NURSE_EMAIL = 'slots-nurse-e2e@gmail.com';
 const ADMIN_EMAIL = 'slots-admin-e2e@gmail.com';
 const DOCTOR_USER_EMAIL = 'slots-doctor-e2e@gmail.com';
+// Second DOCTOR user in the SAME primary dept — used by the F09 cross-
+// doctor scope test to prove that even a same-department peer is rejected
+// when the caller holds only `.own` (the doctor-id must match exactly).
+const DOCTOR_PEER_USER_EMAIL = 'slots-doctor-peer-e2e@gmail.com';
+// Third DOCTOR user in a DIFFERENT dept — used by the cross-department
+// flavour of the same rejection (DOCTOR with `.own` probing a colleague
+// in another dept must STILL be rejected with the same code).
+const DOCTOR_FOREIGN_USER_EMAIL = 'slots-doctor-foreign-e2e@gmail.com';
 
 const DEPT_PRIMARY_NAME = 'Slots E2E Dept Primary';
 const DEPT_WITHOUT_TYPE_NAME = 'Slots E2E Dept Without Procedure';
@@ -78,7 +88,11 @@ interface Fixtures {
   nurse: UserWithRole;
   admin: UserWithRole;
   doctorUser: UserWithRole;
+  doctorPeerUser: UserWithRole;
+  doctorForeignUser: UserWithRole;
   doctor: Doctor;
+  doctorPeer: Doctor;
+  doctorForeign: Doctor;
   deptPrimary: Department;
   deptWithoutType: Department;
   superAdminId: string;
@@ -199,6 +213,39 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     roleCode: ROLE.DOCTOR,
   };
 
+  // Same-department peer DOCTOR — used to prove that even with matching
+  // department, a DOCTOR with `.own` is rejected when querying a different
+  // doctor's slots (the scope arm matches on `Doctor.id`, not `departmentId`).
+  const doctorPeerUser: UserWithRole = {
+    user: await prisma.user.create({
+      data: {
+        email: normalizeEmail(DOCTOR_PEER_USER_EMAIL),
+        firstNameEn: 'Slot',
+        lastNameEn: 'DoctorPeer',
+        roleId: doctorRole.id,
+        departmentId: deptPrimary.id,
+        createdBy: superAdmin.id,
+      },
+    }),
+    roleCode: ROLE.DOCTOR,
+  };
+
+  // Cross-department DOCTOR — same rejection family but probes a foreign
+  // department, mirroring the production cross-clinic case.
+  const doctorForeignUser: UserWithRole = {
+    user: await prisma.user.create({
+      data: {
+        email: normalizeEmail(DOCTOR_FOREIGN_USER_EMAIL),
+        firstNameEn: 'Slot',
+        lastNameEn: 'DoctorForeign',
+        roleId: doctorRole.id,
+        departmentId: deptWithoutType.id,
+        createdBy: superAdmin.id,
+      },
+    }),
+    roleCode: ROLE.DOCTOR,
+  };
+
   const stamp = Date.now().toString(36).slice(-6);
 
   // Post-Item-3: Doctor inherits its department from the linked User row
@@ -211,6 +258,28 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
       identificationNo: `slots-e2e-${stamp}`,
       medicalLicenseNo: `MED-SLOTS-${stamp}`,
       phone: '+66-2-000-9999',
+      createdBy: superAdmin.id,
+    },
+  });
+
+  const doctorPeer = await prisma.doctor.create({
+    data: {
+      userId: doctorPeerUser.user.id,
+      doctorCode: `SLOTS-E2E-${stamp}-P`,
+      identificationNo: `slots-e2e-${stamp}-p`,
+      medicalLicenseNo: `MED-SLOTS-${stamp}-P`,
+      phone: '+66-2-000-9998',
+      createdBy: superAdmin.id,
+    },
+  });
+
+  const doctorForeign = await prisma.doctor.create({
+    data: {
+      userId: doctorForeignUser.user.id,
+      doctorCode: `SLOTS-E2E-${stamp}-F`,
+      identificationNo: `slots-e2e-${stamp}-f`,
+      medicalLicenseNo: `MED-SLOTS-${stamp}-F`,
+      phone: '+66-2-000-9997',
       createdBy: superAdmin.id,
     },
   });
@@ -248,7 +317,11 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     nurse,
     admin,
     doctorUser,
+    doctorPeerUser,
+    doctorForeignUser,
     doctor,
+    doctorPeer,
+    doctorForeign,
     deptPrimary,
     deptWithoutType,
     superAdminId: superAdmin.id,
@@ -260,6 +333,8 @@ async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
     normalizeEmail(NURSE_EMAIL),
     normalizeEmail(ADMIN_EMAIL),
     normalizeEmail(DOCTOR_USER_EMAIL),
+    normalizeEmail(DOCTOR_PEER_USER_EMAIL),
+    normalizeEmail(DOCTOR_FOREIGN_USER_EMAIL),
   ];
 
   const users = await prisma.user.findMany({
@@ -739,6 +814,124 @@ describe('F07 — appointment types + slot finder e2e', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe(ErrorCode.VALIDATION_FAILED);
+  });
+
+  // ─── F09 — DOCTOR (.own) scope on /slots + /appointment-types ─────────────
+  //
+  // These tests lock in the F09 booking widening: DOCTOR (who holds
+  // `appointment.create.own`) MUST be able to call `GET /appointment-types`
+  // AND `GET /slots` for their own doctor row, and MUST be rejected with
+  // `INSUFFICIENT_PERMISSION_SCOPE` when probing any other doctor (same
+  // or different department). The NURSE same-department path is already
+  // covered by the happy-path test above (`STAFF: GET /slots returns
+  // chronological 20-min slots for CONSULTATION`).
+
+  describe('F09 — DOCTOR scope on /slots + /appointment-types', () => {
+    maybe('DOCTOR: GET /appointment-types returns the canonical 4-row catalog', async () => {
+      // Previously 403 — DOCTOR holds `.own` but the endpoint was gated on
+      // `.own-department` only. The F09 booker self-booking flow needs the
+      // catalog so both permission codes are now accepted (any-of).
+      const jwt = await jwtFor(fixtures!.doctorUser);
+
+      const res = await request(server)
+        .get('/api/v1/appointment-types')
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body).toHaveLength(4);
+
+      const codes = new Set(
+        res.body.map((row: { code: string }) => row.code),
+      );
+
+      expect(codes.has(AppointmentType.NEW_PATIENT_VISIT)).toBe(true);
+      expect(codes.has(AppointmentType.FOLLOW_UP)).toBe(true);
+      expect(codes.has(AppointmentType.CONSULTATION)).toBe(true);
+      expect(codes.has(AppointmentType.PROCEDURE)).toBe(true);
+    });
+
+    maybe('DOCTOR: GET /slots for their OWN doctorId returns slots (200)', async () => {
+      // Seed a schedule for the DOCTOR's own doctor row in a non-colliding
+      // window (15:00–16:00 — happy-path uses 09:00, blocker uses 11:00,
+      // cancelled uses 13:00).
+      const ownSchedule = await prisma.doctorSchedule.create({
+        data: {
+          doctorId: fixtures!.doctor.id,
+          departmentId: fixtures!.deptPrimary.id,
+          startAt: slotDate(15, 0),
+          endAt: slotDate(16, 0),
+          createdBy: fixtures!.superAdminId,
+        },
+      });
+
+      const jwt = await jwtFor(fixtures!.doctorUser);
+      const res = await request(server)
+        .get(
+          `/api/v1/slots?doctorId=${fixtures!.doctor.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+
+      const ownSlots = res.body.filter(
+        (s: { scheduleId: string }) => s.scheduleId === ownSchedule.id,
+      );
+
+      // 60-minute schedule stepped by CONSULTATION's 20-minute duration → 3 slots.
+      expect(ownSlots).toHaveLength(3);
+      expect(ownSlots[0].startAt).toBe(slotIso(15, 0));
+      expect(ownSlots[0].endAt).toBe(slotIso(15, 20));
+      expect(ownSlots[0].departmentId).toBe(fixtures!.deptPrimary.id);
+    });
+
+    maybe('DOCTOR: GET /slots for a SAME-DEPT foreign doctorId returns 403 INSUFFICIENT_PERMISSION_SCOPE', async () => {
+      // doctorPeer lives in the SAME deptPrimary. The scope arm matches
+      // strictly on `Doctor.id`, so even a same-dept peer must be rejected.
+      const jwt = await jwtFor(fixtures!.doctorUser);
+      const res = await request(server)
+        .get(
+          `/api/v1/slots?doctorId=${fixtures!.doctorPeer.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
+      expect(res.body.details).toEqual(
+        expect.objectContaining({
+          required: [PERMISSION.APPOINTMENT_CREATE_OWN],
+          scope: SCOPE.OWN,
+          requestedDoctorId: fixtures!.doctorPeer.id,
+          ownDoctorId: fixtures!.doctor.id,
+        }),
+      );
+    });
+
+    maybe('DOCTOR: GET /slots for a CROSS-DEPT foreign doctorId STILL returns 403 INSUFFICIENT_PERMISSION_SCOPE', async () => {
+      // doctorForeign lives in deptWithoutType (a different dept). Same
+      // rejection family — the `.own` arm checks the doctor id BEFORE it
+      // ever looks at the department filter, so probing a colleague in a
+      // different dept fails with the same error code as the same-dept
+      // case above.
+      const jwt = await jwtFor(fixtures!.doctorUser);
+      const res = await request(server)
+        .get(
+          `/api/v1/slots?doctorId=${fixtures!.doctorForeign.id}&departmentId=${fixtures!.deptWithoutType.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
+      expect(res.body.details).toEqual(
+        expect.objectContaining({
+          required: [PERMISSION.APPOINTMENT_CREATE_OWN],
+          scope: SCOPE.OWN,
+          requestedDoctorId: fixtures!.doctorForeign.id,
+          ownDoctorId: fixtures!.doctor.id,
+        }),
+      );
+    });
   });
 });
 

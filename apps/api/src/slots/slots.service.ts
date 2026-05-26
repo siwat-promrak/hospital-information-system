@@ -64,7 +64,7 @@ export class SlotsService {
     caller: AuthenticatedUser,
     args: FindSlotsArgs,
   ): Promise<SlotResult[]> {
-    await this.assertScope(caller, args.departmentId);
+    await this.assertScope(caller, args.doctorId, args.departmentId);
     await this.assertDoctorExists(args.doctorId);
     await this.assertDepartmentAllowsType(args.departmentId, args.type);
 
@@ -131,17 +131,26 @@ export class SlotsService {
   }
 
   /**
-   * Honor the scope encoded on the caller's
-   * `appointment.create.own-department` permission: a NURSE may only
-   * probe slots for doctors in their own department. ADMIN /
-   * MEDICAL_RECORDS_OFFICER / PHARMACY hit the route-permission guard
-   * (`403 INSUFFICIENT_PERMISSION`) before this method runs.
+   * Honor the scope encoded on the caller's `appointment.create.*`
+   * permission:
    *
-   * Future `appointment.create.all` callers (if the catalog grows one)
-   * would short-circuit on the `ALL` branch.
+   *   - `.all`            → future-proof short-circuit (no role holds
+   *                         this today).
+   *   - `.own-department` → NURSE: may only probe slots for doctors in
+   *                         their own department.
+   *   - `.own`            → DOCTOR self-booking: may only probe their
+   *                         own doctor row, regardless of the
+   *                         `departmentId` filter — cross-doctor
+   *                         requests return `INSUFFICIENT_PERMISSION_SCOPE`
+   *                         so probing for foreign doctors does not
+   *                         leak existence.
+   *
+   * ADMIN / MEDICAL_RECORDS_OFFICER / PHARMACY hit the route-permission
+   * guard (`403 INSUFFICIENT_PERMISSION`) before this method runs.
    */
   private async assertScope(
     caller: AuthenticatedUser,
+    doctorId: string,
     departmentId: string,
   ): Promise<void> {
     const scope = resolveAppointmentWriteScope(caller);
@@ -166,11 +175,38 @@ export class SlotsService {
       return;
     }
 
+    if (scope === SCOPE.OWN) {
+      if (!caller.doctor) {
+        throw AppException.forbidden(
+          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+          'DOCTOR user is missing a linked Doctor record.',
+        );
+      }
+
+      if (caller.doctor.id !== doctorId) {
+        throw AppException.forbidden(
+          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+          'DOCTOR users may only probe slots for themselves.',
+          {
+            required: [PERMISSION.APPOINTMENT_CREATE_OWN],
+            scope: SCOPE.OWN,
+            requestedDoctorId: doctorId,
+            ownDoctorId: caller.doctor.id,
+          },
+        );
+      }
+
+      return;
+    }
+
     throw AppException.forbidden(
       ErrorCode.INSUFFICIENT_PERMISSION,
       'Caller is missing the required permission(s).',
       {
-        required: [PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT],
+        required: [
+          PERMISSION.APPOINTMENT_CREATE_OWN,
+          PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+        ],
         held: [...caller.permissionCodes],
       },
     );
