@@ -597,7 +597,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
     );
     expect(queueIds).toContain(apptAId);
 
-    // 4. Nurse B books the pickup in dept B (visit 2).
+    // 4. Nurse B books the pickup in dept B (visit 2). Continuation
+    // bookings MUST use FOLLOW_UP or PROCEDURE.
     const apptBRes = await request(server)
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseBJwt}`)
@@ -606,7 +607,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorB.id,
         departmentId: f.deptB.id,
         scheduleId: f.scheduleB.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.FOLLOW_UP,
         startAt: scratchIso(2, 9),
         previousAppointmentId: apptAId,
       });
@@ -658,7 +659,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorB.id,
         departmentId: f.deptB.id,
         scheduleId: f.scheduleB.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.FOLLOW_UP,
         startAt: scratchIso(2, 10),
         previousAppointmentId: apptBId,
       });
@@ -850,6 +851,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     expect(referRes.status).toBe(200);
 
     // Try to continue in dept A again — does NOT match dept B.
+    // FOLLOW_UP because continuations must be FOLLOW_UP or PROCEDURE.
     const wrongDeptRes = await request(server)
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseAJwt}`)
@@ -858,7 +860,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.FOLLOW_UP,
         startAt: scratchIso(1, 15, 30),
         previousAppointmentId: apptRes.body.id,
       });
@@ -907,9 +909,134 @@ describe('F14 — appointment groups + referrals e2e', () => {
     );
   });
 
+  maybe('Continuation from COMPLETED prev with FOLLOW_UP → 201', async () => {
+    const f = fixtures!;
+    const nurseBJwt = await jwtFor(f.nurseB);
+    const doctorBJwt = await jwtFor(f.doctorBUser);
+
+    const apptRes = await request(server)
+      .post('/api/v1/appointments')
+      .set('Authorization', `Bearer ${nurseBJwt}`)
+      .send({
+        patientId: f.patient.id,
+        doctorId: f.doctorB.id,
+        departmentId: f.deptB.id,
+        scheduleId: f.scheduleB.id,
+        appointmentType: AppointmentType.CONSULTATION,
+        startAt: scratchIso(2, 11),
+      });
+    expect(apptRes.status).toBe(201);
+
+    const completeRes = await request(server)
+      .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
+      .set('Authorization', `Bearer ${doctorBJwt}`);
+    expect(completeRes.status).toBe(200);
+    expect(completeRes.body.status).toBe(AppointmentStatus.COMPLETED);
+
+    const continueRes = await request(server)
+      .post('/api/v1/appointments')
+      .set('Authorization', `Bearer ${nurseBJwt}`)
+      .send({
+        patientId: f.patient.id,
+        doctorId: f.doctorB.id,
+        departmentId: f.deptB.id,
+        scheduleId: f.scheduleB.id,
+        appointmentType: AppointmentType.FOLLOW_UP,
+        startAt: scratchIso(2, 11, 30),
+        previousAppointmentId: apptRes.body.id,
+      });
+    expect(continueRes.status).toBe(201);
+    expect(continueRes.body.appointmentGroupId).toEqual(expect.any(String));
+    expect(continueRes.body.visitNumber).toBe(2);
+  });
+
+  maybe('Continuation from BOOKED prev → 400 PREVIOUS_APPOINTMENT_NOT_COMPLETED', async () => {
+    const f = fixtures!;
+    const nurseBJwt = await jwtFor(f.nurseB);
+
+    const apptRes = await request(server)
+      .post('/api/v1/appointments')
+      .set('Authorization', `Bearer ${nurseBJwt}`)
+      .send({
+        patientId: f.patient.id,
+        doctorId: f.doctorB.id,
+        departmentId: f.deptB.id,
+        scheduleId: f.scheduleB.id,
+        appointmentType: AppointmentType.CONSULTATION,
+        startAt: scratchIso(2, 12),
+      });
+    expect(apptRes.status).toBe(201);
+
+    // prev is still BOOKED (no complete / cancel / refer fired) → 400.
+    const continueRes = await request(server)
+      .post('/api/v1/appointments')
+      .set('Authorization', `Bearer ${nurseBJwt}`)
+      .send({
+        patientId: f.patient.id,
+        doctorId: f.doctorB.id,
+        departmentId: f.deptB.id,
+        scheduleId: f.scheduleB.id,
+        appointmentType: AppointmentType.FOLLOW_UP,
+        startAt: scratchIso(2, 12, 30),
+        previousAppointmentId: apptRes.body.id,
+      });
+    expect(continueRes.status).toBe(400);
+    expect(continueRes.body.code).toBe(
+      ErrorCode.PREVIOUS_APPOINTMENT_NOT_COMPLETED,
+    );
+  });
+
+  maybe('Continuation with CONSULTATION type → 400 CONTINUATION_APPOINTMENT_TYPE_INVALID', async () => {
+    const f = fixtures!;
+    const nurseBJwt = await jwtFor(f.nurseB);
+    const doctorBJwt = await jwtFor(f.doctorBUser);
+
+    const apptRes = await request(server)
+      .post('/api/v1/appointments')
+      .set('Authorization', `Bearer ${nurseBJwt}`)
+      .send({
+        patientId: f.patient.id,
+        doctorId: f.doctorB.id,
+        departmentId: f.deptB.id,
+        scheduleId: f.scheduleB.id,
+        appointmentType: AppointmentType.CONSULTATION,
+        startAt: scratchIso(2, 13),
+      });
+    expect(apptRes.status).toBe(201);
+
+    const completeRes = await request(server)
+      .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
+      .set('Authorization', `Bearer ${doctorBJwt}`);
+    expect(completeRes.status).toBe(200);
+
+    const continueRes = await request(server)
+      .post('/api/v1/appointments')
+      .set('Authorization', `Bearer ${nurseBJwt}`)
+      .send({
+        patientId: f.patient.id,
+        doctorId: f.doctorB.id,
+        departmentId: f.deptB.id,
+        scheduleId: f.scheduleB.id,
+        appointmentType: AppointmentType.CONSULTATION,
+        startAt: scratchIso(2, 13, 30),
+        previousAppointmentId: apptRes.body.id,
+      });
+    expect(continueRes.status).toBe(400);
+    expect(continueRes.body.code).toBe(
+      ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
+    );
+    expect(continueRes.body.details?.allowedAppointmentTypes).toEqual(
+      expect.arrayContaining([
+        AppointmentType.FOLLOW_UP,
+        AppointmentType.PROCEDURE,
+      ]),
+    );
+  });
+
   maybe('GET /appointment-groups + detail returns chronological members', async () => {
     const f = fixtures!;
     const nurseAJwt = await jwtFor(f.nurseA);
+    const doctorAJwt = await jwtFor(f.doctorAUser);
 
     // Standalone first booking — no group yet.
     const firstRes = await request(server)
@@ -924,6 +1051,12 @@ describe('F14 — appointment groups + referrals e2e', () => {
         startAt: scratchIso(1, 17),
       });
     expect(firstRes.status).toBe(201);
+
+    // Continuations require the prev to be COMPLETED (F14 — Rule 1).
+    const completeRes = await request(server)
+      .post(`/api/v1/appointments/${firstRes.body.id}/complete`)
+      .set('Authorization', `Bearer ${doctorAJwt}`);
+    expect(completeRes.status).toBe(200);
 
     // Continuation → group is materialised.
     const secondRes = await request(server)
@@ -965,6 +1098,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
   maybe('Close — foreign doctor rejected with APPOINTMENT_GROUP_CLOSE_FORBIDDEN', async () => {
     const f = fixtures!;
     const nurseAJwt = await jwtFor(f.nurseA);
+    const doctorAJwt = await jwtFor(f.doctorAUser);
     const doctorBJwt = await jwtFor(f.doctorBUser);
 
     const firstRes = await request(server)
@@ -979,6 +1113,12 @@ describe('F14 — appointment groups + referrals e2e', () => {
         startAt: scratchIso(1, 9, 30),
       });
     expect(firstRes.status).toBe(201);
+
+    // Continuations require the prev to be COMPLETED (F14 — Rule 1).
+    const completeRes = await request(server)
+      .post(`/api/v1/appointments/${firstRes.body.id}/complete`)
+      .set('Authorization', `Bearer ${doctorAJwt}`);
+    expect(completeRes.status).toBe(200);
 
     const secondRes = await request(server)
       .post('/api/v1/appointments')

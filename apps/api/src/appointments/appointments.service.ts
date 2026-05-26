@@ -6,7 +6,7 @@
 import '../dayjs';
 
 import { Injectable } from '@nestjs/common';
-import { AppointmentStatus, Prisma } from '@prisma/client';
+import { AppointmentStatus, AppointmentType, Prisma } from '@prisma/client';
 import dayjs from 'dayjs';
 
 import { PERMISSION } from '../auth/permissions';
@@ -36,6 +36,8 @@ import {
   APPOINTMENT_DB_ORDER_DESC,
   APPOINTMENT_LIST_ORDER,
   BLOCKING_APPOINTMENT_STATUSES,
+  CONTINUATION_APPOINTMENT_TYPES,
+  type ContinuationAppointmentType,
 } from './appointments.const';
 import type { ListAppointmentsArgs } from './appointments.types';
 import type { CancelAppointmentDto } from './dto/cancel-appointment.dto';
@@ -155,6 +157,29 @@ export class AppointmentsService {
 
     const row = await this.prisma.$transaction(
       async (tx) => {
+        // 0. F14 — lazy group + referral fulfilment.
+        //
+        // When `previousAppointmentId` is set:
+        //   a. Load + validate prev (same patient, COMPLETED, not in a
+        //      closed group).
+        //   b. Reject continuations whose appointmentType is not in
+        //      `CONTINUATION_APPOINTMENT_TYPES` (FOLLOW_UP / PROCEDURE).
+        //   c. If prev has a group → take group_id + compute
+        //      visit_number = max(visitNumber) + 1.
+        //   d. If prev has no group → create a fresh group, back-link
+        //      prev (visit_number = 1), set new's visit_number = 2.
+        //   e. If prev carries a referral whose destination matches the
+        //      new row's department, set
+        //      `prev.referralFulfilledByAppointmentId = new.id` in the
+        //      same transaction. Mismatch → 400; already-fulfilled →
+        //      409.
+        //
+        // Runs BEFORE the (department, type) allowed-types check so a
+        // continuation booking surfaces the more specific
+        // `CONTINUATION_APPOINTMENT_TYPE_INVALID` rather than the
+        // generic `DEPARTMENT_TYPE_NOT_ALLOWED`.
+        const grouping = await this.resolveGrouping(tx, caller, dto);
+
         // 1. (department, type) is allowed — same lookup yields the
         // per-pair duration + booking-window bounds (F13).
         const allowed = await tx.departmentAppointmentType.findFirst({
@@ -355,21 +380,6 @@ export class AppointmentsService {
         //    permission error).
         this.assertCreateScope(caller, dto);
 
-        // 7. F14 — lazy group + referral fulfilment.
-        //
-        // When `previousAppointmentId` is set:
-        //   a. Load + validate prev (same patient, not CANCELLED).
-        //   b. If prev has a group → assert open + take group_id +
-        //      compute visit_number = max(visitNumber) + 1.
-        //   c. If prev has no group → create a fresh group, back-link
-        //      prev (visit_number = 1), set new's visit_number = 2.
-        //   d. If prev carries a referral whose destination matches the
-        //      new row's department, set
-        //      `prev.referralFulfilledByAppointmentId = new.id` in the
-        //      same transaction. Mismatch → 400; already-fulfilled →
-        //      409.
-        const grouping = await this.resolveGrouping(tx, caller, dto);
-
         const created = await tx.appointment.create({
           data: {
             patientId: dto.patientId,
@@ -478,6 +488,63 @@ export class AppointmentsService {
       );
     }
 
+    if (prev.status === AppointmentStatus.BOOKED) {
+      throw AppException.badRequest(
+        ErrorCode.PREVIOUS_APPOINTMENT_NOT_COMPLETED,
+        'Previous appointment must be COMPLETED before a continuation can be booked.',
+        { previousAppointmentId: prev.id, previousStatus: prev.status },
+      );
+    }
+
+    // Group-closed must fire before the continuation-type check so the
+    // FE gets the more specific "group is closed" diagnostic when both
+    // would otherwise apply.
+    if (prev.appointmentGroupId !== null) {
+      const closedGuard = await tx.appointmentGroup.findFirst({
+        where: { id: prev.appointmentGroupId },
+        select: { id: true, closedAt: true },
+      });
+
+      if (!closedGuard) {
+        throw AppException.notFound(
+          ErrorCode.APPOINTMENT_GROUP_NOT_FOUND,
+          'Appointment group not found.',
+        );
+      }
+
+      if (closedGuard.closedAt !== null) {
+        throw AppException.badRequest(
+          ErrorCode.APPOINTMENT_GROUP_CLOSED,
+          'Appointment group is closed — cannot attach further visits.',
+          {
+            groupId: closedGuard.id,
+            closedAt: closedGuard.closedAt.toISOString(),
+          },
+        );
+      }
+    }
+
+    // Continuation visits must be FOLLOW_UP or PROCEDURE — a new
+    // patient visit is by definition not a continuation, and a
+    // consultation is a fresh advisory. Surfaces as
+    // `400 CONTINUATION_APPOINTMENT_TYPE_INVALID`.
+    if (
+      !(CONTINUATION_APPOINTMENT_TYPES as readonly AppointmentType[]).includes(
+        dto.appointmentType,
+      )
+    ) {
+      throw AppException.badRequest(
+        ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
+        'Continuation visits must be FOLLOW_UP or PROCEDURE.',
+        {
+          previousAppointmentId: prev.id,
+          appointmentType: dto.appointmentType,
+          allowedAppointmentTypes:
+            CONTINUATION_APPOINTMENT_TYPES as readonly ContinuationAppointmentType[],
+        },
+      );
+    }
+
     // Referral consistency — when prev carries a referral, the new
     // department MUST match the destination AND the referral must not
     // already be fulfilled.
@@ -510,37 +577,19 @@ export class AppointmentsService {
       previousAppointmentToFulfillId = prev.id;
     }
 
-    // Existing group → attach as the next visit number.
+    // Existing group → attach as the next visit number. The group's
+    // open / closed status was already validated above (we only reach
+    // here when the group exists and `closedAt IS NULL`).
     if (prev.appointmentGroupId !== null) {
-      const group = await tx.appointmentGroup.findFirst({
-        where: { id: prev.appointmentGroupId },
-        select: { id: true, closedAt: true },
-      });
-
-      if (!group) {
-        throw AppException.notFound(
-          ErrorCode.APPOINTMENT_GROUP_NOT_FOUND,
-          'Appointment group not found.',
-        );
-      }
-
-      if (group.closedAt !== null) {
-        throw AppException.badRequest(
-          ErrorCode.APPOINTMENT_GROUP_CLOSED,
-          'Appointment group is closed — cannot attach further visits.',
-          { groupId: group.id, closedAt: group.closedAt.toISOString() },
-        );
-      }
-
       const max = await tx.appointment.aggregate({
-        where: { appointmentGroupId: group.id },
+        where: { appointmentGroupId: prev.appointmentGroupId },
         _max: { visitNumber: true },
       });
 
       const nextVisit = (max._max.visitNumber ?? 0) + 1;
 
       return {
-        groupId: group.id,
+        groupId: prev.appointmentGroupId,
         visitNumber: nextVisit,
         previousAppointmentToFulfillId,
       };

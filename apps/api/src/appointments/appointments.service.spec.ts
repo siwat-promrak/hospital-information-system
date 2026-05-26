@@ -404,3 +404,256 @@ describe('AppointmentsService.refer', () => {
     expect(callArgs.data.referredToDepartmentId).toBe(FOREIGN_DEPT_ID);
   });
 });
+
+/**
+ * Coverage for F14 — Rule 1 (prev must be COMPLETED with group still
+ * open) + Rule 2 (continuation visits must be FOLLOW_UP or PROCEDURE).
+ *
+ * The booking transaction is heavy on collaborators — `tx` exposes the
+ * department-type lookup, doctor + patient + schedule fetches, slot
+ * collision query, group-resolution, and the final insert. Each test
+ * stubs only the pieces it touches and lets the rest no-op.
+ */
+describe('AppointmentsService.create — continuation validation', () => {
+  const PATIENT_ID = 'patient-1';
+  const SCHEDULE_ID = 'sched-1';
+  const PREV_APPT_ID = 'prev-1';
+
+  // Far future so the past-startAt guard doesn't fire.
+  const SLOT_START = '2097-12-01T10:00:00.000Z';
+  const SCHEDULE_START = new Date('2097-12-01T09:00:00.000Z');
+  const SCHEDULE_END = new Date('2097-12-01T18:00:00.000Z');
+
+  interface PrevRow {
+    id: string;
+    patientId: string;
+    departmentId: string;
+    status: AppointmentStatus;
+    appointmentGroupId: string | null;
+    visitNumber: number | null;
+    referredToDepartmentId: string | null;
+    referralFulfilledByAppointmentId: string | null;
+  }
+
+  function buildPrismaMock(opts: {
+    prev: PrevRow | null;
+    onCreate?: jest.Mock;
+  }): PrismaService {
+    const createSpy =
+      opts.onCreate ??
+      jest.fn(async () =>
+        baseRow({
+          status: AppointmentStatus.BOOKED,
+          appointmentGroupId: 'group-new',
+          visitNumber: 2,
+        }),
+      );
+
+    return {
+      $transaction: async (
+        fn: (tx: unknown) => Promise<unknown>,
+        _options?: unknown,
+      ) => {
+        const tx = {
+          appointment: {
+            findFirst: async (args: {
+              where: { id?: string };
+            }): Promise<PrevRow | null> => {
+              if (args.where.id === PREV_APPT_ID) {
+                return opts.prev;
+              }
+
+              return null;
+            },
+            aggregate: async () => ({ _max: { visitNumber: 1 } }),
+            create: createSpy,
+            update: async () => baseRow(),
+          },
+          appointmentGroup: {
+            findFirst: async () => ({ id: 'group-1', closedAt: null }),
+            create: async () => ({ id: 'group-new' }),
+          },
+          departmentAppointmentType: {
+            findFirst: async () => ({
+              id: 'dat-1',
+              durationMinutes: 20,
+              bookingWindowStartMinute: null,
+              bookingWindowEndMinute: null,
+            }),
+          },
+          doctor: {
+            findFirst: async () => ({
+              id: DOC_HOME_ID,
+              user: { departmentId: HOME_DEPT_ID },
+            }),
+          },
+          patient: {
+            findFirst: async () => ({ id: PATIENT_ID }),
+          },
+          doctorSchedule: {
+            findFirst: async () => ({
+              id: SCHEDULE_ID,
+              startAt: SCHEDULE_START,
+              endAt: SCHEDULE_END,
+              breakStartAt: null,
+              breakEndAt: null,
+              acceptsBooking: true,
+            }),
+          },
+        };
+
+        return fn(tx);
+      },
+    } as unknown as PrismaService;
+  }
+
+  it('accepts a FOLLOW_UP continuation from a COMPLETED prev', async () => {
+    const createSpy = jest.fn(async () =>
+      baseRow({
+        status: AppointmentStatus.BOOKED,
+        appointmentGroupId: 'group-new',
+        visitNumber: 2,
+      }),
+    );
+
+    const prisma = buildPrismaMock({
+      prev: {
+        id: PREV_APPT_ID,
+        patientId: PATIENT_ID,
+        departmentId: HOME_DEPT_ID,
+        status: AppointmentStatus.COMPLETED,
+        appointmentGroupId: null,
+        visitNumber: null,
+        referredToDepartmentId: null,
+        referralFulfilledByAppointmentId: null,
+      },
+      onCreate: createSpy,
+    });
+    const service = new AppointmentsService(prisma);
+
+    const result = await service.create(DOCTOR_USER, {
+      patientId: PATIENT_ID,
+      doctorId: DOC_HOME_ID,
+      departmentId: HOME_DEPT_ID,
+      scheduleId: SCHEDULE_ID,
+      appointmentType: AppointmentType.FOLLOW_UP,
+      startAt: SLOT_START,
+      previousAppointmentId: PREV_APPT_ID,
+    });
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(result.appointmentGroupId).toBe('group-new');
+    expect(result.visitNumber).toBe(2);
+  });
+
+  it('rejects a continuation from a BOOKED prev with PREVIOUS_APPOINTMENT_NOT_COMPLETED', async () => {
+    const prisma = buildPrismaMock({
+      prev: {
+        id: PREV_APPT_ID,
+        patientId: PATIENT_ID,
+        departmentId: HOME_DEPT_ID,
+        status: AppointmentStatus.BOOKED,
+        appointmentGroupId: null,
+        visitNumber: null,
+        referredToDepartmentId: null,
+        referralFulfilledByAppointmentId: null,
+      },
+    });
+    const service = new AppointmentsService(prisma);
+
+    try {
+      await service.create(DOCTOR_USER, {
+        patientId: PATIENT_ID,
+        doctorId: DOC_HOME_ID,
+        departmentId: HOME_DEPT_ID,
+        scheduleId: SCHEDULE_ID,
+        appointmentType: AppointmentType.FOLLOW_UP,
+        startAt: SLOT_START,
+        previousAppointmentId: PREV_APPT_ID,
+      });
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(
+        ErrorCode.PREVIOUS_APPOINTMENT_NOT_COMPLETED,
+      );
+      expect((err as AppException).getStatus()).toBe(400);
+    }
+  });
+
+  it('rejects a NEW_PATIENT_VISIT continuation with CONTINUATION_APPOINTMENT_TYPE_INVALID', async () => {
+    const prisma = buildPrismaMock({
+      prev: {
+        id: PREV_APPT_ID,
+        patientId: PATIENT_ID,
+        departmentId: HOME_DEPT_ID,
+        status: AppointmentStatus.COMPLETED,
+        appointmentGroupId: null,
+        visitNumber: null,
+        referredToDepartmentId: null,
+        referralFulfilledByAppointmentId: null,
+      },
+    });
+    const service = new AppointmentsService(prisma);
+
+    try {
+      await service.create(DOCTOR_USER, {
+        patientId: PATIENT_ID,
+        doctorId: DOC_HOME_ID,
+        departmentId: HOME_DEPT_ID,
+        scheduleId: SCHEDULE_ID,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+        startAt: SLOT_START,
+        previousAppointmentId: PREV_APPT_ID,
+      });
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(
+        ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
+      );
+      expect((err as AppException).getStatus()).toBe(400);
+      expect((err as AppException).details?.allowedAppointmentTypes).toEqual(
+        expect.arrayContaining([
+          AppointmentType.FOLLOW_UP,
+          AppointmentType.PROCEDURE,
+        ]),
+      );
+    }
+  });
+
+  it('rejects a CONSULTATION continuation with CONTINUATION_APPOINTMENT_TYPE_INVALID', async () => {
+    const prisma = buildPrismaMock({
+      prev: {
+        id: PREV_APPT_ID,
+        patientId: PATIENT_ID,
+        departmentId: HOME_DEPT_ID,
+        status: AppointmentStatus.COMPLETED,
+        appointmentGroupId: null,
+        visitNumber: null,
+        referredToDepartmentId: null,
+        referralFulfilledByAppointmentId: null,
+      },
+    });
+    const service = new AppointmentsService(prisma);
+
+    try {
+      await service.create(DOCTOR_USER, {
+        patientId: PATIENT_ID,
+        doctorId: DOC_HOME_ID,
+        departmentId: HOME_DEPT_ID,
+        scheduleId: SCHEDULE_ID,
+        appointmentType: AppointmentType.CONSULTATION,
+        startAt: SLOT_START,
+        previousAppointmentId: PREV_APPT_ID,
+      });
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(
+        ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
+      );
+      expect((err as AppException).getStatus()).toBe(400);
+    }
+  });
+});

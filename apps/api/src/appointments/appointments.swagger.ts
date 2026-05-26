@@ -138,6 +138,31 @@ const PREVIOUS_APPOINTMENT_CANCELLED_EXAMPLE = {
   message: 'Cannot continue from a cancelled appointment.',
 };
 
+const PREVIOUS_APPOINTMENT_NOT_COMPLETED_EXAMPLE = {
+  statusCode: 400,
+  code: ErrorCode.PREVIOUS_APPOINTMENT_NOT_COMPLETED,
+  message:
+    'Previous appointment must be COMPLETED before a continuation can be booked.',
+  details: {
+    previousAppointmentId: '7c8e2a10-1234-5678-9abc-deadbeefcafe',
+    previousStatus: AppointmentStatus.BOOKED,
+  },
+};
+
+const CONTINUATION_APPOINTMENT_TYPE_INVALID_EXAMPLE = {
+  statusCode: 400,
+  code: ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
+  message: 'Continuation visits must be FOLLOW_UP or PROCEDURE.',
+  details: {
+    previousAppointmentId: '7c8e2a10-1234-5678-9abc-deadbeefcafe',
+    appointmentType: AppointmentType.CONSULTATION,
+    allowedAppointmentTypes: [
+      AppointmentType.FOLLOW_UP,
+      AppointmentType.PROCEDURE,
+    ],
+  },
+};
+
 const APPOINTMENT_GROUP_CLOSED_EXAMPLE = {
   statusCode: 400,
   code: ErrorCode.APPOINTMENT_GROUP_CLOSED,
@@ -202,7 +227,10 @@ export function ApiCreateAppointment(): MethodDecorator & ClassDecorator {
         '`DEPARTMENT_TYPE_NOT_ALLOWED`, `DOCTOR_DEPARTMENT_MISMATCH`, ' +
         '`SCHEDULE_NOT_FOUND_FOR_BOOKING`, `SCHEDULE_NOT_BOOKABLE`, ' +
         '`SLOT_OUTSIDE_SCHEDULE`, `SLOT_OVERLAPS_BREAK`, ' +
-        '`PREVIOUS_APPOINTMENT_CANCELLED`, `APPOINTMENT_GROUP_CLOSED`, ' +
+        '`PREVIOUS_APPOINTMENT_CANCELLED`, ' +
+        '`PREVIOUS_APPOINTMENT_NOT_COMPLETED`, ' +
+        '`CONTINUATION_APPOINTMENT_TYPE_INVALID`, ' +
+        '`APPOINTMENT_GROUP_CLOSED`, ' +
         '`APPOINTMENT_GROUP_PATIENT_MISMATCH`, or ' +
         '`REFERRAL_DEPARTMENT_MISMATCH`.',
       schema: {
@@ -216,6 +244,8 @@ export function ApiCreateAppointment(): MethodDecorator & ClassDecorator {
           { example: SLOT_OUTSIDE_SCHEDULE_EXAMPLE },
           { example: SLOT_OVERLAPS_BREAK_EXAMPLE },
           { example: PREVIOUS_APPOINTMENT_CANCELLED_EXAMPLE },
+          { example: PREVIOUS_APPOINTMENT_NOT_COMPLETED_EXAMPLE },
+          { example: CONTINUATION_APPOINTMENT_TYPE_INVALID_EXAMPLE },
           { example: APPOINTMENT_GROUP_CLOSED_EXAMPLE },
           { example: APPOINTMENT_GROUP_PATIENT_MISMATCH_EXAMPLE },
           { example: REFERRAL_DEPARTMENT_MISMATCH_EXAMPLE },
