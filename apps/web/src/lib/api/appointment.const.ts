@@ -17,6 +17,11 @@ export const APPOINTMENT_API_PATH = BE_PATH.APPOINTMENTS;
 export const APPOINTMENT_API_PATH_BUILDER = {
   detail: (id: string) => BE_PATH_BUILDER.appointmentDetail(id),
   cancel: (id: string) => BE_PATH_BUILDER.appointmentCancel(id),
+  // F14 — doctor-only "this visit is done" toggle. No body.
+  complete: (id: string) => BE_PATH_BUILDER.appointmentComplete(id),
+  // F14 — doctor-only "send to another department" action. Body
+  // `{ toDepartmentId }`.
+  refer: (id: string) => BE_PATH_BUILDER.appointmentRefer(id),
 } as const;
 
 export const APPOINTMENT_QUERY_PARAM = {
@@ -34,6 +39,20 @@ export const APPOINTMENT_QUERY_PARAM = {
   STATUS: "status",
   /** BE-bound — sort direction for `startAt`. `asc` (default) or `desc`. */
   ORDER: "order",
+  /**
+   * F14 — restrict to appointments whose `referredToDepartmentId` matches
+   * AND that are still pending (no follow-up booked yet). Powers the
+   * referrals pickup queue page; the BE auto-narrows to caller-readable
+   * rows on top so a NURSE only sees referrals their own department can
+   * act on.
+   */
+  PENDING_REFERRAL_TO_DEPARTMENT_ID: "pendingReferralToDepartmentId",
+  /**
+   * F14 — booking-wizard continuation step pre-fill. Surfaced as a URL
+   * param so the referrals queue's "Book follow-up" link can deep-link
+   * straight into the wizard with the prior visit pre-supplied.
+   */
+  PREVIOUS_APPOINTMENT_ID: "previousAppointmentId",
 } as const;
 
 export type AppointmentQueryParam =

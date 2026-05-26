@@ -64,6 +64,13 @@ export interface AppointmentDepartmentRef {
 /**
  * Returned by `POST /appointments` (201), `GET /appointments/:id` (200),
  * and rows in `GET /appointments` (200, paginated).
+ *
+ * F14 referral fields (`previousAppointmentId`, `referredToDepartmentId`,
+ * `referredAt`, `referralFulfilledByAppointmentId`, `appointmentGroupId`)
+ * are nullable: appointments booked without a referral / continuation
+ * carry `null` for all of them. The detail page shows the "Close case"
+ * button only when `appointmentGroupId` is set AND the appointment is
+ * the latest non-cancelled visit in the group.
  */
 export interface AppointmentResponse {
   id: string;
@@ -82,6 +89,16 @@ export interface AppointmentResponse {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** F14 — non-null when this row continues a prior visit. */
+  previousAppointmentId: string | null;
+  /** F14 — non-null when this row is the destination of a referral. */
+  referredToDepartmentId: string | null;
+  /** F14 — ISO 8601 UTC; non-null iff the appointment has a pending or fulfilled referral. */
+  referredAt: string | null;
+  /** F14 — set once a downstream visit fulfils the referral. */
+  referralFulfilledByAppointmentId: string | null;
+  /** F14 — non-null once the appointment is part of a multi-visit group. */
+  appointmentGroupId: string | null;
   patient: AppointmentPatientRef;
   doctor: AppointmentDoctorRef;
   department: AppointmentDepartmentRef;
@@ -100,6 +117,17 @@ export interface CreateAppointmentBody {
   appointmentType: AppointmentType;
   startAt: string;
   reason?: string | null;
+  /**
+   * F14 — link this booking to a prior visit. The BE infers the group
+   * (joins the prior visit's group, or opens a new one when the prior
+   * visit is ungrouped) and copies `appointmentGroupId` onto the row.
+   * Surfaces in two flows:
+   *   1. The booking wizard's "Is this a continuation?" step, when the
+   *      front desk picks an existing visit.
+   *   2. The referrals queue's "Book follow-up" link, which pre-fills
+   *      the picked visit via `?previousAppointmentId=…`.
+   */
+  previousAppointmentId?: string | null;
 }
 
 /**

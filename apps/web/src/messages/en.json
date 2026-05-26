@@ -130,7 +130,9 @@
       "medicalRecords": "Medical records",
       "appointments": "Appointments",
       "appointmentsNew": "Book appointment",
-      "patientsNew": "Register patient"
+      "patientsNew": "Register patient",
+      "appointmentGroups": "Cases",
+      "referrals": "Referrals"
     }
   },
   "Breadcrumb": {
@@ -146,7 +148,9 @@
     "appointments": "Appointments",
     "appointmentsNew": "New booking",
     "patients": "Patients",
-    "patientsNew": "Register"
+    "patientsNew": "Register",
+    "appointmentGroups": "Cases",
+    "referrals": "Referrals"
   },
   "UserMenu": {
     "openMenu": "Open user menu",
@@ -174,7 +178,10 @@
       "signedOut": "You have been signed out.",
       "patientCreated": "Patient registered (HN {hn}).",
       "appointmentCreated": "Appointment booked.",
-      "appointmentCancelled": "Appointment cancelled."
+      "appointmentCancelled": "Appointment cancelled.",
+      "appointmentCompleted": "Appointment marked as completed.",
+      "appointmentReferred": "Appointment referred to another department.",
+      "appointmentGroupClosed": "Case closed."
     },
     "Errors": {
       "generic": "Something went wrong. Please try again.",
@@ -196,7 +203,15 @@
       "appointmentAlreadyCompleted": "This appointment has already been completed and can no longer be cancelled.",
       "departmentTypeNotAllowed": "This appointment type is not offered by the selected department.",
       "doctorDepartmentMismatch": "The selected doctor is not in this department.",
-      "outsideBookingWindow": "This time falls outside the booking window for this appointment type."
+      "outsideBookingWindow": "This time falls outside the booking window for this appointment type.",
+      "previousAppointmentCancelled": "The prior visit has been cancelled — pick another or skip the continuation step.",
+      "appointmentGroupClosed": "This case has been closed and cannot accept new appointments.",
+      "appointmentGroupPatientMismatch": "The prior visit belongs to a different patient.",
+      "referralDepartmentMismatch": "The picked department doesn't match the referral target.",
+      "referralAlreadyFulfilled": "This referral has already been fulfilled by another appointment.",
+      "appointmentAlreadyReferred": "This appointment has already been referred to another department.",
+      "appointmentGroupCloseForbidden": "Only the most recent visit's doctor can close this case.",
+      "appointmentNotBooked": "Action only available on booked appointments."
     }
   },
   "Directory": {
@@ -398,7 +413,26 @@
       "cancelDismiss": "Keep appointment",
       "alreadyCancelled": "Already cancelled — no further action needed.",
       "alreadyCompleted": "Already completed — cannot be cancelled.",
-      "notFound": "Appointment not found."
+      "notFound": "Appointment not found.",
+      "completeAction": "Mark as completed",
+      "completeDialogTitle": "Mark this appointment as completed?",
+      "completeDialogBody": "The appointment will be locked as COMPLETED. Use Refer to send the patient to another department, or Close case when there's no follow-up.",
+      "completeConfirm": "Mark as completed",
+      "completeDismiss": "Cancel",
+      "referAction": "Refer to another department",
+      "referDialogTitle": "Refer this appointment",
+      "referDialogBody": "Pick the destination department. The receiving department will see this patient in their referrals pickup queue.",
+      "referTargetLabel": "Destination department",
+      "referConfirm": "Refer",
+      "referDismiss": "Cancel",
+      "closeCaseAction": "Close case",
+      "closeCaseDialogTitle": "Close this case?",
+      "closeCaseDialogBody": "The case will be marked as closed. New continuation bookings against this case will be rejected.",
+      "closeCaseConfirm": "Close case",
+      "closeCaseDismiss": "Cancel",
+      "groupBadge": "Visit {visitNumber} in case",
+      "referredBadge": "Referred to {departmentName}",
+      "viewCaseLink": "View case timeline"
     },
     "Errors": {
       "forbidden": "You don't have permission to view appointments.",
@@ -474,8 +508,31 @@
     "subtitle": "Pick a patient, a doctor, an appointment type, and an open slot.",
     "stepLabels": {
       "patient": "Patient",
+      "continuation": "Continuation",
       "slot": "Doctor + slot",
       "confirm": "Confirm"
+    },
+    "Continuation": {
+      "title": "Is this a continuation of a prior visit?",
+      "subtitle": "Linking a follow-up to its prior visit groups them under one case so the timeline stays intact.",
+      "optionNo": "No, this is a new visit",
+      "optionYes": "Yes, continues a prior visit",
+      "pickerTitle": "Pick the prior visit",
+      "pickerEmpty": "No prior visits on file for this patient.",
+      "pickerLoading": "Loading prior visits…",
+      "rowDateLabel": "Date",
+      "rowDepartmentLabel": "Department",
+      "rowDoctorLabel": "Doctor",
+      "rowVisitLabel": "Visit #{visitNumber}",
+      "rowUngrouped": "Standalone visit",
+      "selectedSummary": "Linked to visit on {date} · {department} · {doctor}",
+      "back": "Back",
+      "next": "Continue",
+      "loadMore": "Show more",
+      "showingCount": "Showing {loaded} of {total} prior visits",
+      "errorRequired": "Pick a prior visit before continuing.",
+      "prefilledNotice": "Pre-filled from the referrals queue.",
+      "clearSelection": "Clear selection"
     },
     "Patient": {
       "searchLabel": "Search patients",
@@ -536,7 +593,64 @@
       "missingType": "Pick an appointment type.",
       "missingDate": "Pick a date.",
       "missingReason": "PROCEDURE bookings require a reason.",
+      "missingContinuation": "Pick a prior visit or switch to \"No, this is a new visit\".",
       "generic": "Failed to book the appointment. Please try again."
+    }
+  },
+  "AppointmentGroups": {
+    "title": "Cases",
+    "subtitle": "Multi-visit care plans grouped by patient. Each case bundles the prior visits, the referrals between departments, and the close action.",
+    "empty": "No cases match the current filters.",
+    "filters": {
+      "status": "Status",
+      "statusOpen": "Open",
+      "statusClosed": "Closed",
+      "statusAll": "All",
+      "patient": "Patient"
+    },
+    "List": {
+      "visits": "{count, plural, =0 {No visits} =1 {# visit} other {# visits}}",
+      "openedAt": "Opened",
+      "closedAt": "Closed",
+      "latestVisit": "Latest visit",
+      "viewDetail": "View case"
+    },
+    "Detail": {
+      "back": "Back to cases",
+      "title": "Case timeline",
+      "openedAt": "Opened",
+      "closedAt": "Closed",
+      "statusOpen": "Open",
+      "statusClosed": "Closed",
+      "memberCount": "{count, plural, =0 {No visits} =1 {# visit} other {# visits}}",
+      "visitNumber": "Visit #{visitNumber}",
+      "departmentLabel": "Department",
+      "doctorLabel": "Doctor",
+      "scheduledFor": "Scheduled",
+      "referredToBadge": "Referred to {departmentName}",
+      "fulfilledBadge": "Fulfilled by visit #{visitNumber}",
+      "viewAppointment": "Open appointment",
+      "notFound": "Case not found."
+    },
+    "Errors": {
+      "forbidden": "You don't have permission to view cases."
+    }
+  },
+  "Referrals": {
+    "title": "Referrals pickup queue",
+    "subtitle": "Patients referred to your department from another care team. Pick one to start the follow-up booking.",
+    "empty": "No pending referrals to your department.",
+    "List": {
+      "referredAt": "Referred",
+      "patientLabel": "Patient",
+      "sourceDepartment": "From",
+      "sourceDoctor": "By",
+      "hnLabel": "HN",
+      "viewAppointment": "Open source visit",
+      "bookFollowUp": "Book follow-up"
+    },
+    "Errors": {
+      "forbidden": "You don't have permission to view referrals."
     }
   }
 }

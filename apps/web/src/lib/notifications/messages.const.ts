@@ -20,6 +20,7 @@
  */
 
 import { K } from "@/i18n/keys.generated";
+import { APPOINTMENT_GROUP_ERROR_CODE } from "@/lib/api/appointment-group.const";
 import { APPOINTMENT_ERROR_CODE } from "@/lib/api/appointment.const";
 import { PATIENT_ERROR_CODE } from "@/lib/api/patient.const";
 import { SCHEDULE_ERROR_CODE } from "@/lib/api/schedule.const";
@@ -36,6 +37,10 @@ export const SNACKBAR_SUCCESS_KEY = {
   PATIENT_CREATED: "patientCreated",
   APPOINTMENT_CREATED: "appointmentCreated",
   APPOINTMENT_CANCELLED: "appointmentCancelled",
+  // F14 success toasts
+  APPOINTMENT_COMPLETED: "appointmentCompleted",
+  APPOINTMENT_REFERRED: "appointmentReferred",
+  APPOINTMENT_GROUP_CLOSED: "appointmentGroupClosed",
 } as const;
 
 export type SnackbarSuccessKey =
@@ -92,6 +97,24 @@ export const ERROR_CODE_TO_KEY: Readonly<
     K.Snackbar.Errors.doctorDepartmentMismatch,
   [APPOINTMENT_ERROR_CODE.APPOINTMENT_OUTSIDE_BOOKING_WINDOW]:
     K.Snackbar.Errors.outsideBookingWindow,
+
+  // Appointment groups + referrals (F14)
+  [APPOINTMENT_GROUP_ERROR_CODE.PREVIOUS_APPOINTMENT_CANCELLED]:
+    K.Snackbar.Errors.previousAppointmentCancelled,
+  [APPOINTMENT_GROUP_ERROR_CODE.APPOINTMENT_GROUP_CLOSED]:
+    K.Snackbar.Errors.appointmentGroupClosed,
+  [APPOINTMENT_GROUP_ERROR_CODE.APPOINTMENT_GROUP_PATIENT_MISMATCH]:
+    K.Snackbar.Errors.appointmentGroupPatientMismatch,
+  [APPOINTMENT_GROUP_ERROR_CODE.REFERRAL_DEPARTMENT_MISMATCH]:
+    K.Snackbar.Errors.referralDepartmentMismatch,
+  [APPOINTMENT_GROUP_ERROR_CODE.REFERRAL_ALREADY_FULFILLED]:
+    K.Snackbar.Errors.referralAlreadyFulfilled,
+  [APPOINTMENT_GROUP_ERROR_CODE.APPOINTMENT_ALREADY_REFERRED]:
+    K.Snackbar.Errors.appointmentAlreadyReferred,
+  [APPOINTMENT_GROUP_ERROR_CODE.APPOINTMENT_GROUP_CLOSE_FORBIDDEN]:
+    K.Snackbar.Errors.appointmentGroupCloseForbidden,
+  [APPOINTMENT_GROUP_ERROR_CODE.APPOINTMENT_NOT_BOOKED]:
+    K.Snackbar.Errors.appointmentNotBooked,
 };
 
 /** Single key for the generic-error path — defined once so the hook + tests share it. */
