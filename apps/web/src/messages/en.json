@@ -52,6 +52,11 @@
       "CONSULTATION": "Consultation",
       "PROCEDURE": "Procedure"
     },
+    "AppointmentTypeWindow": {
+      "range": "{start} – {end}",
+      "beforeOnly": "Before {end} only",
+      "fromOnly": "From {start}"
+    },
     "AppointmentStatus": {
       "BOOKED": "Booked",
       "CANCELLED": "Cancelled",
@@ -190,7 +195,8 @@
       "appointmentAlreadyCancelled": "This appointment has already been cancelled.",
       "appointmentAlreadyCompleted": "This appointment has already been completed and can no longer be cancelled.",
       "departmentTypeNotAllowed": "This appointment type is not offered by the selected department.",
-      "doctorDepartmentMismatch": "The selected doctor is not in this department."
+      "doctorDepartmentMismatch": "The selected doctor is not in this department.",
+      "outsideBookingWindow": "This time falls outside the booking window for this appointment type."
     }
   },
   "Directory": {

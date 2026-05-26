@@ -7,7 +7,6 @@ import { PERMISSION_CODE } from "@/auth/permissions";
 import BookingWizard from "@/components/appointment/BookingWizard";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
-import { listAppointmentTypes } from "@/lib/api/appointment-type.api";
 import { listDepartments } from "@/lib/api/department.api";
 import { fetchDoctorPickerSeed } from "@/lib/api/doctor.actions";
 import { DEFAULT_PAGE, MAX_PAGE_SIZE } from "@/lib/api/pagination.const";
@@ -74,11 +73,17 @@ export default async function BookingWizardPage({
   // so cross-coverage doctors don't appear.
   const callerDepartmentId = session.user.departmentId ?? undefined;
 
-  // Any 403/404 from the three BE fetches below bubbles up to
+  // Any 403/404 from the two BE fetches below bubbles up to
   // `(app)/error.tsx`, which renders the right friendly card based on
   // the `ApiError.digest` prefix — no per-page try/catch needed.
-  const [appointmentTypes, departments, doctorSeed] = await Promise.all([
-    listAppointmentTypes(),
+  //
+  // Note: the appointment-type catalog used to be a third SSR fetch
+  // here, but F13 moved per-pair duration + booking-window onto the
+  // per-department endpoint. The wizard now fetches
+  // `GET /departments/:id/appointment-types` client-side once a
+  // department is picked, so the SSR shape no longer needs the global
+  // label catalog.
+  const [departments, doctorSeed] = await Promise.all([
     listDepartments({ page: DEFAULT_PAGE, pageSize: MAX_PAGE_SIZE }),
     fetchDoctorPickerSeed({ departmentId: callerDepartmentId }),
   ]);
@@ -94,7 +99,6 @@ export default async function BookingWizardPage({
         </Typography>
       </Stack>
       <BookingWizard
-        appointmentTypes={appointmentTypes}
         departments={departments.data}
         doctorSeed={doctorSeed}
         doctorScopeDepartmentId={callerDepartmentId}

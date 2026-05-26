@@ -52,6 +52,11 @@
       "CONSULTATION": "ปรึกษา",
       "PROCEDURE": "หัตถการ"
     },
+    "AppointmentTypeWindow": {
+      "range": "{start} – {end}",
+      "beforeOnly": "ก่อน {end} เท่านั้น",
+      "fromOnly": "ตั้งแต่ {start}"
+    },
     "AppointmentStatus": {
       "BOOKED": "นัดแล้ว",
       "CANCELLED": "ยกเลิก",
@@ -190,7 +195,8 @@
       "appointmentAlreadyCancelled": "นัดหมายนี้ถูกยกเลิกไปแล้ว",
       "appointmentAlreadyCompleted": "นัดหมายนี้เสร็จสิ้นแล้ว ไม่สามารถยกเลิกได้",
       "departmentTypeNotAllowed": "แผนกนี้ไม่ให้บริการประเภทนัดหมายนี้",
-      "doctorDepartmentMismatch": "แพทย์ที่เลือกไม่ได้อยู่ในแผนกนี้"
+      "doctorDepartmentMismatch": "แพทย์ที่เลือกไม่ได้อยู่ในแผนกนี้",
+      "outsideBookingWindow": "ช่วงเวลานี้อยู่นอกช่วงเวลาที่เปิดจองสำหรับประเภทนัดหมายนี้"
     }
   },
   "Directory": {
