@@ -31,7 +31,13 @@
  * `schedule.read.own-department`, `appointment.delete.own`.
  *
  * `medical_records` deliberately omits a delete permission — records are
- * permanent (no soft-delete column in the schema either).
+ * permanent (no soft-delete column in the schema either). After F17 the
+ * family holds exactly one code (`medical_records.read.all`) because
+ * creation and mutation have moved inside the appointment-action endpoints.
+ *
+ * ── Catalog totals (F17) ─────────────────────────────────────────────────
+ * 33 permissions (was 35): user 4 + role 4 + appointment 9 + schedule 9 +
+ * patient 4 + doctor 1 + doctor_workspace 1 + medical_records 1.
  */
 
 export const PERMISSION = {
@@ -78,11 +84,12 @@ export const PERMISSION = {
   // ── Doctor (1) ─ catalog lookups are global, read-only ──────────────
   DOCTOR_READ: 'doctor.read',
 
-  // ── Medical Records (4) ─ NO delete (records are permanent) ─────────
+  // ── Doctor Workspace (1) ─ FE nav/page gate; DOCTOR-only ─────────────
+  DOCTOR_WORKSPACE_READ_OWN: 'doctor_workspace.read.own',
+
+  // ── Medical Records (1) ─ NO create/update/delete (records are
+  //    write-once via appointment-action endpoints after F17) ────────────
   MEDICAL_RECORDS_READ_ALL: 'medical_records.read.all',
-  MEDICAL_RECORDS_CREATE_OWN: 'medical_records.create.own',
-  MEDICAL_RECORDS_UPDATE_OWN: 'medical_records.update.own',
-  MEDICAL_RECORDS_UPDATE_ALL: 'medical_records.update.all',
 } as const;
 
 export type PermissionCode = (typeof PERMISSION)[keyof typeof PERMISSION];
@@ -200,21 +207,18 @@ export const PERMISSION_CATALOG: readonly PermissionCatalogEntry[] = [
   // ── Doctor (1) ───────────────────────────────────────────────────────
   { code: PERMISSION.DOCTOR_READ, description: 'View doctor details (single + list)' },
 
-  // ── Medical Records (4) ──────────────────────────────────────────────
+  // ── Doctor Workspace (1) ─────────────────────────────────────────────
+  {
+    code: PERMISSION.DOCTOR_WORKSPACE_READ_OWN,
+    description:
+      'Access the /workspace page and its nav item. DOCTOR-only. BE does not check ' +
+      'this code on data reads — workspace data flows through appointment.read.own ' +
+      'and medical_records.read.all.',
+  },
+
+  // ── Medical Records (1) — write-once after F17 ───────────────────────
   {
     code: PERMISSION.MEDICAL_RECORDS_READ_ALL,
     description: 'View any medical record across every department',
-  },
-  {
-    code: PERMISSION.MEDICAL_RECORDS_CREATE_OWN,
-    description: 'Create medical records where the caller is the authoring doctor',
-  },
-  {
-    code: PERMISSION.MEDICAL_RECORDS_UPDATE_OWN,
-    description: 'Update medical records the caller authored',
-  },
-  {
-    code: PERMISSION.MEDICAL_RECORDS_UPDATE_ALL,
-    description: 'Update any medical record across every doctor',
   },
 ];

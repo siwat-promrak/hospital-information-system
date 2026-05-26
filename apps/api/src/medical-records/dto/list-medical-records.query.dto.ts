@@ -6,7 +6,8 @@ import { PaginationQueryDto } from '../../common/pagination';
 /**
  * Query DTO for `GET /medical-records`. Composes the shared
  * `PaginationQueryDto` with the filter axes consumed by the
- * patient-detail timeline and the doctor's own records list.
+ * patient-detail timeline, doctor's own records list, and the F17
+ * visit-thread view (appointmentGroupId).
  *
  * All filters are AND-combined. Missing filters = no constraint.
  */
@@ -34,4 +35,14 @@ export class ListMedicalRecordsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   appointmentId?: string;
+
+  @ApiPropertyOptional({
+    example: 'c1a2b3d4-0001-0002-0003-deadbeef0000',
+    description:
+      'F17 — Restrict to records whose linked appointment belongs to this appointment group. ' +
+      'Used by the visit-thread view to show all prior notes in the same clinical case.',
+  })
+  @IsOptional()
+  @IsUUID()
+  appointmentGroupId?: string;
 }

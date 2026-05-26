@@ -1,38 +1,27 @@
 /**
- * End-to-end coverage for F08 — `/medical-records` BE module.
+ * End-to-end coverage for F08/F17 — `/medical-records` BE module.
  *
  * Mirrors the F06 / F07 suite shape: tests run against the real Nest app +
  * seeded Postgres, but the whole suite skips gracefully when the DB is
  * unreachable so CI without Docker still passes.
  *
- * What is covered (per the F08 roadmap + US-9.x acceptance criteria):
- *  - POST /medical-records
- *    - DOCTOR creates a record for own appointment → 201 + correct
- *      `doctorId` / `departmentId` mirror from the appointment.
- *    - DOCTOR for ANOTHER doctor's appointment → 403
- *      `INSUFFICIENT_PERMISSION_SCOPE`.
- *    - Mismatched `patientId` (not the appointment's patient) → 400
- *      `VALIDATION_FAILED`.
- *    - Second create against the SAME appointment → 409
- *      `MEDICAL_RECORD_ALREADY_EXISTS` (the new unique constraint).
- *    - DOCTOR-role user with no linked `Doctor` row → 403.
- *    - NURSE attempts to create → 403 `INSUFFICIENT_PERMISSION`.
- *    - No JWT → 401.
- *    - Empty `note` → 400.
+ * F17 note: `POST /medical-records` and `PATCH /medical-records/:id` were
+ * removed. Records are now written exclusively inside appointment-action
+ * transactions (complete / refer / follow-up). The fixture setup creates
+ * one medical record directly via Prisma so the read-only routes still
+ * have data to exercise.
+ *
+ * What is covered:
+ *  - POST /medical-records → 404 (route removed in F17)
+ *  - PATCH /medical-records/:id → 404 (route removed in F17)
  *  - GET /medical-records
- *    - DOCTOR with `read.all` sees the full result set; populated + filter
- *      narrowing by `?patientId=` / `?doctorId=` / `?appointmentId=`.
+ *    - DOCTOR with `read.all` sees the full result set; filter narrowing
+ *      by `?patientId=` / `?doctorId=` / `?appointmentId=` /
+ *      `?appointmentGroupId=`.
  *    - PHARMACY (read-only) can list → 200.
  *    - Synthetic role with NO `medical_records.read.all` → 403.
  *  - GET /medical-records/:id
  *    - DOCTOR / MRO / PHARMACY → 200.
- *    - Unknown id → 404 `NOT_FOUND`.
- *  - PATCH /medical-records/:id
- *    - Author DOCTOR updates own → 200 (note + drug merge).
- *    - Different DOCTOR (not author) → 403 `INSUFFICIENT_PERMISSION_SCOPE`.
- *    - MRO updates anyone's record → 200 (`.update.all`).
- *    - PHARMACY attempts update → 403 `INSUFFICIENT_PERMISSION`.
- *    - Omitting `drug` leaves the existing value untouched.
  *    - Unknown id → 404 `NOT_FOUND`.
  *  - Permanence:
  *    - `DELETE /medical-records/:id` → 404 (no route registered).
@@ -50,6 +39,7 @@ import {
   type Appointment,
   type Department,
   type Doctor,
+  type MedicalRecord,
   type Patient,
   type User,
 } from '@prisma/client';
@@ -59,7 +49,6 @@ import request from 'supertest';
 
 import '../src/dayjs';
 
-import { PERMISSION } from '../src/auth/permissions';
 import { ROLE } from '../src/auth/roles';
 import { AppModule } from '../src/app.module';
 import { ErrorCode } from '../src/common/errors';
@@ -105,6 +94,7 @@ interface Fixtures {
   patientTwo: Patient;
   apptForDoctorOwn: Appointment;
   apptForDoctorOther: Appointment;
+  medicalRecord: MedicalRecord;
   superAdminId: string;
 }
 
@@ -416,6 +406,20 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     },
   });
 
+  // Seed one medical record directly — POST /medical-records was removed
+  // in F17 so the GET / GET :id read-only tests need data pre-seeded.
+  const medicalRecord = await prisma.medicalRecord.create({
+    data: {
+      appointmentId: apptForDoctorOwn.id,
+      doctorId: doctorOwn.id,
+      patientId: patientOne.id,
+      departmentId: dept.id,
+      note: 'Patient presented with mild hypertension.',
+      drug: 'Amlodipine 5mg once daily for 30 days.',
+      createdBy: doctorOwnUser.user.id,
+    },
+  });
+
   return {
     doctorOwnUser,
     doctorOtherUser,
@@ -432,6 +436,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     patientTwo,
     apptForDoctorOwn,
     apptForDoctorOther,
+    medicalRecord,
     superAdminId: superAdmin.id,
   };
 }
@@ -581,10 +586,10 @@ describe('F08 — medical records e2e', () => {
       NEXTAUTH_SECRET,
     );
 
-  // ─── POST /medical-records ────────────────────────────────────────────────
+  // ─── POST /medical-records — removed in F17 ──────────────────────────────
 
-  describe('POST /medical-records', () => {
-    maybe('DOCTOR creates a record for own appointment → 201', async () => {
+  describe('POST /medical-records (F17: route removed)', () => {
+    maybe('Any request → 404 (no route registered)', async () => {
       const jwt = await jwtFor(fixtures!.doctorOwnUser);
 
       const res = await request(server)
@@ -593,151 +598,10 @@ describe('F08 — medical records e2e', () => {
         .send({
           patientId: fixtures!.patientOne.id,
           appointmentId: fixtures!.apptForDoctorOwn.id,
-          note: 'Patient presented with mild hypertension.',
-          drug: 'Amlodipine 5mg once daily for 30 days.',
+          note: 'F17 removed this route.',
         });
 
-      expect(res.status).toBe(201);
-      expect(res.body.id).toEqual(expect.any(String));
-      expect(res.body.doctorId).toBe(fixtures!.doctorOwn.id);
-      expect(res.body.departmentId).toBe(fixtures!.dept.id);
-      expect(res.body.patientId).toBe(fixtures!.patientOne.id);
-      expect(res.body.appointmentId).toBe(fixtures!.apptForDoctorOwn.id);
-      expect(res.body.note).toBe('Patient presented with mild hypertension.');
-      expect(res.body.drug).toBe('Amlodipine 5mg once daily for 30 days.');
-      expect(typeof res.body.createdAt).toBe('string');
-      expect(typeof res.body.updatedAt).toBe('string');
-      expect(res.body.doctor).toEqual(
-        expect.objectContaining({
-          id: fixtures!.doctorOwn.id,
-          doctorCode: fixtures!.doctorOwn.doctorCode,
-        }),
-      );
-      expect(res.body.department).toEqual(
-        expect.objectContaining({ id: fixtures!.dept.id, name: DEPT_NAME }),
-      );
-    });
-
-    maybe('DOCTOR cannot create for ANOTHER doctor\'s appointment → 403 INSUFFICIENT_PERMISSION_SCOPE', async () => {
-      const jwt = await jwtFor(fixtures!.doctorOwnUser);
-
-      const res = await request(server)
-        .post('/api/v1/medical-records')
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({
-          patientId: fixtures!.patientTwo.id,
-          appointmentId: fixtures!.apptForDoctorOther.id,
-          note: 'Hijack attempt.',
-        });
-
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
-    });
-
-    maybe('DOCTOR with patientId not matching appointment → 400 VALIDATION_FAILED', async () => {
-      // doctorOther's appointment is for patientTwo; we sign in as
-      // doctorOther so the scope check passes, then submit the WRONG
-      // patientId (patientOne) so the patient-mismatch branch trips.
-      const jwt = await jwtFor(fixtures!.doctorOtherUser);
-
-      const res = await request(server)
-        .post('/api/v1/medical-records')
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({
-          patientId: fixtures!.patientOne.id,
-          appointmentId: fixtures!.apptForDoctorOther.id,
-          note: 'Patient id swap.',
-        });
-
-      expect(res.status).toBe(400);
-      expect(res.body.code).toBe(ErrorCode.VALIDATION_FAILED);
-    });
-
-    maybe('Second create against the SAME appointment → 409 MEDICAL_RECORD_ALREADY_EXISTS', async () => {
-      // The "happy path" test above already created one record for
-      // apptForDoctorOwn. A second POST against the same appointment
-      // must trip the new unique constraint.
-      const jwt = await jwtFor(fixtures!.doctorOwnUser);
-
-      const res = await request(server)
-        .post('/api/v1/medical-records')
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({
-          patientId: fixtures!.patientOne.id,
-          appointmentId: fixtures!.apptForDoctorOwn.id,
-          note: 'Duplicate attempt.',
-        });
-
-      expect(res.status).toBe(409);
-      expect(res.body.code).toBe(ErrorCode.MEDICAL_RECORD_ALREADY_EXISTS);
-      expect(res.body.details).toEqual(
-        expect.objectContaining({ appointmentId: fixtures!.apptForDoctorOwn.id }),
-      );
-    });
-
-    maybe('DOCTOR-role user with no linked Doctor row → 403', async () => {
-      const jwt = await jwtFor(fixtures!.doctorNoRowUser);
-
-      const res = await request(server)
-        .post('/api/v1/medical-records')
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({
-          patientId: fixtures!.patientTwo.id,
-          appointmentId: fixtures!.apptForDoctorOther.id,
-          note: 'Corrupt-state DOCTOR.',
-        });
-
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
-    });
-
-    maybe('NURSE attempts create → 403 INSUFFICIENT_PERMISSION (missing create.own)', async () => {
-      const jwt = await jwtFor(fixtures!.nurse);
-
-      const res = await request(server)
-        .post('/api/v1/medical-records')
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({
-          patientId: fixtures!.patientTwo.id,
-          appointmentId: fixtures!.apptForDoctorOther.id,
-          note: 'NURSE write attempt.',
-        });
-
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION);
-      expect(res.body.details).toEqual(
-        expect.objectContaining({
-          required: [PERMISSION.MEDICAL_RECORDS_CREATE_OWN],
-        }),
-      );
-    });
-
-    maybe('No JWT → 401', async () => {
-      const res = await request(server)
-        .post('/api/v1/medical-records')
-        .send({
-          patientId: fixtures!.patientTwo.id,
-          appointmentId: fixtures!.apptForDoctorOther.id,
-          note: 'Anonymous attempt.',
-        });
-
-      expect(res.status).toBe(401);
-    });
-
-    maybe('Empty note → 400 VALIDATION_FAILED', async () => {
-      const jwt = await jwtFor(fixtures!.doctorOtherUser);
-
-      const res = await request(server)
-        .post('/api/v1/medical-records')
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({
-          patientId: fixtures!.patientTwo.id,
-          appointmentId: fixtures!.apptForDoctorOther.id,
-          note: '',
-        });
-
-      expect(res.status).toBe(400);
-      expect(res.body.code).toBe(ErrorCode.VALIDATION_FAILED);
+      expect(res.status).toBe(404);
     });
   });
 
@@ -843,27 +707,9 @@ describe('F08 — medical records e2e', () => {
   // ─── GET /medical-records/:id ─────────────────────────────────────────────
 
   describe('GET /medical-records/:id', () => {
-    let recordId: string;
-
-    beforeAll(async () => {
-      if (skipReason || !fixtures) {
-        return;
-      }
-
-      const existing = await prisma.medicalRecord.findUnique({
-        where: { appointmentId: fixtures.apptForDoctorOwn.id },
-        select: { id: true },
-      });
-
-      if (!existing) {
-        return;
-      }
-
-      recordId = existing.id;
-    });
-
     maybe('DOCTOR → 200', async () => {
       const jwt = await jwtFor(fixtures!.doctorOwnUser);
+      const recordId = fixtures!.medicalRecord.id;
 
       const res = await request(server)
         .get(`/api/v1/medical-records/${recordId}`)
@@ -875,6 +721,7 @@ describe('F08 — medical records e2e', () => {
 
     maybe('MRO → 200', async () => {
       const jwt = await jwtFor(fixtures!.mro);
+      const recordId = fixtures!.medicalRecord.id;
 
       const res = await request(server)
         .get(`/api/v1/medical-records/${recordId}`)
@@ -886,6 +733,7 @@ describe('F08 — medical records e2e', () => {
 
     maybe('PHARMACY → 200', async () => {
       const jwt = await jwtFor(fixtures!.pharmacy);
+      const recordId = fixtures!.medicalRecord.id;
 
       const res = await request(server)
         .get(`/api/v1/medical-records/${recordId}`)
@@ -908,109 +756,19 @@ describe('F08 — medical records e2e', () => {
     });
   });
 
-  // ─── PATCH /medical-records/:id ───────────────────────────────────────────
+  // ─── PATCH /medical-records/:id — removed in F17 ──────────────────────────
 
-  describe('PATCH /medical-records/:id', () => {
-    let recordId: string;
-
-    beforeAll(async () => {
-      if (skipReason || !fixtures) {
-        return;
-      }
-
-      const existing = await prisma.medicalRecord.findUnique({
-        where: { appointmentId: fixtures.apptForDoctorOwn.id },
-        select: { id: true },
-      });
-
-      if (!existing) {
-        return;
-      }
-
-      recordId = existing.id;
-    });
-
-    maybe('Author DOCTOR updates own → 200 (note + drug merge)', async () => {
+  describe('PATCH /medical-records/:id (F17: route removed)', () => {
+    maybe('Any PATCH → 404 (no route registered)', async () => {
       const jwt = await jwtFor(fixtures!.doctorOwnUser);
+      const recordId = fixtures!.medicalRecord.id;
 
       const res = await request(server)
         .patch(`/api/v1/medical-records/${recordId}`)
         .set('Authorization', `Bearer ${jwt}`)
-        .send({
-          note: 'Updated note from author.',
-          drug: 'Amlodipine 10mg.',
-        });
-
-      expect(res.status).toBe(200);
-      expect(res.body.note).toBe('Updated note from author.');
-      expect(res.body.drug).toBe('Amlodipine 10mg.');
-    });
-
-    maybe('Different DOCTOR (not author) → 403 INSUFFICIENT_PERMISSION_SCOPE', async () => {
-      const jwt = await jwtFor(fixtures!.doctorOtherUser);
-
-      const res = await request(server)
-        .patch(`/api/v1/medical-records/${recordId}`)
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({ note: 'Foreign edit.' });
-
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
-    });
-
-    maybe('MRO updates any record → 200 (.update.all)', async () => {
-      const jwt = await jwtFor(fixtures!.mro);
-
-      const res = await request(server)
-        .patch(`/api/v1/medical-records/${recordId}`)
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({ note: 'MRO correction.' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.note).toBe('MRO correction.');
-    });
-
-    maybe('PHARMACY attempts update → 403 INSUFFICIENT_PERMISSION', async () => {
-      const jwt = await jwtFor(fixtures!.pharmacy);
-
-      const res = await request(server)
-        .patch(`/api/v1/medical-records/${recordId}`)
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({ note: 'Pharmacy write attempt.' });
-
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION);
-    });
-
-    maybe('Omitting drug leaves existing value untouched', async () => {
-      const jwt = await jwtFor(fixtures!.doctorOwnUser);
-
-      const before = await request(server)
-        .get(`/api/v1/medical-records/${recordId}`)
-        .set('Authorization', `Bearer ${jwt}`);
-      const drugBefore = before.body.drug;
-
-      const res = await request(server)
-        .patch(`/api/v1/medical-records/${recordId}`)
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({ note: 'Note-only update.' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.note).toBe('Note-only update.');
-      // `drug` is omitted from the patch — service must NOT clear it.
-      expect(res.body.drug).toBe(drugBefore);
-    });
-
-    maybe('unknown id → 404 NOT_FOUND', async () => {
-      const jwt = await jwtFor(fixtures!.doctorOwnUser);
-
-      const res = await request(server)
-        .patch('/api/v1/medical-records/00000000-0000-4000-8000-000000000000')
-        .set('Authorization', `Bearer ${jwt}`)
-        .send({ note: 'Ghost edit.' });
+        .send({ note: 'F17 removed this route.' });
 
       expect(res.status).toBe(404);
-      expect(res.body.code).toBe(ErrorCode.NOT_FOUND);
     });
   });
 

@@ -22,24 +22,31 @@ import {
   ApiCancelAppointment,
   ApiCompleteAppointment,
   ApiCreateAppointment,
+  ApiFollowUpAppointment,
   ApiGetAppointment,
   ApiListAppointments,
   ApiReferAppointment,
 } from './appointments.swagger';
 import { CancelAppointmentDto } from './dto/cancel-appointment.dto';
+import { CompleteAppointmentDto } from './dto/complete-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { ListAppointmentsQueryDto } from './dto/list-appointments.query.dto';
+import { FollowUpAppointmentDto } from './dto/follow-up-appointment.dto';
 import { ReferAppointmentDto } from './dto/refer-appointment.dto';
 import { AppointmentResponseDto } from './dto/appointment.response.dto';
+import { ListAppointmentsQueryDto } from './dto/list-appointments.query.dto';
 
 /**
  * F09 appointments controller. Front-desk booking + queue management.
+ * F17 wires workspace-action endpoints with note + drug.
  *
  * Permission gating per CRUD verb:
  *  - `POST /appointments`              → `appointment.create.{own|own-department}`.
  *  - `GET /appointments`               → any of `appointment.read.{own|own-department|all}`.
  *  - `GET /appointments/:id`           → any of `appointment.read.{own|own-department|all}`.
  *  - `POST /appointments/:id/cancel`   → `appointment.delete.{own|own-department}`.
+ *  - `POST /appointments/:id/complete` → `appointment.update.{own|own-department}`.
+ *  - `POST /appointments/:id/refer`    → `appointment.update.{own|own-department}`.
+ *  - `POST /appointments/:id/follow-up`→ `appointment.update.{own|own-department}`.
  */
 @ApiTags('appointments')
 @Controller('appointments')
@@ -123,8 +130,9 @@ export class AppointmentsController {
   complete(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: CompleteAppointmentDto,
   ): Promise<AppointmentResponseDto> {
-    return this.appointments.complete(user, id);
+    return this.appointments.complete(user, id, dto);
   }
 
   @Post(':id/refer')
@@ -140,5 +148,20 @@ export class AppointmentsController {
     @Body() dto: ReferAppointmentDto,
   ): Promise<AppointmentResponseDto> {
     return this.appointments.refer(user, id, dto);
+  }
+
+  @Post(':id/follow-up')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(
+    PERMISSION.APPOINTMENT_UPDATE_OWN,
+    PERMISSION.APPOINTMENT_UPDATE_OWN_DEPARTMENT,
+  )
+  @ApiFollowUpAppointment()
+  followUp(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: FollowUpAppointmentDto,
+  ): Promise<AppointmentResponseDto> {
+    return this.appointments.followUp(user, id, dto);
   }
 }

@@ -289,53 +289,21 @@ export function ApiCreateAppointment(): MethodDecorator & ClassDecorator {
 export function ApiCompleteAppointment(): MethodDecorator & ClassDecorator {
   return applyDecorators(
     ApiOperation({
-      summary: 'Complete an appointment (DOCTOR-only)',
+      summary: 'Complete an appointment (DOCTOR-only) — F17',
       description:
-        'Transitions `BOOKED → COMPLETED`. Idempotent on `COMPLETED`. ' +
+        'Transitions `BOOKED → COMPLETED`, inserts a `MedicalRecord` row, and ' +
+        '(when the appointment belongs to a group) closes the group — all in one ' +
+        'Serializable transaction. Body: `{ note: string, drug?: string }`. ' +
         'Rejects from `CANCELLED` with `409 APPOINTMENT_NOT_BOOKED`. ' +
-        'No group / referral side-effect — this is the "completion-only" ' +
-        'ending, symmetric with `cancel`.',
+        'Replaces the legacy F14 "close case" endpoint which is removed in F17.',
     }),
     ApiParam({ name: 'id', description: 'Appointment id (uuid).' }),
     ApiOkResponse({
-      description: 'Appointment completed (or already completed)',
-      type: AppointmentResponseDto,
-    }),
-    ApiForbiddenResponse({
-      description: 'Caller is not the doctor of the appointment.',
-      schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
-    }),
-    ApiNotFoundResponse({
-      description: 'Appointment id is unknown.',
-      schema: { example: NOT_FOUND_EXAMPLE },
-    }),
-    ApiConflictResponse({
-      description: 'Appointment status is CANCELLED.',
-      schema: { example: APPOINTMENT_NOT_BOOKED_EXAMPLE },
-    }),
-  );
-}
-
-export function ApiReferAppointment(): MethodDecorator & ClassDecorator {
-  return applyDecorators(
-    ApiOperation({
-      summary: 'Refer an appointment to another department (DOCTOR-only)',
-      description:
-        'Atomic: sets `status = COMPLETED`, `referredToDepartmentId = ' +
-        'body.toDepartmentId`, and `referredAt = now()`. The group stays ' +
-        'open — closing is a separate action ' +
-        '(`POST /appointment-groups/:id/close`). A second refer attempt ' +
-        'on the same row returns `409 APPOINTMENT_ALREADY_REFERRED`. Free ' +
-        'department choice — any valid `departmentId` is accepted.',
-    }),
-    ApiParam({ name: 'id', description: 'Appointment id (uuid).' }),
-    ApiOkResponse({
-      description: 'Appointment referred',
+      description: 'Appointment completed',
       type: AppointmentResponseDto,
     }),
     ApiBadRequestResponse({
-      description:
-        '`VALIDATION_FAILED` OR `NOT_FOUND` (`toDepartmentId` is unknown).',
+      description: '`VALIDATION_FAILED` — empty `note`.',
       schema: { example: VALIDATION_EXAMPLE },
     }),
     ApiForbiddenResponse({
@@ -348,11 +316,100 @@ export function ApiReferAppointment(): MethodDecorator & ClassDecorator {
     }),
     ApiConflictResponse({
       description:
-        'Appointment has already been referred OR is CANCELLED.',
+        '`APPOINTMENT_NOT_BOOKED` (status is CANCELLED), ' +
+        '`APPOINTMENT_ALREADY_COMPLETED` (status is already COMPLETED), or ' +
+        '`MEDICAL_RECORD_ALREADY_EXISTS` (duplicate workspace action).',
+      schema: { example: APPOINTMENT_NOT_BOOKED_EXAMPLE },
+    }),
+  );
+}
+
+export function ApiReferAppointment(): MethodDecorator & ClassDecorator {
+  return applyDecorators(
+    ApiOperation({
+      summary: 'Refer an appointment to another department (DOCTOR-only) — F17',
+      description:
+        'F17 extends the F14 shape: body is now ' +
+        '`{ toDepartmentId, note: string, drug?: string }`. ' +
+        'Atomic: inserts a `MedicalRecord` row, sets `status = COMPLETED`, ' +
+        '`referredToDepartmentId = body.toDepartmentId`, and `referredAt = now()`. ' +
+        'The group stays open — destination NURSE picks up via the pending-referral ' +
+        'queue. A second refer attempt returns `409 APPOINTMENT_ALREADY_REFERRED`.',
+    }),
+    ApiParam({ name: 'id', description: 'Appointment id (uuid).' }),
+    ApiOkResponse({
+      description: 'Appointment referred',
+      type: AppointmentResponseDto,
+    }),
+    ApiBadRequestResponse({
+      description:
+        '`VALIDATION_FAILED` (empty `note` or invalid UUID) OR `NOT_FOUND` (`toDepartmentId` is unknown).',
+      schema: { example: VALIDATION_EXAMPLE },
+    }),
+    ApiForbiddenResponse({
+      description: 'Caller is not the doctor of the appointment.',
+      schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
+    }),
+    ApiNotFoundResponse({
+      description: 'Appointment id is unknown.',
+      schema: { example: NOT_FOUND_EXAMPLE },
+    }),
+    ApiConflictResponse({
+      description:
+        '`APPOINTMENT_ALREADY_REFERRED`, `APPOINTMENT_NOT_BOOKED` (CANCELLED), ' +
+        '`APPOINTMENT_ALREADY_COMPLETED`, or `MEDICAL_RECORD_ALREADY_EXISTS`.',
       schema: {
         oneOf: [
           { example: APPOINTMENT_ALREADY_REFERRED_EXAMPLE },
           { example: APPOINTMENT_NOT_BOOKED_EXAMPLE },
+        ],
+      },
+    }),
+  );
+}
+
+export function ApiFollowUpAppointment(): MethodDecorator & ClassDecorator {
+  return applyDecorators(
+    ApiOperation({
+      summary: 'Follow up an appointment (DOCTOR-only) — F17',
+      description:
+        'Atomic action: completes the current appointment, creates a `MedicalRecord` ' +
+        'row for it, and books the next FOLLOW_UP appointment in the same group — ' +
+        'all in one Serializable transaction. Body: ' +
+        '`{ startAt: string (ISO UTC), note: string, drug?: string }`. ' +
+        'Returns the **new** follow-up appointment in the response body. ' +
+        'Reuses F13 booking-window enforcement, slot-conflict check, and ' +
+        'F14 group materialisation — no standalone endpoint needed.',
+    }),
+    ApiParam({ name: 'id', description: 'Appointment id (uuid).' }),
+    ApiOkResponse({
+      description: 'New follow-up appointment created',
+      type: AppointmentResponseDto,
+    }),
+    ApiBadRequestResponse({
+      description:
+        '`VALIDATION_FAILED` (empty `note`), `APPOINTMENT_START_IN_PAST`, ' +
+        '`DEPARTMENT_TYPE_NOT_ALLOWED`, `SCHEDULE_NOT_FOUND_FOR_BOOKING`, ' +
+        '`SLOT_OVERLAPS_BREAK`, `APPOINTMENT_OUTSIDE_BOOKING_WINDOW`, or ' +
+        '`SLOT_NOT_ON_GRID`.',
+      schema: { example: VALIDATION_EXAMPLE },
+    }),
+    ApiForbiddenResponse({
+      description: 'Caller is not the doctor of the appointment.',
+      schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
+    }),
+    ApiNotFoundResponse({
+      description: 'Appointment id is unknown.',
+      schema: { example: NOT_FOUND_EXAMPLE },
+    }),
+    ApiConflictResponse({
+      description:
+        '`APPOINTMENT_NOT_BOOKED` (CANCELLED), `APPOINTMENT_ALREADY_COMPLETED`, ' +
+        '`MEDICAL_RECORD_ALREADY_EXISTS`, or `SLOT_TAKEN`.',
+      schema: {
+        oneOf: [
+          { example: APPOINTMENT_NOT_BOOKED_EXAMPLE },
+          { example: SLOT_TAKEN_EXAMPLE },
         ],
       },
     }),

@@ -42,7 +42,7 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     code: ROLE.DOCTOR,
     name: 'Doctor',
     description:
-      'Clinician with own-doctor scope on schedules + appointments + medical records (`*.own`). Sees own-department reads for cross-coverage context. Created via admin invite alongside a Doctor row.',
+      'Clinician with own-doctor scope on schedules + appointments (`*.own`). Sees own-department reads for cross-coverage context. Created via admin invite alongside a Doctor row. Medical-record creation moves inside appointment-action endpoints (F17); records become write-once.',
   },
   {
     code: ROLE.NURSE,
@@ -54,7 +54,7 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     code: ROLE.MEDICAL_RECORDS_OFFICER,
     name: 'Medical Records Officer',
     description:
-      'Cross-department medical records: views all appointments + schedules + medical records, full CRUD on patient demographics, updates ANY medical record. No booking, no schedule management.',
+      'Cross-department medical records: views all appointments + schedules + medical records, full CRUD on patient demographics. Read-only on medical records after F17 (no mutation permission). No booking, no schedule management.',
   },
   {
     code: ROLE.PHARMACY,
@@ -80,15 +80,18 @@ export const SIGN_IN_ELIGIBLE_ROLES: readonly RoleCode[] = [
 /**
  * Seeded policy assignment: which permissions each role starts with.
  *
- * Totals (50 policies):
+ * Totals (48 policies — F17 reduced from 50):
  *   - ADMIN                   : 9   (4 user + 4 role + 1 doctor.read)
- *   - DOCTOR                  : 15  (5 schedule.own + 5 appointment.own + 1
- *                                    patient.read + 1 doctor.read + 3 medical_records.own)
+ *   - DOCTOR                  : 14  (5 schedule.own + 5 appointment.own + 1
+ *                                    patient.read + 1 doctor.read + 1 doctor_workspace.read.own
+ *                                    + 1 medical_records.read.all)
+ *                                   (was 15: −medical_records.create.own −medical_records.update.own
+ *                                    +doctor_workspace.read.own)
  *   - NURSE                   : 14  (4 schedule.own-department + 4 appointment.own-department
  *                                    + 4 patient + 1 doctor.read + 1 medical_records.read.all)
- *   - MEDICAL_RECORDS_OFFICER : 9   (4 patient + 1 appointment.read.all + 1 schedule.read.all
- *                                    + 1 doctor.read + 1 medical_records.read.all
- *                                    + 1 medical_records.update.all)
+ *   - MEDICAL_RECORDS_OFFICER : 8   (4 patient + 1 appointment.read.all + 1 schedule.read.all
+ *                                    + 1 doctor.read + 1 medical_records.read.all)
+ *                                   (was 9: −medical_records.update.all)
  *   - PHARMACY                : 3   (patient.read + doctor.read + medical_records.read.all)
  *
  * Lives here (next to the role catalog) so adding a permission to a role
@@ -121,9 +124,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Readonly<Record<RoleCode, readonly Permis
     PERMISSION.APPOINTMENT_DELETE_OWN,
     PERMISSION.PATIENT_READ,
     PERMISSION.DOCTOR_READ,
+    PERMISSION.DOCTOR_WORKSPACE_READ_OWN,
     PERMISSION.MEDICAL_RECORDS_READ_ALL,
-    PERMISSION.MEDICAL_RECORDS_CREATE_OWN,
-    PERMISSION.MEDICAL_RECORDS_UPDATE_OWN,
   ],
   [ROLE.NURSE]: [
     PERMISSION.SCHEDULE_CREATE_OWN_DEPARTMENT,
@@ -150,7 +152,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Readonly<Record<RoleCode, readonly Permis
     PERMISSION.SCHEDULE_READ_ALL,
     PERMISSION.DOCTOR_READ,
     PERMISSION.MEDICAL_RECORDS_READ_ALL,
-    PERMISSION.MEDICAL_RECORDS_UPDATE_ALL,
   ],
   [ROLE.PHARMACY]: [
     PERMISSION.PATIENT_READ,

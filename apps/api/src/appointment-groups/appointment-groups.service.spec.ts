@@ -1,10 +1,10 @@
 /**
  * Unit coverage for F14 `AppointmentGroupsService`.
  *
- * These tests exercise the scope-narrowing predicates + the close-case
- * doctor authority check using a hand-rolled Prisma stub. End-to-end
- * behaviour (full lazy-group transactional flow, real DB constraints)
- * is covered by `test/appointment-groups.e2e-spec.ts`.
+ * These tests exercise the scope-narrowing predicates using a
+ * hand-rolled Prisma stub. The close() method was removed in F17;
+ * group closure is now handled atomically by appointments.complete().
+ * End-to-end behaviour lives in `test/appointment-groups.e2e-spec.ts`.
  */
 import { AppointmentStatus, AppointmentType } from '@prisma/client';
 
@@ -70,14 +70,6 @@ const DOCTOR_USER: AuthenticatedUser = {
     PERMISSION.APPOINTMENT_DELETE_OWN,
   ],
   doctor: { id: DOC_HOME_ID, departmentId: HOME_DEPT_ID },
-};
-
-const FOREIGN_DOCTOR_USER: AuthenticatedUser = {
-  ...DOCTOR_USER,
-  id: 'user-doc-foreign',
-  email: 'doc-foreign@example.com',
-  departmentId: FOREIGN_DEPT_ID,
-  doctor: { id: DOC_FOREIGN_ID, departmentId: FOREIGN_DEPT_ID },
 };
 
 const NURSE_USER: AuthenticatedUser = {
@@ -353,179 +345,3 @@ describe('AppointmentGroupsService.list', () => {
   });
 });
 
-describe('AppointmentGroupsService.close', () => {
-  it('rejects with APPOINTMENT_GROUP_CLOSE_FORBIDDEN when caller is not the latest doctor', async () => {
-    const prisma = {
-      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          appointmentGroup: {
-            findFirst: async () => ({
-              id: 'group-1',
-              closedAt: null,
-              appointments: [
-                {
-                  id: 'appt-foreign',
-                  doctorId: DOC_FOREIGN_ID, // not caller
-                  status: AppointmentStatus.BOOKED,
-                },
-              ],
-            }),
-          },
-        });
-      },
-    } as unknown as PrismaService;
-    const service = new AppointmentGroupsService(prisma);
-
-    try {
-      await service.close(DOCTOR_USER, 'group-1');
-      fail('expected throw');
-    } catch (err) {
-      expect(err).toBeInstanceOf(AppException);
-      expect((err as AppException).code).toBe(
-        ErrorCode.APPOINTMENT_GROUP_CLOSE_FORBIDDEN,
-      );
-      expect((err as AppException).getStatus()).toBe(403);
-    }
-  });
-
-  it('rejects with APPOINTMENT_GROUP_NOT_FOUND when the group is missing', async () => {
-    const prisma = {
-      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          appointmentGroup: {
-            findFirst: async () => null,
-          },
-        });
-      },
-    } as unknown as PrismaService;
-    const service = new AppointmentGroupsService(prisma);
-
-    try {
-      await service.close(DOCTOR_USER, 'group-missing');
-      fail('expected throw');
-    } catch (err) {
-      expect(err).toBeInstanceOf(AppException);
-      expect((err as AppException).code).toBe(
-        ErrorCode.APPOINTMENT_GROUP_NOT_FOUND,
-      );
-    }
-  });
-
-  it('is idempotent when latest appointment is already COMPLETED — still sets closedAt', async () => {
-    const groupUpdate = jest.fn(async () => ({}));
-    const appointmentUpdate = jest.fn(async () => ({}));
-    const finalRow = buildGroupRow({
-      closedAt: new Date('2026-06-15T10:00:00.000Z'),
-    });
-
-    const prisma = {
-      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          appointmentGroup: {
-            findFirst: async () => ({
-              id: 'group-1',
-              closedAt: null,
-              appointments: [
-                {
-                  id: 'appt-1',
-                  doctorId: DOC_HOME_ID,
-                  status: AppointmentStatus.COMPLETED, // already done
-                },
-              ],
-            }),
-            update: groupUpdate,
-            findFirstOrThrow: async () => finalRow,
-          },
-          appointment: {
-            update: appointmentUpdate,
-          },
-        });
-      },
-    } as unknown as PrismaService;
-    const service = new AppointmentGroupsService(prisma);
-
-    const result = await service.close(DOCTOR_USER, 'group-1');
-
-    expect(appointmentUpdate).not.toHaveBeenCalled();
-    expect(groupUpdate).toHaveBeenCalledTimes(1);
-    expect(result.closedAt).toBe('2026-06-15T10:00:00.000Z');
-  });
-
-  it('skips the group update when group is already closed (idempotent)', async () => {
-    const groupUpdate = jest.fn(async () => ({}));
-    const appointmentUpdate = jest.fn(async () => ({}));
-    const finalRow = buildGroupRow({
-      closedAt: new Date('2026-06-15T10:00:00.000Z'),
-    });
-
-    const prisma = {
-      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          appointmentGroup: {
-            findFirst: async () => ({
-              id: 'group-1',
-              closedAt: new Date('2026-06-15T10:00:00.000Z'),
-              appointments: [
-                {
-                  id: 'appt-1',
-                  doctorId: DOC_HOME_ID,
-                  status: AppointmentStatus.COMPLETED,
-                },
-              ],
-            }),
-            update: groupUpdate,
-            findFirstOrThrow: async () => finalRow,
-          },
-          appointment: {
-            update: appointmentUpdate,
-          },
-        });
-      },
-    } as unknown as PrismaService;
-    const service = new AppointmentGroupsService(prisma);
-
-    await service.close(DOCTOR_USER, 'group-1');
-
-    expect(groupUpdate).not.toHaveBeenCalled();
-    expect(appointmentUpdate).not.toHaveBeenCalled();
-  });
-
-  it('completes the latest BOOKED visit AND sets closedAt when caller is the latest doctor', async () => {
-    const groupUpdate = jest.fn(async () => ({}));
-    const appointmentUpdate = jest.fn(async () => ({}));
-    const finalRow = buildGroupRow({
-      closedAt: new Date('2026-06-15T10:00:00.000Z'),
-    });
-
-    const prisma = {
-      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          appointmentGroup: {
-            findFirst: async () => ({
-              id: 'group-1',
-              closedAt: null,
-              appointments: [
-                {
-                  id: 'appt-latest',
-                  doctorId: DOC_HOME_ID,
-                  status: AppointmentStatus.BOOKED,
-                },
-              ],
-            }),
-            update: groupUpdate,
-            findFirstOrThrow: async () => finalRow,
-          },
-          appointment: {
-            update: appointmentUpdate,
-          },
-        });
-      },
-    } as unknown as PrismaService;
-    const service = new AppointmentGroupsService(prisma);
-
-    await service.close(DOCTOR_USER, 'group-1');
-
-    expect(appointmentUpdate).toHaveBeenCalledTimes(1);
-    expect(groupUpdate).toHaveBeenCalledTimes(1);
-  });
-});

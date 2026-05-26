@@ -217,22 +217,3 @@ export function resolveScheduleScope(user: AuthenticatedUser): Scope | null {
   return null;
 }
 
-/**
- * Scope for medical_records UPDATE — DOCTOR holds `.own` (only own-authored),
- * MEDICAL_RECORDS_OFFICER holds `.all` (any record). No `.own-department`
- * variant by design — the writer is the authoring doctor, not the
- * coverage team.
- */
-export function resolveMedicalRecordsUpdateScope(
-  user: AuthenticatedUser,
-): Scope | null {
-  if (holds(user, PERMISSION.MEDICAL_RECORDS_UPDATE_ALL)) {
-    return SCOPE.ALL;
-  }
-
-  if (holds(user, PERMISSION.MEDICAL_RECORDS_UPDATE_OWN)) {
-    return SCOPE.OWN;
-  }
-
-  return null;
-}

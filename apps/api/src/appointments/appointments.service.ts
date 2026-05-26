@@ -28,6 +28,7 @@ import {
   resolvePagination,
   type Paginated,
 } from '../common/pagination';
+import { MedicalRecordsService } from '../medical-records/medical-records.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeSchedulesSlots } from '../slots/slots.service';
 import type { AuthenticatedUser } from '../users/users.types';
@@ -44,7 +45,9 @@ import {
 } from './appointments.const';
 import type { ListAppointmentsArgs } from './appointments.types';
 import type { CancelAppointmentDto } from './dto/cancel-appointment.dto';
+import type { CompleteAppointmentDto } from './dto/complete-appointment.dto';
 import type { CreateAppointmentDto } from './dto/create-appointment.dto';
+import type { FollowUpAppointmentDto } from './dto/follow-up-appointment.dto';
 import type { ReferAppointmentDto } from './dto/refer-appointment.dto';
 import { AppointmentResponseDto } from './dto/appointment.response.dto';
 
@@ -101,7 +104,10 @@ type AppointmentRow = Prisma.AppointmentGetPayload<{
  */
 @Injectable()
 export class AppointmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly medicalRecords: MedicalRecordsService,
+  ) {}
 
   /**
    * Transactional booking. Validates inside a Serializable transaction
@@ -1090,164 +1096,631 @@ export class AppointmentsService {
   }
 
   /**
-   * F14 — `POST /appointments/:id/complete`. Transitions `BOOKED →
-   * COMPLETED`. Idempotent on `COMPLETED`; rejects from `CANCELLED`
-   * with `409 APPOINTMENT_NOT_BOOKED`. Caller MUST be the doctor on
-   * the appointment (`appointment.update.own`).
+   * F17 — `POST /appointments/:id/complete`. Transitions `BOOKED →
+   * COMPLETED`, inserts a `MedicalRecord` row, and (when the appointment
+   * belongs to a group) closes the group — all inside a Serializable
+   * transaction with single retry on P2034.
    *
-   * No group / referral side-effect — this is the "completion-only"
-   * ending, symmetric with `cancel`.
+   * Caller MUST be the doctor on the appointment (`appointment.update.own`).
+   * F14's separate "close case" endpoint is retired; this action now covers
+   * both the completion and the group closure in one step.
    */
   async complete(
     caller: AuthenticatedUser,
     id: string,
+    dto: CompleteAppointmentDto,
   ): Promise<AppointmentResponseDto> {
-    const existing = await this.prisma.appointment.findFirst({
-      where: { id },
-      select: {
-        id: true,
-        doctorId: true,
-        departmentId: true,
-        status: true,
+    return this.completeWithRetry(caller, id, dto, 0);
+  }
+
+  private async completeWithRetry(
+    caller: AuthenticatedUser,
+    id: string,
+    dto: CompleteAppointmentDto,
+    attempt: number,
+  ): Promise<AppointmentResponseDto> {
+    try {
+      return await this.completeInTransaction(caller, id, dto);
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2034' &&
+        attempt < 1
+      ) {
+        return this.completeWithRetry(caller, id, dto, attempt + 1);
+      }
+
+      throw err;
+    }
+  }
+
+  private async completeInTransaction(
+    caller: AuthenticatedUser,
+    id: string,
+    dto: CompleteAppointmentDto,
+  ): Promise<AppointmentResponseDto> {
+    const row = await this.prisma.$transaction(
+      async (tx) => {
+        const existing = await tx.appointment.findFirst({
+          where: { id },
+          select: {
+            id: true,
+            doctorId: true,
+            patientId: true,
+            departmentId: true,
+            status: true,
+            appointmentGroupId: true,
+          },
+        });
+
+        if (!existing) {
+          throw AppException.notFound(
+            ErrorCode.APPOINTMENT_NOT_FOUND,
+            'Appointment not found.',
+          );
+        }
+
+        this.assertUpdateScope(caller, existing.doctorId, existing.departmentId);
+
+        if (existing.status === AppointmentStatus.CANCELLED) {
+          throw AppException.conflict(
+            ErrorCode.APPOINTMENT_NOT_BOOKED,
+            'Appointment is not in a bookable state and cannot be completed.',
+            { appointmentId: existing.id, status: existing.status },
+          );
+        }
+
+        if (existing.status !== AppointmentStatus.BOOKED) {
+          throw AppException.conflict(
+            ErrorCode.APPOINTMENT_ALREADY_COMPLETED,
+            'Appointment is already completed.',
+            { appointmentId: existing.id, status: existing.status },
+          );
+        }
+
+        // Insert medical record before transitioning status so a
+        // duplicate-record conflict (409) surfaces before the update.
+        await this.medicalRecords.createInsideTx(tx, {
+          appointmentId: existing.id,
+          doctorId: existing.doctorId,
+          patientId: existing.patientId,
+          departmentId: existing.departmentId,
+          note: dto.note,
+          drug: dto.drug,
+          createdBy: caller.id,
+        });
+
+        const now = dayjs.utc().toDate();
+
+        const updated = await tx.appointment.update({
+          where: { id },
+          data: {
+            status: AppointmentStatus.COMPLETED,
+            completedAt: now,
+            updatedBy: caller.id,
+          },
+          include: appointmentInclude,
+        });
+
+        // If the appointment belongs to a group, close it.
+        if (existing.appointmentGroupId !== null) {
+          await tx.appointmentGroup.update({
+            where: { id: existing.appointmentGroupId },
+            data: {
+              closedAt: now,
+              updatedBy: caller.id,
+            },
+          });
+        }
+
+        return updated;
       },
-    });
-
-    if (!existing) {
-      throw AppException.notFound(
-        ErrorCode.APPOINTMENT_NOT_FOUND,
-        'Appointment not found.',
-      );
-    }
-
-    this.assertUpdateScope(caller, existing.doctorId, existing.departmentId);
-
-    if (existing.status === AppointmentStatus.COMPLETED) {
-      // Idempotent — re-fetch with the wire include and return.
-      const row = await this.prisma.appointment.findFirstOrThrow({
-        where: { id },
-        include: appointmentInclude,
-      });
-
-      return this.toResponse(row);
-    }
-
-    if (existing.status === AppointmentStatus.CANCELLED) {
-      throw AppException.conflict(
-        ErrorCode.APPOINTMENT_NOT_BOOKED,
-        'Appointment is not in a bookable state and cannot be completed.',
-        { appointmentId: existing.id, status: existing.status },
-      );
-    }
-
-    const row = await this.prisma.appointment.update({
-      where: { id },
-      data: {
-        status: AppointmentStatus.COMPLETED,
-        completedAt: dayjs.utc().toDate(),
-        updatedBy: caller.id,
-      },
-      include: appointmentInclude,
-    });
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
 
     return this.toResponse(row);
   }
 
   /**
-   * F14 — `POST /appointments/:id/refer`. Atomic transition: status →
-   * `COMPLETED`, `referredToDepartmentId = body.toDepartmentId`,
-   * `referredAt = now()`. The group stays open — closing is the
-   * separate `POST /appointment-groups/:id/close` action.
+   * F17 (extends F14) — `POST /appointments/:id/refer`. Atomic: inserts a
+   * `MedicalRecord` row, transitions `status → COMPLETED`, stamps
+   * `referredToDepartmentId = body.toDepartmentId`, and `referredAt = now()`.
+   * The group stays open — destination NURSE picks up via the pending-referral
+   * queue.
    *
    * Auth: caller MUST be the doctor on the appointment
    * (`appointment.update.own`).
    *
    * A second refer attempt on the same row returns
-   * `409 APPOINTMENT_ALREADY_REFERRED` — the referral pair is set
-   * exactly once.
+   * `409 APPOINTMENT_ALREADY_REFERRED` — the referral pair is set exactly once.
    */
   async refer(
     caller: AuthenticatedUser,
     id: string,
     dto: ReferAppointmentDto,
   ): Promise<AppointmentResponseDto> {
-    const row = await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.appointment.findFirst({
-        where: { id },
-        select: {
-          id: true,
-          doctorId: true,
-          departmentId: true,
-          status: true,
-          referredToDepartmentId: true,
-        },
-      });
+    return this.referWithRetry(caller, id, dto, 0);
+  }
 
-      if (!existing) {
-        throw AppException.notFound(
-          ErrorCode.APPOINTMENT_NOT_FOUND,
-          'Appointment not found.',
-        );
+  private async referWithRetry(
+    caller: AuthenticatedUser,
+    id: string,
+    dto: ReferAppointmentDto,
+    attempt: number,
+  ): Promise<AppointmentResponseDto> {
+    try {
+      return await this.referInTransaction(caller, id, dto);
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2034' &&
+        attempt < 1
+      ) {
+        return this.referWithRetry(caller, id, dto, attempt + 1);
       }
 
-      this.assertUpdateScope(caller, existing.doctorId, existing.departmentId);
+      throw err;
+    }
+  }
 
-      if (existing.referredToDepartmentId !== null) {
-        throw AppException.conflict(
-          ErrorCode.APPOINTMENT_ALREADY_REFERRED,
-          'Appointment has already been referred.',
-          {
-            appointmentId: existing.id,
-            referredToDepartmentId: existing.referredToDepartmentId,
+  private async referInTransaction(
+    caller: AuthenticatedUser,
+    id: string,
+    dto: ReferAppointmentDto,
+  ): Promise<AppointmentResponseDto> {
+    const row = await this.prisma.$transaction(
+      async (tx) => {
+        const existing = await tx.appointment.findFirst({
+          where: { id },
+          select: {
+            id: true,
+            doctorId: true,
+            patientId: true,
+            departmentId: true,
+            status: true,
+            referredToDepartmentId: true,
           },
-        );
-      }
+        });
 
-      if (existing.status === AppointmentStatus.CANCELLED) {
-        throw AppException.conflict(
-          ErrorCode.APPOINTMENT_NOT_BOOKED,
-          'Cancelled appointment cannot be referred.',
-          { appointmentId: existing.id, status: existing.status },
-        );
-      }
+        if (!existing) {
+          throw AppException.notFound(
+            ErrorCode.APPOINTMENT_NOT_FOUND,
+            'Appointment not found.',
+          );
+        }
 
-      // FK existence — surface a clean 400 rather than letting the DB
-      // FK violation propagate as an opaque 500.
-      const destination = await tx.department.findFirst({
-        where: { id: dto.toDepartmentId, deletedAt: null },
-        select: { id: true },
-      });
+        this.assertUpdateScope(caller, existing.doctorId, existing.departmentId);
 
-      if (!destination) {
-        throw AppException.badRequest(
-          ErrorCode.NOT_FOUND,
-          'Destination department not found.',
-          { toDepartmentId: dto.toDepartmentId },
-        );
-      }
+        if (existing.referredToDepartmentId !== null) {
+          throw AppException.conflict(
+            ErrorCode.APPOINTMENT_ALREADY_REFERRED,
+            'Appointment has already been referred.',
+            {
+              appointmentId: existing.id,
+              referredToDepartmentId: existing.referredToDepartmentId,
+            },
+          );
+        }
 
-      const now = dayjs.utc().toDate();
-      const isAlreadyCompleted = existing.status === AppointmentStatus.COMPLETED;
+        if (existing.status === AppointmentStatus.CANCELLED) {
+          throw AppException.conflict(
+            ErrorCode.APPOINTMENT_NOT_BOOKED,
+            'Cancelled appointment cannot be referred.',
+            { appointmentId: existing.id, status: existing.status },
+          );
+        }
 
-      return tx.appointment.update({
-        where: { id },
-        data: {
-          status: AppointmentStatus.COMPLETED,
-          completedAt: isAlreadyCompleted ? undefined : now,
-          referredToDepartmentId: dto.toDepartmentId,
-          referredAt: now,
-          updatedBy: caller.id,
-        },
-        include: appointmentInclude,
-      });
-    });
+        if (existing.status !== AppointmentStatus.BOOKED) {
+          throw AppException.conflict(
+            ErrorCode.APPOINTMENT_ALREADY_COMPLETED,
+            'Appointment is already completed.',
+            { appointmentId: existing.id, status: existing.status },
+          );
+        }
+
+        // FK existence — surface a clean 400 rather than letting the DB
+        // FK violation propagate as an opaque 500.
+        const destination = await tx.department.findFirst({
+          where: { id: dto.toDepartmentId, deletedAt: null },
+          select: { id: true },
+        });
+
+        if (!destination) {
+          throw AppException.badRequest(
+            ErrorCode.NOT_FOUND,
+            'Destination department not found.',
+            { toDepartmentId: dto.toDepartmentId },
+          );
+        }
+
+        // Insert medical record before stamping the referral columns.
+        await this.medicalRecords.createInsideTx(tx, {
+          appointmentId: existing.id,
+          doctorId: existing.doctorId,
+          patientId: existing.patientId,
+          departmentId: existing.departmentId,
+          note: dto.note,
+          drug: dto.drug,
+          createdBy: caller.id,
+        });
+
+        const now = dayjs.utc().toDate();
+
+        return tx.appointment.update({
+          where: { id },
+          data: {
+            status: AppointmentStatus.COMPLETED,
+            completedAt: now,
+            referredToDepartmentId: dto.toDepartmentId,
+            referredAt: now,
+            updatedBy: caller.id,
+          },
+          include: appointmentInclude,
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
 
     return this.toResponse(row);
   }
 
   /**
-   * Shared assertion helper for the F14 doctor-only actions (`complete`
-   * / `refer`). Mirrors the cancel-side scope dispatch but reads from
-   * the `appointment.update.*` family.
+   * F17 — `POST /appointments/:id/follow-up`. Atomic visit-ending +
+   * continuation booking:
+   *  1. Validates current appointment is BOOKED + caller is the doctor.
+   *  2. Inserts a `MedicalRecord` row for the current appointment.
+   *  3. Marks current appointment COMPLETED.
+   *  4. Creates the next FOLLOW_UP appointment in the same group by
+   *     delegating to the internal create-appointment logic (reuses all
+   *     F13 duration / booking-window / slot-conflict / F14 grouping
+   *     invariants — no duplication).
+   *  5. Returns the **new** follow-up appointment in the response body.
+   *
+   * Runs inside a single Serializable transaction; retried once on P2034.
+   */
+  async followUp(
+    caller: AuthenticatedUser,
+    id: string,
+    dto: FollowUpAppointmentDto,
+  ): Promise<AppointmentResponseDto> {
+    return this.followUpWithRetry(caller, id, dto, 0);
+  }
+
+  private async followUpWithRetry(
+    caller: AuthenticatedUser,
+    id: string,
+    dto: FollowUpAppointmentDto,
+    attempt: number,
+  ): Promise<AppointmentResponseDto> {
+    try {
+      return await this.followUpInTransaction(caller, id, dto);
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2034' &&
+        attempt < 1
+      ) {
+        return this.followUpWithRetry(caller, id, dto, attempt + 1);
+      }
+
+      throw err;
+    }
+  }
+
+  private async followUpInTransaction(
+    caller: AuthenticatedUser,
+    id: string,
+    dto: FollowUpAppointmentDto,
+  ): Promise<AppointmentResponseDto> {
+    const startAt = dayjs.utc(dto.startAt);
+    const now = dayjs.utc();
+
+    if (startAt.isSameOrBefore(now)) {
+      throw AppException.badRequest(
+        ErrorCode.APPOINTMENT_START_IN_PAST,
+        'Follow-up appointment start time cannot be in the past.',
+        { startAt: dto.startAt, now: now.toISOString() },
+      );
+    }
+
+    const row = await this.prisma.$transaction(
+      async (tx) => {
+        // Step 1 — load + validate the current appointment.
+        const current = await tx.appointment.findFirst({
+          where: { id },
+          select: {
+            id: true,
+            doctorId: true,
+            patientId: true,
+            departmentId: true,
+            scheduleId: true,
+            status: true,
+            appointmentGroupId: true,
+          },
+        });
+
+        if (!current) {
+          throw AppException.notFound(
+            ErrorCode.APPOINTMENT_NOT_FOUND,
+            'Appointment not found.',
+          );
+        }
+
+        this.assertUpdateScope(caller, current.doctorId, current.departmentId);
+
+        if (current.status === AppointmentStatus.CANCELLED) {
+          throw AppException.conflict(
+            ErrorCode.APPOINTMENT_NOT_BOOKED,
+            'Appointment is not in a bookable state.',
+            { appointmentId: current.id, status: current.status },
+          );
+        }
+
+        if (current.status !== AppointmentStatus.BOOKED) {
+          throw AppException.conflict(
+            ErrorCode.APPOINTMENT_ALREADY_COMPLETED,
+            'Appointment is already completed.',
+            { appointmentId: current.id, status: current.status },
+          );
+        }
+
+        // Step 2 — insert medical record for the current appointment.
+        await this.medicalRecords.createInsideTx(tx, {
+          appointmentId: current.id,
+          doctorId: current.doctorId,
+          patientId: current.patientId,
+          departmentId: current.departmentId,
+          note: dto.note,
+          drug: dto.drug,
+          createdBy: caller.id,
+        });
+
+        // Step 3 — mark current appointment COMPLETED.
+        const completedAt = now.toDate();
+
+        await tx.appointment.update({
+          where: { id },
+          data: {
+            status: AppointmentStatus.COMPLETED,
+            completedAt,
+            updatedBy: caller.id,
+          },
+        });
+
+        // Step 4 — create the follow-up appointment. Reuse the internal
+        // create logic (F13 duration + booking window + slot-conflict +
+        // F14 group materialisation) by building a synthetic
+        // `CreateAppointmentDto` and calling the inner helpers directly
+        // inside this transaction.
+        //
+        // We look up the schedule that covers `startAt` for this doctor +
+        // department (the doctor picks a slot from the slot-finder which
+        // always shows them, so any valid slot resolves to a real schedule).
+        const followUpType = AppointmentType.FOLLOW_UP;
+
+        // (department, type) allowed — also fetches duration + booking window.
+        const allowed = await tx.departmentAppointmentType.findFirst({
+          where: {
+            departmentId: current.departmentId,
+            appointmentType: followUpType,
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+            durationMinutes: true,
+            bookingWindowStartMinute: true,
+            bookingWindowEndMinute: true,
+          },
+        });
+
+        if (!allowed) {
+          throw AppException.badRequest(
+            ErrorCode.DEPARTMENT_TYPE_NOT_ALLOWED,
+            'Department does not offer FOLLOW_UP appointment type.',
+            {
+              departmentId: current.departmentId,
+              appointmentType: followUpType,
+            },
+          );
+        }
+
+        const endAt = startAt.add(allowed.durationMinutes, 'minute');
+
+        // F13 booking-window back-stop.
+        const slotStartLocalMin = localMinuteOfDay(startAt.toDate());
+        const slotEndLocalMin = localMinuteOfDay(endAt.toDate());
+
+        if (
+          !isWithinBookingWindow(
+            slotStartLocalMin,
+            slotEndLocalMin,
+            allowed.bookingWindowStartMinute,
+            allowed.bookingWindowEndMinute,
+          )
+        ) {
+          throw AppException.badRequest(
+            ErrorCode.APPOINTMENT_OUTSIDE_BOOKING_WINDOW,
+            'Requested follow-up slot falls outside the booking window for this (department, type).',
+            {
+              departmentId: current.departmentId,
+              appointmentType: followUpType,
+              startAt: dto.startAt,
+              endAt: endAt.toISOString(),
+              bookingWindowStartMinute: allowed.bookingWindowStartMinute,
+              bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+            },
+          );
+        }
+
+        // Resolve the covering schedule for `startAt`.
+        const schedule = await tx.doctorSchedule.findFirst({
+          where: {
+            doctorId: current.doctorId,
+            departmentId: current.departmentId,
+            startAt: { lte: startAt.toDate() },
+            endAt: { gt: startAt.toDate() },
+            deletedAt: null,
+            acceptsBooking: true,
+          },
+          select: {
+            id: true,
+            startAt: true,
+            endAt: true,
+            breakStartAt: true,
+            breakEndAt: true,
+            acceptsBooking: true,
+          },
+        });
+
+        if (!schedule) {
+          throw AppException.badRequest(
+            ErrorCode.SCHEDULE_NOT_FOUND_FOR_BOOKING,
+            'No bookable schedule covers the requested follow-up slot.',
+            {
+              doctorId: current.doctorId,
+              departmentId: current.departmentId,
+              startAt: dto.startAt,
+            },
+          );
+        }
+
+        // Slot must not cross the break window.
+        if (schedule.breakStartAt !== null && schedule.breakEndAt !== null) {
+          const breakStart = dayjs.utc(schedule.breakStartAt);
+          const breakEnd = dayjs.utc(schedule.breakEndAt);
+
+          if (startAt.isBefore(breakEnd) && breakStart.isBefore(endAt)) {
+            throw AppException.badRequest(
+              ErrorCode.SLOT_OVERLAPS_BREAK,
+              'Requested follow-up slot overlaps the schedule break window.',
+              {
+                scheduleId: schedule.id,
+                slotStartAt: startAt.toISOString(),
+                slotEndAt: endAt.toISOString(),
+                breakStartAt: breakStart.toISOString(),
+                breakEndAt: breakEnd.toISOString(),
+              },
+            );
+          }
+        }
+
+        // Slot-availability race check.
+        const blockers = await tx.appointment.findMany({
+          where: {
+            doctorId: current.doctorId,
+            status: { in: [...BLOCKING_APPOINTMENT_STATUSES] },
+            startAt: { lt: schedule.endAt },
+            endAt: { gt: schedule.startAt },
+          },
+          select: { id: true, startAt: true, endAt: true },
+        });
+
+        const conflicting = blockers.find(
+          (b) => b.startAt < endAt.toDate() && b.endAt > startAt.toDate(),
+        );
+
+        if (conflicting) {
+          throw AppException.conflict(
+            ErrorCode.SLOT_TAKEN,
+            'Another booking has just claimed this slot.',
+            {
+              conflictingAppointmentId: conflicting.id,
+              slotStartAt: startAt.toISOString(),
+              slotEndAt: endAt.toISOString(),
+            },
+          );
+        }
+
+        // Grid alignment — re-use the slot-finder computation.
+        const offered = computeSchedulesSlots({
+          schedule: {
+            id: schedule.id,
+            departmentId: current.departmentId,
+            startAt: schedule.startAt,
+            endAt: schedule.endAt,
+            breakStartAt: schedule.breakStartAt,
+            breakEndAt: schedule.breakEndAt,
+            doctor: { id: current.doctorId, doctorCode: '', name: '' },
+          },
+          durationMinutes: allowed.durationMinutes,
+          bookingWindowStartMinute: allowed.bookingWindowStartMinute,
+          bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+          blockingAppointments: blockers,
+          now: now.toDate(),
+        });
+
+        const slotStartIso = startAt.toISOString();
+
+        if (!offered.some((s) => s.startAt === slotStartIso)) {
+          throw AppException.badRequest(
+            ErrorCode.SLOT_NOT_ON_GRID,
+            'Requested follow-up startAt does not align to a slot offered by the slot finder.',
+            {
+              scheduleId: schedule.id,
+              slotStartAt: slotStartIso,
+              durationMinutes: allowed.durationMinutes,
+            },
+          );
+        }
+
+        // Step 4c — F14 group materialisation for the follow-up.
+        // The current appointment is now COMPLETED (step 3). We pass it as
+        // the "previous" row to `resolveGrouping` via a synthetic DTO shape.
+        // Since `resolveGrouping` reads from `tx.appointment`, the COMPLETED
+        // status is now visible inside the transaction.
+        const syntheticDto = {
+          previousAppointmentId: current.id,
+          patientId: current.patientId,
+          doctorId: current.doctorId,
+          departmentId: current.departmentId,
+          scheduleId: schedule.id,
+          appointmentType: followUpType,
+          startAt: dto.startAt,
+          reason: null,
+        } satisfies CreateAppointmentDto;
+
+        const grouping = await this.resolveGrouping(tx, caller, syntheticDto);
+
+        const created = await tx.appointment.create({
+          data: {
+            patientId: current.patientId,
+            doctorId: current.doctorId,
+            departmentId: current.departmentId,
+            scheduleId: schedule.id,
+            appointmentType: followUpType,
+            status: AppointmentStatus.BOOKED,
+            startAt: startAt.toDate(),
+            endAt: endAt.toDate(),
+            reason: null,
+            createdBy: caller.id,
+            appointmentGroupId: grouping.groupId,
+            visitNumber: grouping.visitNumber,
+          },
+          include: appointmentInclude,
+        });
+
+        if (grouping.previousAppointmentToFulfillId !== null) {
+          await tx.appointment.update({
+            where: { id: grouping.previousAppointmentToFulfillId },
+            data: {
+              referralFulfilledByAppointmentId: created.id,
+              updatedBy: caller.id,
+            },
+          });
+        }
+
+        return created;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    return this.toResponse(row);
+  }
+
+  /**
+   * Shared assertion helper for the F14/F17 doctor-only actions (`complete`
+   * / `refer` / `followUp`). Mirrors the cancel-side scope dispatch but reads
+   * from the `appointment.update.*` family.
    */
   private assertUpdateScope(
     caller: AuthenticatedUser,

@@ -1,15 +1,16 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 
 /**
- * Request body for `POST /appointments/:id/refer` (F14 — US-14.4).
+ * Request body for `POST /appointments/:id/refer` (F17 update of F14 — US-17.6).
  *
- * Atomic action invoked by the appointment's doctor at the end of a
- * visit when deciding to send the patient to another specialist.
- * The service sets `status = COMPLETED`, `referredToDepartmentId =
- * toDepartmentId`, and `referredAt = now()` in one transaction. The
- * group stays open — closing is the separate "complete + close"
- * action (`POST /appointment-groups/:id/close`).
+ * F17 extends the F14 shape with required `note` and optional `drug` so the
+ * referring doctor's clinical reasoning is captured in the visit record as
+ * part of the same atomic action. The service inserts a `MedicalRecord` row
+ * before stamping `referredToDepartmentId` and transitioning to COMPLETED.
+ *
+ * The group stays open — destination NURSE picks up via the pending-referral
+ * queue (`GET /appointments?pendingReferralOnly=true`).
  */
 export class ReferAppointmentDto {
   @ApiProperty({
@@ -21,4 +22,20 @@ export class ReferAppointmentDto {
   })
   @IsUUID()
   toDepartmentId!: string;
+
+  @ApiProperty({
+    example: 'Referring patient to Neurology for further evaluation of recurring headaches.',
+    description: 'Required clinical note for this visit.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  note!: string;
+
+  @ApiPropertyOptional({
+    example: 'Ibuprofen 400mg PRN for headache relief',
+    description: 'Optional medication note (free text).',
+  })
+  @IsOptional()
+  @IsString()
+  drug?: string;
 }

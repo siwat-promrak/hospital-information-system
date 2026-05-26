@@ -1,11 +1,8 @@
 import {
   Controller,
   Get,
-  HttpCode,
-  HttpStatus,
   Param,
   ParseUUIDPipe,
-  Post,
   Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
@@ -18,7 +15,6 @@ import type { AuthenticatedUser } from '../users/users.types';
 
 import { AppointmentGroupsService } from './appointment-groups.service';
 import {
-  ApiCloseAppointmentGroup,
   ApiGetAppointmentGroup,
   ApiListAppointmentGroups,
 } from './appointment-groups.swagger';
@@ -30,15 +26,14 @@ import { ListAppointmentGroupsQueryDto } from './dto/list-appointment-groups.que
 
 /**
  * F14 appointment-groups controller. Surfaces the multi-visit case
- * timeline + the doctor-only "close case" action.
+ * timeline (list + detail) — read-only surface after F17.
+ *
+ * The `POST /:id/close` route has been removed in F17. Group closure is
+ * now handled atomically by `POST /appointments/:id/complete`.
  *
  * Permission gating:
- *   - `GET /appointment-groups`             → any `appointment.read.*` (scope filters list).
- *   - `GET /appointment-groups/:id`         → any `appointment.read.*` (scope filters detail).
- *   - `POST /appointment-groups/:id/close`  → any `appointment.update.*`; service further
- *                                             rejects with `403 APPOINTMENT_GROUP_CLOSE_FORBIDDEN`
- *                                             unless the caller is the doctor of the latest
- *                                             non-cancelled visit.
+ *   - `GET /appointment-groups`     → any `appointment.read.*` (scope filters list).
+ *   - `GET /appointment-groups/:id` → any `appointment.read.*` (scope filters detail).
  */
 @ApiTags('appointment-groups')
 @Controller('appointment-groups')
@@ -78,19 +73,5 @@ export class AppointmentGroupsController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<AppointmentGroupDetailResponseDto> {
     return this.appointmentGroups.getById(user, id);
-  }
-
-  @Post(':id/close')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermission(
-    PERMISSION.APPOINTMENT_UPDATE_OWN,
-    PERMISSION.APPOINTMENT_UPDATE_OWN_DEPARTMENT,
-  )
-  @ApiCloseAppointmentGroup()
-  close(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<AppointmentGroupDetailResponseDto> {
-    return this.appointmentGroups.close(user, id);
   }
 }

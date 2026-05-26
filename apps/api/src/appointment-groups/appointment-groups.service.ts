@@ -5,8 +5,7 @@
 import '../dayjs';
 
 import { Injectable } from '@nestjs/common';
-import { AppointmentStatus, Prisma } from '@prisma/client';
-import dayjs from 'dayjs';
+import { Prisma } from '@prisma/client';
 
 import { resolveAppointmentReadScope, SCOPE } from '../auth/scope';
 import { AppException } from '../common/app-exception';
@@ -165,95 +164,6 @@ export class AppointmentGroupsService {
         'Appointment group not found.',
       );
     }
-
-    return this.toDetailResponse(row);
-  }
-
-  /**
-   * Close a case. Atomically:
-   *   - Sets `appointmentGroup.closedAt = now()`.
-   *   - Transitions the latest non-cancelled appointment in the group
-   *     from `BOOKED` to `COMPLETED` (idempotent on `COMPLETED`).
-   *
-   * Auth: caller MUST be the doctor on the latest non-cancelled
-   * appointment in the group. Otherwise `403
-   * APPOINTMENT_GROUP_CLOSE_FORBIDDEN`. Closing a group that already
-   * has its `closedAt` set is idempotent (the second call is a no-op
-   * that returns the current state).
-   */
-  async close(
-    caller: AuthenticatedUser,
-    id: string,
-  ): Promise<AppointmentGroupDetailResponseDto> {
-    const row = await this.prisma.$transaction(async (tx) => {
-      const group = await tx.appointmentGroup.findFirst({
-        where: { id },
-        include: {
-          appointments: {
-            where: { status: { not: AppointmentStatus.CANCELLED } },
-            orderBy: [{ startAt: 'desc' }, { visitNumber: 'desc' }],
-            select: {
-              id: true,
-              doctorId: true,
-              status: true,
-            },
-          },
-        },
-      });
-
-      if (!group) {
-        throw AppException.notFound(
-          ErrorCode.APPOINTMENT_GROUP_NOT_FOUND,
-          'Appointment group not found.',
-        );
-      }
-
-      const latest = group.appointments[0];
-
-      if (!latest) {
-        throw AppException.badRequest(
-          ErrorCode.APPOINTMENT_GROUP_CLOSE_FORBIDDEN,
-          'Group has no non-cancelled appointment to complete.',
-        );
-      }
-
-      if (!caller.doctor || caller.doctor.id !== latest.doctorId) {
-        throw AppException.forbidden(
-          ErrorCode.APPOINTMENT_GROUP_CLOSE_FORBIDDEN,
-          "Only the doctor on the latest non-cancelled appointment may close this case.",
-        );
-      }
-
-      const now = dayjs.utc().toDate();
-
-      // Latest still BOOKED → also flip to COMPLETED. Idempotent when
-      // already COMPLETED.
-      if (latest.status === AppointmentStatus.BOOKED) {
-        await tx.appointment.update({
-          where: { id: latest.id },
-          data: {
-            status: AppointmentStatus.COMPLETED,
-            completedAt: now,
-            updatedBy: caller.id,
-          },
-        });
-      }
-
-      if (group.closedAt === null) {
-        await tx.appointmentGroup.update({
-          where: { id: group.id },
-          data: {
-            closedAt: now,
-            updatedBy: caller.id,
-          },
-        });
-      }
-
-      return tx.appointmentGroup.findFirstOrThrow({
-        where: { id: group.id },
-        include: groupDetailInclude,
-      });
-    });
 
     return this.toDetailResponse(row);
   }

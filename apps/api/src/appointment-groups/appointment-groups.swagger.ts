@@ -1,6 +1,5 @@
 import { applyDecorators } from '@nestjs/common';
 import {
-  ApiConflictResponse,
   ApiExtraModels,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -32,13 +31,6 @@ const FORBIDDEN_READ_EXAMPLE = {
     ],
     held: [],
   },
-};
-
-const FORBIDDEN_CLOSE_EXAMPLE = {
-  statusCode: 403,
-  code: ErrorCode.APPOINTMENT_GROUP_CLOSE_FORBIDDEN,
-  message:
-    'Only the doctor on the latest non-cancelled appointment may close this case.',
 };
 
 const NOT_FOUND_EXAMPLE = {
@@ -99,34 +91,3 @@ export function ApiGetAppointmentGroup(): MethodDecorator & ClassDecorator {
   );
 }
 
-export function ApiCloseAppointmentGroup(): MethodDecorator & ClassDecorator {
-  return applyDecorators(
-    ApiOperation({
-      summary: 'Close a case (latest visit → COMPLETED + group → closed)',
-      description:
-        'Atomic: sets `group.closedAt = now()` AND transitions the ' +
-        "group's latest non-cancelled appointment from `BOOKED` to " +
-        '`COMPLETED` (idempotent on `COMPLETED`). Idempotent on an ' +
-        'already-closed group. Caller MUST be the doctor on the latest ' +
-        'non-cancelled appointment in the group; otherwise 403 ' +
-        '`APPOINTMENT_GROUP_CLOSE_FORBIDDEN`.',
-    }),
-    ApiParam({ name: 'id', description: 'Appointment group id (uuid).' }),
-    ApiOkResponse({
-      description: 'Appointment group closed (or already closed)',
-      type: AppointmentGroupDetailResponseDto,
-    }),
-    ApiForbiddenResponse({
-      description: 'Caller is not the doctor of the latest non-cancelled visit.',
-      schema: { example: FORBIDDEN_CLOSE_EXAMPLE },
-    }),
-    ApiNotFoundResponse({
-      description: 'Group id is unknown.',
-      schema: { example: NOT_FOUND_EXAMPLE },
-    }),
-    ApiConflictResponse({
-      description: 'Group has no non-cancelled appointment to complete.',
-      schema: { example: FORBIDDEN_CLOSE_EXAMPLE },
-    }),
-  );
-}
