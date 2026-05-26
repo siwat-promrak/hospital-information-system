@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { AppointmentType } from '@prisma/client';
 
 /**
  * Department row returned by `GET /departments`.
@@ -21,4 +22,22 @@ export class DepartmentResponseDto {
     required: false,
   })
   description!: string | null;
+
+  /**
+   * The `AppointmentType` enum values this department offers — the
+   * `department_appointment_types` join table per-row. Consumed by the
+   * booking wizard to filter the type Select to only the types the
+   * picked department actually supports; submitting a mismatched
+   * `(departmentId, appointmentType)` still 400s on the BE with
+   * `DEPARTMENT_TYPE_NOT_ALLOWED`, but the FE narrowing prevents the
+   * round-trip when the catalog already proves the pair is unsupported.
+   */
+  @ApiProperty({
+    enum: AppointmentType,
+    isArray: true,
+    example: ['NEW_PATIENT_VISIT', 'FOLLOW_UP', 'CONSULTATION', 'PROCEDURE'],
+    description:
+      'Set of AppointmentType codes this department offers; drives the booking wizard type filter.',
+  })
+  allowedAppointmentTypes!: AppointmentType[];
 }
