@@ -569,7 +569,8 @@
       "reasonLabel": "Reason",
       "reasonHelper": "Optional — required only for PROCEDURE bookings.",
       "reasonPlaceholder": "e.g. Routine pacemaker check-up",
-      "reasonRequiredHelper": "Required for PROCEDURE bookings."
+      "reasonRequiredHelper": "Required for PROCEDURE bookings.",
+      "continuationTypeUnavailable": "This department doesn't offer follow-up or procedure appointments. Pick a different department, or change the answer on the continuation step."
     },
     "Confirm": {
       "title": "Confirm booking",

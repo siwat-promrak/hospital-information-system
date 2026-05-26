@@ -203,6 +203,7 @@ export const K = {
     },
     Slot: {
       back: "back",
+      continuationTypeUnavailable: "continuationTypeUnavailable",
       dateHelper: "dateHelper",
       dateLabel: "dateLabel",
       departmentLabel: "departmentLabel",

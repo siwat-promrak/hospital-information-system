@@ -39,6 +39,7 @@ import { K, NS } from "@/i18n/keys.generated";
 import { useRouter } from "@/i18n/navigation";
 import { dayjs } from "@/lib/dayjs";
 import { createAppointmentAction } from "@/lib/api/appointment.actions";
+import { isContinuationAppointmentType } from "@/lib/api/appointment.const";
 import { getDepartmentAppointmentTypesAction } from "@/lib/api/department.actions";
 import { SNACKBAR_SUCCESS_KEY } from "@/lib/notifications/messages.const";
 import { useNotify } from "@/lib/notifications/use-notify";
@@ -336,6 +337,58 @@ export default function BookingWizard({
       setAppointmentType("");
     }
   }, [departmentId, appointmentType, departments]);
+
+  // F14 (corrective tightening) — when a `previousAppointmentId` is set
+  // (either via the continuation picker OR via the referrals deep-link),
+  // the appointment-type chip catalog narrows to the
+  // `CONTINUATION_APPOINTMENT_TYPES` set (`FOLLOW_UP` and `PROCEDURE`).
+  // `NEW_PATIENT_VISIT` and `CONSULTATION` are not valid continuations —
+  // the BE rejects them with `CONTINUATION_APPOINTMENT_TYPE_INVALID` —
+  // so the wizard hides them from the chip selector. When the user
+  // clears the prior visit (back to "No"), the full per-department
+  // catalog is restored automatically because we derive the narrowed
+  // list from `departmentTypes` on each render.
+  //
+  // We DON'T filter `DepartmentSelect.allowedAppointmentTypes` directly
+  // — `departmentTypes` is the per-department-scoped catalog from
+  // `GET /departments/:id/appointment-types` and is the authoritative
+  // input to `<AppointmentTypeSelect>`.
+  const isContinuationBooking = previousVisit != null;
+  const visibleDepartmentTypes = useMemo(() => {
+    if (!isContinuationBooking) {
+      return departmentTypes;
+    }
+
+    return departmentTypes.filter((type) =>
+      isContinuationAppointmentType(type.code),
+    );
+  }, [departmentTypes, isContinuationBooking]);
+
+  // Write-side cascade matching the read-side narrowing above. If the
+  // user picks "Yes, continues" AFTER having already picked
+  // `NEW_PATIENT_VISIT` or `CONSULTATION`, drop the now-forbidden choice
+  // so the user re-picks from the narrowed catalog (instead of
+  // submitting an invalid pair).
+  useEffect(() => {
+    if (!isContinuationBooking || !appointmentType) {
+      return;
+    }
+
+    if (!isContinuationAppointmentType(appointmentType)) {
+      setAppointmentType("");
+    }
+  }, [isContinuationBooking, appointmentType]);
+
+  // True when the wizard is on a continuation flow AND the picked
+  // department offers neither `FOLLOW_UP` nor `PROCEDURE`. The
+  // type-select catalog will be empty and the user can't move forward —
+  // surface the dead-end with a clear instruction instead of leaving
+  // the dropdown silently unselectable.
+  const showContinuationTypeUnavailable =
+    isContinuationBooking &&
+    departmentId !== "" &&
+    departmentTypes.length > 0 &&
+    visibleDepartmentTypes.length === 0;
 
   const handlePickPatient = useCallback((next: PatientResponse | null) => {
     setPatient(next);
@@ -673,6 +726,11 @@ export default function BookingWizard({
         <Card variant="outlined">
           <CardContent>
             <Stack spacing={3}>
+              {showContinuationTypeUnavailable ? (
+                <Alert severity="warning">
+                  {tSlot(K.BookingWizard.Slot.continuationTypeUnavailable)}
+                </Alert>
+              ) : null}
               {/*
                 Step-2 form grid. 2 columns on `md+`, single column on
                 `xs`. Both rows share the same column tracks so each
@@ -731,14 +789,28 @@ export default function BookingWizard({
                     is picked so the user can't choose before a
                     department; cleared automatically when the picked
                     type isn't offered by the newly-picked department
-                    (see the cascade effect above). */}
+                    (see the cascade effect above).
+
+                    F14 — when this is a continuation booking
+                    (`previousVisit != null`), the catalog is further
+                    narrowed to `FOLLOW_UP` / `PROCEDURE` via
+                    `visibleDepartmentTypes`. The BE rejects the other
+                    two types with `CONTINUATION_APPOINTMENT_TYPE_INVALID`. */}
                 <AppointmentTypeSelect
                   value={appointmentType}
                   onChange={setAppointmentType}
-                  types={departmentTypes}
+                  types={visibleDepartmentTypes}
                   label={tSlot(K.BookingWizard.Slot.typeLabel)}
                   required
-                  disabled={!departmentId}
+                  disabled={!departmentId || showContinuationTypeUnavailable}
+                  error={showContinuationTypeUnavailable}
+                  helperText={
+                    showContinuationTypeUnavailable
+                      ? tSlot(
+                          K.BookingWizard.Slot.continuationTypeUnavailable,
+                        )
+                      : undefined
+                  }
                 />
                 <TextField
                   type="date"

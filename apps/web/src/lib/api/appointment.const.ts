@@ -118,3 +118,41 @@ export const APPOINTMENT_ERROR_CODE = {
 
 export type AppointmentErrorCode =
   (typeof APPOINTMENT_ERROR_CODE)[keyof typeof APPOINTMENT_ERROR_CODE];
+
+/**
+ * F14 (corrective tightening) — the appointment types that are valid
+ * for a CONTINUATION booking (one that carries a `previousAppointmentId`).
+ *
+ * The booking wizard's continuation step uses this set to narrow the
+ * per-department type catalog when a prior visit is picked; the BE
+ * enforces the same set on `POST /appointments` via
+ * `CONTINUATION_APPOINTMENT_TYPE_INVALID`. Drift between the FE filter
+ * and the BE check would surface as a generic 422 instead of the user
+ * being unable to pick a forbidden type — so this catalog lives in one
+ * place and the BE mirrors it.
+ *
+ * Rationale: a `NEW_PATIENT_VISIT` is by definition a first visit
+ * (continuations don't apply), and a `CONSULTATION` opens a new case
+ * thread rather than continuing one. Only `FOLLOW_UP` (the usual
+ * "come back next week") and `PROCEDURE` (the planned next-step
+ * intervention against the prior diagnosis) make semantic sense as a
+ * continuation of a prior visit.
+ */
+export const CONTINUATION_APPOINTMENT_TYPES = [
+  "FOLLOW_UP",
+  "PROCEDURE",
+] as const;
+
+export type ContinuationAppointmentType =
+  (typeof CONTINUATION_APPOINTMENT_TYPES)[number];
+
+/**
+ * Membership test for the continuation-allowed catalog. Lives next to
+ * the const so consumers don't have to re-import `Array.includes` typing
+ * gymnastics — a single named predicate keeps the call sites flat.
+ */
+export function isContinuationAppointmentType(
+  code: string,
+): code is ContinuationAppointmentType {
+  return (CONTINUATION_APPOINTMENT_TYPES as readonly string[]).includes(code);
+}
