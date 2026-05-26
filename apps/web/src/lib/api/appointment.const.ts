@@ -114,6 +114,23 @@ export const APPOINTMENT_ERROR_CODE = {
    * this through normal flow.
    */
   APPOINTMENT_OUTSIDE_BOOKING_WINDOW: "APPOINTMENT_OUTSIDE_BOOKING_WINDOW",
+  /**
+   * F14 (corrective tightening) — `POST /appointments` was given a
+   * `previousAppointmentId` that points to a row whose status is NOT
+   * `COMPLETED` (typically still `BOOKED`, occasionally `CANCELLED`).
+   * The booking wizard's continuation picker hides ineligible rows, so a
+   * caller hitting this either bypassed the wizard or deep-linked into
+   * the wizard with a stale `previousAppointmentId` query param.
+   */
+  PREVIOUS_APPOINTMENT_NOT_COMPLETED: "PREVIOUS_APPOINTMENT_NOT_COMPLETED",
+  /**
+   * F14 (corrective tightening) — `POST /appointments` was given a
+   * `previousAppointmentId` paired with an `appointmentType` that is
+   * NOT in `CONTINUATION_APPOINTMENT_TYPES` (i.e. not `FOLLOW_UP` or
+   * `PROCEDURE`). The wizard hides the disallowed type chips, so this
+   * surfaces only when a caller bypasses the wizard.
+   */
+  CONTINUATION_APPOINTMENT_TYPE_INVALID: "CONTINUATION_APPOINTMENT_TYPE_INVALID",
 } as const;
 
 export type AppointmentErrorCode =

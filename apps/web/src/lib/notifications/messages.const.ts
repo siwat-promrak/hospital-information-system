@@ -97,6 +97,16 @@ export const ERROR_CODE_TO_KEY: Readonly<
     K.Snackbar.Errors.doctorDepartmentMismatch,
   [APPOINTMENT_ERROR_CODE.APPOINTMENT_OUTSIDE_BOOKING_WINDOW]:
     K.Snackbar.Errors.outsideBookingWindow,
+  // F14 — booking-wizard continuation tightening. The BE rejects
+  // continuations whose prior visit isn't COMPLETED, and continuations
+  // whose appointment type is not in `CONTINUATION_APPOINTMENT_TYPES`.
+  // The wizard hides ineligible rows / types, so these toasts only fire
+  // when a caller (CLI / Postman / a stale referrals deep-link) reaches
+  // `POST /appointments` directly.
+  [APPOINTMENT_ERROR_CODE.PREVIOUS_APPOINTMENT_NOT_COMPLETED]:
+    K.Snackbar.Errors.previousAppointmentNotCompleted,
+  [APPOINTMENT_ERROR_CODE.CONTINUATION_APPOINTMENT_TYPE_INVALID]:
+    K.Snackbar.Errors.continuationAppointmentTypeInvalid,
 
   // Appointment groups + referrals (F14)
   [APPOINTMENT_GROUP_ERROR_CODE.PREVIOUS_APPOINTMENT_CANCELLED]:

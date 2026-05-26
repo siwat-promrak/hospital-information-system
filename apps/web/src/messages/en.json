@@ -211,7 +211,9 @@
       "referralAlreadyFulfilled": "This referral has already been fulfilled by another appointment.",
       "appointmentAlreadyReferred": "This appointment has already been referred to another department.",
       "appointmentGroupCloseForbidden": "Only the most recent visit's doctor can close this case.",
-      "appointmentNotBooked": "Action only available on booked appointments."
+      "appointmentNotBooked": "Action only available on booked appointments.",
+      "previousAppointmentNotCompleted": "Continuations can only link to a completed prior visit. Pick a completed visit or start a new case.",
+      "continuationAppointmentTypeInvalid": "Continuations can only be booked as follow-up or procedure. Change the appointment type or skip the continuation step."
     }
   },
   "Directory": {
