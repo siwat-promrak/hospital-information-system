@@ -6,6 +6,10 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
+import {
+  APPOINTMENT_READ_SCOPE,
+  resolveAppointmentReadScope,
+} from "@/appointment/scope";
 import { FE_PATH } from "@/auth/routes";
 import { PERMISSION_CODE } from "@/auth/permissions";
 import AppointmentListFilter from "@/components/appointment/AppointmentListFilter";
@@ -22,6 +26,7 @@ import {
   type AppointmentListOrderValue,
   type AppointmentStatusValue,
 } from "@/lib/api/appointment.const";
+import { getMe } from "@/lib/api/auth.api";
 import { listDepartments } from "@/lib/api/department.api";
 import { fetchDoctorPickerSeed } from "@/lib/api/doctor.actions";
 import {
@@ -105,14 +110,11 @@ export default async function AppointmentsPage({
   const tErrors = await getTranslations(NS.AppointmentsErrors);
   const tList = await getTranslations(NS.AppointmentsList);
 
-  const canRead = hasPermission(
-    session,
-    PERMISSION_CODE.APPOINTMENT_READ_OWN,
-    PERMISSION_CODE.APPOINTMENT_READ_OWN_DEPARTMENT,
-    PERMISSION_CODE.APPOINTMENT_READ_ALL,
+  const readScope = resolveAppointmentReadScope(
+    session.user.permissionCodes,
   );
 
-  if (!canRead) {
+  if (readScope === null) {
     return (
       <Card variant="outlined" sx={{ p: 4, textAlign: "center" }}>
         <Typography variant="body2" color="text.secondary">
@@ -133,17 +135,42 @@ export default async function AppointmentsPage({
   const status = resolveStatus(statusParam);
   const order = resolveOrder(orderParam) ?? APPOINTMENT_LIST_ORDER.ASC;
 
-  // Scope the doctor picker to the caller's department for NURSE — the
-  // BE-side scope guard would 403 a `?doctorId=<other-dept>` filter
-  // anyway, but trimming the picker keeps the UX clean.
+  // Per-scope filter matrix for the appointments page:
+  //
+  //  - `ALL`           : department + doctor pickers both editable. MRO
+  //                       (no seeded role today, but future F11 ADMIN
+  //                       lands here).
+  //  - `OWN_DEPARTMENT`: department disabled + pinned to caller's dept,
+  //                       doctor picker EDITABLE (NURSE / DOCTOR — DOCTOR
+  //                       holds both `.own` AND `.own-department` in the
+  //                       seeded baseline, so they fall into this branch
+  //                       and can browse colleagues for cross-coverage).
+  //  - `OWN`           : department disabled + pinned + doctor disabled
+  //                       + pinned to caller's `me.doctor.id`. No seeded
+  //                       role today; a custom role with only `.own`
+  //                       triggers this branch.
   const callerDepartmentId = session.user.departmentId ?? undefined;
+  const isReadOwnOnly = readScope === APPOINTMENT_READ_SCOPE.OWN;
+  // Fetch `/me` only when we genuinely need the caller's doctor id to
+  // pin the picker — saves a round-trip for the common DOCTOR / NURSE /
+  // MRO cases that don't lock the doctor field.
+  const me = isReadOwnOnly ? await getMe() : null;
+  const forcedDoctorId = isReadOwnOnly ? me?.doctor?.id : undefined;
+  // When the doctor is forced, scope the picker seed to ANY department
+  // that contains the caller's row — easiest is to fetch by the doctor's
+  // own department so the seed surely contains the locked row. Falls
+  // back to the caller's user department / URL filter for the wider
+  // cases.
+  const doctorSeedDepartmentId = forcedDoctorId
+    ? (me?.doctor?.departmentId ?? callerDepartmentId)
+    : (callerDepartmentId ?? departmentIdParam);
 
   const [appointmentsResult, departmentsResult, doctorSeed] =
     await Promise.all([
       listAppointments({
         page,
         pageSize,
-        doctorId: doctorIdParam,
+        doctorId: forcedDoctorId ?? doctorIdParam,
         patientId: patientIdParam,
         departmentId: departmentIdParam,
         from: fromParam,
@@ -153,7 +180,7 @@ export default async function AppointmentsPage({
       }),
       listDepartments({ page: DEFAULT_PAGE, pageSize: MAX_PAGE_SIZE }),
       fetchDoctorPickerSeed({
-        departmentId: callerDepartmentId ?? departmentIdParam,
+        departmentId: doctorSeedDepartmentId,
       }),
     ]);
 
@@ -199,12 +226,13 @@ export default async function AppointmentsPage({
           callerDepartmentId ?? departmentIdParam ?? undefined
         }
         activeDepartmentId={departmentIdParam ?? null}
-        activeDoctorId={doctorIdParam ?? null}
+        activeDoctorId={forcedDoctorId ?? doctorIdParam ?? null}
         activeStatus={status ?? null}
         activeOrder={order}
         activeFrom={fromParam ?? ""}
         activeTo={toParam ?? ""}
         departmentFilterDisabled={Boolean(callerDepartmentId)}
+        forcedDoctorId={forcedDoctorId}
       />
 
       <Card variant="outlined">

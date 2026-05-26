@@ -144,6 +144,13 @@ function SidebarContents({
   const tNavItems = useTranslations(NS.NavItems);
   const pathname = usePathname();
 
+  // Single-pass active-item resolution. When two entries share a prefix
+  // (e.g. `/appointments` + `/appointments/new`) the most-specific match
+  // wins, so visiting `/appointments/new` highlights only "Book
+  // appointment" — not both menu items. Hoisted out of the per-item
+  // render so the longest-prefix comparison runs once per nav cycle.
+  const activeItemId = resolveActiveItemId(items, pathname);
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <Toolbar
@@ -187,7 +194,7 @@ function SidebarContents({
         {items.map((item) => {
           const Icon = ICON_FOR[item.iconName];
           const label = tNavItems(item.i18nKey);
-          const selected = isItemSelected(pathname, item.href);
+          const selected = item.id === activeItemId;
 
           const button = (
             <ListItemButton
@@ -282,7 +289,40 @@ function SidebarContents({
   );
 }
 
-function isItemSelected(pathname: string, href: string): boolean {
+/**
+ * Resolve which nav item is "currently active" given the URL. Walks the
+ * nav array once and picks the entry whose `href` is the longest prefix
+ * of `pathname` (with the same equality / `startsWith(href + "/")`
+ * semantics the per-item check used). The longest-prefix rule makes
+ * sibling routes like `/appointments` + `/appointments/new` mutually
+ * exclusive — visiting `/appointments/new` activates only the more
+ * specific entry, even though `/appointments` is also a prefix match.
+ *
+ * Returns the item's `id` (or `null` when no entry matches) so the per-
+ * item render can light up exactly one `<ListItemButton>` per pathname.
+ */
+function resolveActiveItemId(
+  items: readonly NavItem[],
+  pathname: string,
+): string | null {
+  let bestId: string | null = null;
+  let bestLength = -1;
+
+  for (const item of items) {
+    if (!isHrefMatch(item.href, pathname)) {
+      continue;
+    }
+
+    if (item.href.length > bestLength) {
+      bestId = item.id;
+      bestLength = item.href.length;
+    }
+  }
+
+  return bestId;
+}
+
+function isHrefMatch(href: string, pathname: string): boolean {
   if (href === "/") {
     return pathname === "/";
   }

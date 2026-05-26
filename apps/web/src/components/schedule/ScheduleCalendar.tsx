@@ -121,6 +121,16 @@ interface ScheduleCalendarProps {
    * user steps through months / flips view mode.
    */
   extraPreserveParams?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Caller's home department id. Forwarded to `ScheduleFormDialog` so
+   * the create modal opens with the department field pre-set to the
+   * caller's dept — important for NURSE callers (who hold
+   * `schedule.create.own-department` but not `.own`) who otherwise
+   * land on an empty department + no doctor picked yet. DOCTOR callers
+   * also get the prefill, harmlessly: their doctor pre-fill resyncs
+   * the department to the doctor's row on selection.
+   */
+  prefilledDepartmentId?: string;
 }
 
 /**
@@ -166,6 +176,7 @@ export default function ScheduleCalendar({
   canDelete,
   colorByDepartment,
   extraPreserveParams,
+  prefilledDepartmentId,
 }: ScheduleCalendarProps) {
   const tSchedules = useTranslations(NS.Schedules);
 
@@ -445,6 +456,8 @@ export default function ScheduleCalendar({
         createsLockedToCaller={createsLockedToCaller}
         callerDoctorId={callerDoctorId}
         canDelete={canDelete}
+        departments={departments}
+        prefilledDepartmentId={prefilledDepartmentId}
         editing={editing}
         prefill={prefill}
       />

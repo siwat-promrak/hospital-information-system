@@ -11,7 +11,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { FE_PATH } from "@/auth/routes";
 import AppointmentStatusSelect from "@/components/shared/select/AppointmentStatusSelect";
@@ -53,6 +53,15 @@ interface AppointmentListFilterProps {
    * NURSE callers whose role auto-narrows server-side.
    */
   departmentFilterDisabled: boolean;
+  /**
+   * When set, the doctor picker is pinned to this id and rendered
+   * disabled — used when the caller's effective appointment-READ scope
+   * is `.own` (no `.own-department`), so the URL `?doctorId` is
+   * effectively a constant of the caller's own doctor id. The page also
+   * mirrors this into `activeDoctorId` so the picker resolves the
+   * pinned row from the SSR seed without any extra fetch.
+   */
+  forcedDoctorId?: string;
 }
 
 /**
@@ -90,6 +99,7 @@ export default function AppointmentListFilter({
   activeFrom,
   activeTo,
   departmentFilterDisabled,
+  forcedDoctorId,
 }: AppointmentListFilterProps) {
   const t = useTranslations(NS.AppointmentsFilters);
   const router = useRouter();
@@ -147,15 +157,38 @@ export default function AppointmentListFilter({
   // When the user changes department, if the picked doctor no longer
   // matches it, drop the doctor so the user doesn't submit a
   // `(department=A, doctor=fromDeptB)` filter that returns nothing.
+  // Suppressed when the doctor is forced — the page's RBAC pinned the
+  // picker to one row and we don't want a department flip to clear a
+  // value the user can't re-select.
   useEffect(() => {
-    if (!doctor) {
+    if (!doctor || forcedDoctorId) {
       return;
     }
 
     if (departmentId && doctor.departmentId !== departmentId) {
       setDoctor(null);
     }
-  }, [departmentId, doctor]);
+  }, [departmentId, doctor, forcedDoctorId]);
+
+  // Doctor-first selection narrows the department dropdown to the
+  // single department the picked doctor belongs to — prevents the user
+  // from picking a `(department=A, doctor=fromDeptB)` pair that would
+  // return an empty list. When no doctor is picked OR the department
+  // filter is disabled (NURSE / DOCTOR — already pinned by the page),
+  // the full catalog stays visible.
+  const narrowedDepartments = useMemo(() => {
+    if (departmentFilterDisabled || !doctor) {
+      return departments;
+    }
+
+    const match = departments.find((d) => d.id === doctor.departmentId);
+
+    if (!match) {
+      return departments;
+    }
+
+    return [match];
+  }, [departments, doctor, departmentFilterDisabled]);
 
   function buildSearch(): URLSearchParams {
     const search = new URLSearchParams();
@@ -199,7 +232,12 @@ export default function AppointmentListFilter({
 
   function handleReset() {
     setDepartmentId(departmentFilterDisabled ? departmentId : "");
-    setDoctor(null);
+    // Forced doctors (READ scope `.own` callers) stay pinned through a
+    // Reset — clearing the locked id and then re-navigating to
+    // `/appointments` would just re-pin it on the next render via
+    // `activeDoctorId`. Keep the picker's local state aligned with
+    // what the page is about to send back.
+    setDoctor(forcedDoctorId ? doctor : null);
     setStatus("");
     setOrder(APPOINTMENT_LIST_ORDER.ASC);
     setFrom("");
@@ -265,7 +303,7 @@ export default function AppointmentListFilter({
             <DepartmentSelect
               value={departmentId}
               onChange={setDepartmentId}
-              departments={departments}
+              departments={narrowedDepartments}
               label={t(K.Appointments.filters.department)}
               size="small"
               disabled={departmentFilterDisabled}
@@ -282,7 +320,8 @@ export default function AppointmentListFilter({
                 label={t(K.Appointments.filters.doctor)}
                 placeholder={t(K.Appointments.filters.doctorPlaceholder)}
                 size="small"
-                clearable
+                clearable={!forcedDoctorId}
+                disabled={Boolean(forcedDoctorId)}
               />
             </Box>
 

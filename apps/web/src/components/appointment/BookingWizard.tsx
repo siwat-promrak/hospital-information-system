@@ -71,6 +71,14 @@ interface BookingWizardProps {
    * pick whichever department their schedule lives in.
    */
   forcedDepartmentId?: string;
+  /**
+   * Gates the "Register new patient" CTA on step 1. When `false` the
+   * row drops the button entirely — DOCTOR callers (who book but can't
+   * register patients) should never see an affordance whose destination
+   * would 403. Computed in the page from
+   * `hasPermission(session, PATIENT_CREATE)`.
+   */
+  canRegisterPatient: boolean;
 }
 
 const BOOKING_STEP = {
@@ -103,6 +111,7 @@ export default function BookingWizard({
   doctorSeed,
   doctorScopeDepartmentId,
   forcedDepartmentId,
+  canRegisterPatient,
 }: BookingWizardProps) {
   const tPatient = useTranslations(NS.BookingWizardPatient);
   const tSlot = useTranslations(NS.BookingWizardSlot);
@@ -335,15 +344,19 @@ export default function BookingWizard({
               <Stack
                 direction={{ xs: "column-reverse", sm: "row" }}
                 spacing={1.5}
-                justifyContent="space-between"
+                justifyContent={
+                  canRegisterPatient ? "space-between" : "flex-end"
+                }
               >
-                <Button
-                  type="button"
-                  variant="text"
-                  onClick={() => router.push(FE_PATH.PATIENTS_NEW)}
-                >
-                  {tPatient(K.BookingWizard.Patient.registerCta)}
-                </Button>
+                {canRegisterPatient ? (
+                  <Button
+                    type="button"
+                    variant="text"
+                    onClick={() => router.push(FE_PATH.PATIENTS_NEW)}
+                  >
+                    {tPatient(K.BookingWizard.Patient.registerCta)}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="contained"
@@ -409,6 +422,22 @@ export default function BookingWizard({
                     required
                   />
                 </Box>
+                {/*
+                  TODO(F09 follow-up): pre-filter the appointment-type
+                  options to those the picked department actually offers.
+                  The BE knows the `department_appointment_types` join
+                  table but does not currently surface it on the wire
+                  (see `DepartmentResponseDto` — no `allowedAppointmentTypes`
+                  field, no `GET /departments/:id/appointment-types`
+                  route). For now the wizard shows the full catalog and
+                  the BE rejects mismatches with
+                  `400 DEPARTMENT_TYPE_NOT_ALLOWED`, which `useNotify`
+                  surfaces via the existing `ERROR_CODE_TO_KEY` map
+                  (`Snackbar.Errors.departmentTypeNotAllowed`). Picking
+                  the right wire shape (extra field on
+                  `DepartmentResponseDto` vs. a dedicated lookup endpoint)
+                  is a backend ticket — kept out of scope here.
+                */}
                 <AppointmentTypeSelect
                   value={appointmentType}
                   onChange={setAppointmentType}

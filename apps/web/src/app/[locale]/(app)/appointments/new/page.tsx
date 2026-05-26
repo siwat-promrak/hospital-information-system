@@ -58,6 +58,15 @@ export default async function BookingWizardPage({
     );
   }
 
+  // The "Register new patient" CTA on step 1 of the wizard jumps out to
+  // `/patients/new`. Gate the CTA on the same permission the patient-
+  // create route enforces so a DOCTOR (who can book but not register)
+  // doesn't see a link that would 403 on click.
+  const canRegisterPatient = hasPermission(
+    session,
+    PERMISSION_CODE.PATIENT_CREATE,
+  );
+
   // Department-scoped roles (NURSE) only book inside their own department
   // — narrow the doctor picker accordingly so the wizard's BE call
   // doesn't trip the scope guard. DOCTOR (`.own`) auto-narrows to their
@@ -90,6 +99,7 @@ export default async function BookingWizardPage({
         doctorSeed={doctorSeed}
         doctorScopeDepartmentId={callerDepartmentId}
         forcedDepartmentId={callerDepartmentId}
+        canRegisterPatient={canRegisterPatient}
       />
     </Stack>
   );

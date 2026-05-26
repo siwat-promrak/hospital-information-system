@@ -79,20 +79,18 @@ function resolveScope(raw: string | undefined): ScheduleScope {
 }
 
 /**
- * Per-mode page heading. Inlined rather than a helper because the typed
- * `as const` keys must reach `tSchedules(...)` without going through a
- * function return that widens them to `string`.
+ * Per-(viewMode, scope) page heading lookup. Inlined as a const lookup
+ * rather than a helper because the typed `as const` keys must reach
+ * `tSchedules(...)` without going through a function return that widens
+ * them to `string`.
  *
- * `OWN_PLUS_DEPT` reuses the `ALL` titles because the toggle (and the
- * active doctor filter) already tell the user what they're looking at —
- * a third heading would be noise.
+ * `OWN_PLUS_DEPT` is the only mode whose heading swaps with the active
+ * `scope` toggle (`MINE` → "My schedule", `DEPT` → "Department
+ * schedules"); the other three modes (`ALL`, `DEPT`, `OWN`) ignore the
+ * scope arg and use a fixed pair.
  */
 const HEADING_FOR_MODE = {
   [SCHEDULE_VIEW_MODE.ALL]: {
-    title: K.Schedules.allTitle,
-    subtitle: K.Schedules.allSubtitle,
-  },
-  [SCHEDULE_VIEW_MODE.OWN_PLUS_DEPT]: {
     title: K.Schedules.allTitle,
     subtitle: K.Schedules.allSubtitle,
   },
@@ -104,10 +102,24 @@ const HEADING_FOR_MODE = {
     title: K.Schedules.ownTitle,
     subtitle: K.Schedules.ownSubtitle,
   },
-} as const satisfies Record<
-  ScheduleViewMode,
-  { title: string; subtitle: string }
->;
+} as const;
+
+/**
+ * Heading lookup for the dual `OWN_PLUS_DEPT` mode — scope toggle
+ * drives the copy. Stored as a flat map (rather than a branch inside
+ * the page) so the literal `K.*` keys stay narrowed and `tSchedules`
+ * accepts them without widening to `string`.
+ */
+const HEADING_FOR_OWN_PLUS_DEPT_SCOPE = {
+  [SCHEDULE_SCOPE.MINE]: {
+    title: K.Schedules.ownTitle,
+    subtitle: K.Schedules.ownSubtitle,
+  },
+  [SCHEDULE_SCOPE.DEPT]: {
+    title: K.Schedules.deptTitle,
+    subtitle: K.Schedules.deptSubtitle,
+  },
+} as const;
 
 /**
  * Unified, permission-aware F06 schedule page. Replaces the previous
@@ -326,7 +338,13 @@ export default async function SchedulesPage({
 
   const colorByDepartment = viewMode === SCHEDULE_VIEW_MODE.ALL;
 
-  const headingCopy = HEADING_FOR_MODE[viewMode];
+  // `OWN_PLUS_DEPT` swaps copy with the scope toggle; every other mode
+  // has a static heading drawn from the per-mode map. Resolving inline
+  // keeps the literal `K.*` keys narrow enough for `tSchedules(...)` to
+  // accept them without a typecast.
+  const headingCopy = isOwnPlusDept
+    ? HEADING_FOR_OWN_PLUS_DEPT_SCOPE[scope]
+    : HEADING_FOR_MODE[viewMode];
 
   // URL-preservation maps — every interactive control that navigates
   // (calendar header, view toggle, filters, scope toggle) drops its own
@@ -424,6 +442,7 @@ export default async function SchedulesPage({
         canDelete={effectiveCanDelete}
         colorByDepartment={colorByDepartment}
         extraPreserveParams={calendarExtraPreserve}
+        prefilledDepartmentId={session.user.departmentId ?? undefined}
       />
     </Stack>
   );

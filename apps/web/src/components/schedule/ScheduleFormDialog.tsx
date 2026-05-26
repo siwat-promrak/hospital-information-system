@@ -47,6 +47,7 @@ import { useNotify } from "@/lib/notifications/use-notify";
 import { SNACKBAR_SUCCESS_KEY } from "@/lib/notifications/messages.const";
 import { isScheduleReadOnly } from "@/schedule/time";
 import type { PaginatedListInitial } from "@/lib/hooks/use-paginated-list";
+import type { DepartmentRow } from "@/types/department.types";
 import type { DoctorListRow } from "@/types/doctor.types";
 import type { ScheduleResponse } from "@/types/schedule.types";
 
@@ -112,6 +113,25 @@ interface ScheduleFormDialogProps {
    * delete affordance the BE would reject).
    */
   canDelete: boolean;
+  /**
+   * Full department catalog — used to look up the prefilled department
+   * row's name when the dialog opens in create mode without a picked
+   * doctor (NURSE callers, who don't carry their own `lockedDoctorId`).
+   * The picker still auto-fills from `selectedDoctor.department` once a
+   * doctor is chosen.
+   */
+  departments: readonly DepartmentRow[];
+  /**
+   * Caller's home department id — pre-fills the (always-disabled)
+   * department field in CREATE mode so a NURSE who opens the modal
+   * already sees their dept selected. The form value is also pre-set
+   * to this id so submit carries the right department even before the
+   * caller picks a doctor.
+   *
+   * When omitted, the dialog falls back to the existing behavior:
+   * department mirrors the picked doctor's department.
+   */
+  prefilledDepartmentId?: string;
   /** Existing schedule to edit; `null` opens the dialog in create mode. */
   editing: ScheduleResponse | null;
   /**
@@ -152,6 +172,8 @@ export default function ScheduleFormDialog({
   createsLockedToCaller,
   callerDoctorId,
   canDelete,
+  departments,
+  prefilledDepartmentId,
   editing,
   prefill,
 }: ScheduleFormDialogProps) {
@@ -210,6 +232,7 @@ export default function ScheduleFormDialog({
   });
 
   const watchedDoctorId = watch("doctorId");
+  const watchedDepartmentId = watch("departmentId");
   const watchedHasBreak = watch("hasBreak");
   const watchedDate = watch("date");
 
@@ -271,9 +294,15 @@ export default function ScheduleFormDialog({
     }
 
     // Create mode — start from the prefill (the cell the user clicked).
+    // Department resolution order: cell prefill (explicit) → caller's
+    // home department (NURSE / DOCTOR pre-fill) → empty. Doctor pre-
+    // fill (`lockedDoctorId`, DOCTOR caller pinned to their own row)
+    // narrows further; the department effect below re-syncs once the
+    // doctor is resolved.
     reset({
       doctorId: lockedDoctorId ?? "",
-      departmentId: prefill?.departmentId ?? "",
+      departmentId:
+        prefill?.departmentId ?? prefilledDepartmentId ?? "",
       date: prefill?.date ?? todayLocalISODate(),
       startTime: prefill?.startTime ?? DEFAULT_START_TIME,
       endTime: prefill?.endTime ?? DEFAULT_END_TIME,
@@ -295,7 +324,15 @@ export default function ScheduleFormDialog({
     } else {
       setPickedDoctor(null);
     }
-  }, [open, editing, lockedDoctorId, prefill, reset, doctorSeed]);
+  }, [
+    open,
+    editing,
+    lockedDoctorId,
+    prefill,
+    prefilledDepartmentId,
+    reset,
+    doctorSeed,
+  ]);
 
   // The selected doctor's department powers the department field. After
   // the RBAC refactor a doctor belongs to exactly one department, so the
@@ -354,6 +391,49 @@ export default function ScheduleFormDialog({
       shouldDirty: false,
     });
   }, [selectedDoctor, setValue]);
+
+  // Display-side wiring for the (always-disabled) department picker.
+  // The form's `departmentId` is the authoritative value (it's what
+  // submit sends to the BE); the picker just needs a label to render.
+  //
+  //   - When a doctor is picked, the form value === doctor's dept; the
+  //     `selectedDoctor.department` carries the name inline.
+  //   - When no doctor is picked but a prefill landed (NURSE caller
+  //     entering create mode), the form value === `prefilledDepartmentId`;
+  //     look up the matching row in the caller-supplied `departments`
+  //     catalog so the picker shows the right name.
+  //   - When the form value happens to be an id that isn't in the
+  //     catalog (defensive — shouldn't happen because the page passes
+  //     the full list), synthesize a thin row with an empty name so the
+  //     picker still has something to render and no crash.
+  const departmentDisplayValue = watchedDepartmentId ?? "";
+  const departmentDisplayOptions = useMemo<readonly DepartmentRow[]>(() => {
+    if (selectedDoctor) {
+      return [
+        {
+          id: selectedDoctor.departmentId,
+          name: selectedDoctor.department.name,
+          description: null,
+        },
+      ];
+    }
+
+    if (!departmentDisplayValue) {
+      return [];
+    }
+
+    const fromCatalog = departments.find(
+      (d) => d.id === departmentDisplayValue,
+    );
+
+    if (fromCatalog) {
+      return [fromCatalog];
+    }
+
+    return [
+      { id: departmentDisplayValue, name: "", description: null },
+    ];
+  }, [selectedDoctor, departmentDisplayValue, departments]);
 
   /**
    * Server-side error handler. Field-level errors that point at a specific
@@ -637,36 +717,29 @@ export default function ScheduleFormDialog({
                 )}
               />
 
-              {/* Department field — auto-derived from the selected doctor
-                  and never user-editable. The form value lives in
-                  react-hook-form's state via `setValue("departmentId", ...)`
-                  in the doctor-change effect; this control is purely visual
-                  and always `disabled`. The `departments` array is built
-                  from the selected doctor's department alone (zero or one
-                  entry) so the wrapper stays a thin pass-through to
-                  `<ClearableSelect>` without leaking the form's deeper
-                  department catalog into this dialog. Schema errors on
-                  `departmentId` are exceptionally rare (the auto-fill keeps
-                  the value valid) but we still surface them in custom
-                  inline Alerts below for defensiveness. */}
+              {/* Department field — always `disabled`. Renders the
+                  form's current `departmentId` value, which is driven by
+                  one of three sources (in this priority order):
+                    1. The selected doctor's department (auto-synced via
+                       the effect above whenever `selectedDoctor` changes).
+                    2. `prefilledDepartmentId` (the caller's home
+                       department, set in the create-mode `reset()`
+                       call) — applies until a doctor is picked.
+                    3. The user-provided cell prefill (only set by the
+                       day-details create flow).
+                  The `departments` prop carries the single row matching
+                  whichever id is currently in the form so the picker
+                  has a label to render. Falls back to a single synthesized
+                  row when the id isn't in the catalog (defensive — shouldn't
+                  happen because the page always passes the full list). */}
               <Box>
                 <DepartmentSelect
-                  value={selectedDoctor ? selectedDoctor.departmentId : ""}
+                  value={departmentDisplayValue}
                   onChange={() => {
                     // disabled — onChange is unreachable, but the prop is
                     // required by the wrapper signature
                   }}
-                  departments={
-                    selectedDoctor
-                      ? [
-                          {
-                            id: selectedDoctor.departmentId,
-                            name: selectedDoctor.department.name,
-                            description: null,
-                          },
-                        ]
-                      : []
-                  }
+                  departments={departmentDisplayOptions}
                   label={tForm(K.Schedules.Form.department)}
                   disabled
                   error={
