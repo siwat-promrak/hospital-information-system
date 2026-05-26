@@ -90,6 +90,8 @@ export const ERROR_CODE_TO_KEY: Readonly<
     K.Snackbar.Errors.departmentTypeNotAllowed,
   [APPOINTMENT_ERROR_CODE.DOCTOR_DEPARTMENT_MISMATCH]:
     K.Snackbar.Errors.doctorDepartmentMismatch,
+  [APPOINTMENT_ERROR_CODE.APPOINTMENT_OUTSIDE_BOOKING_WINDOW]:
+    K.Snackbar.Errors.outsideBookingWindow,
 };
 
 /** Single key for the generic-error path — defined once so the hook + tests share it. */

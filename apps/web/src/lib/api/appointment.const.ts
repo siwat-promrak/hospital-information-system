@@ -86,6 +86,15 @@ export const APPOINTMENT_ERROR_CODE = {
   APPOINTMENT_ALREADY_COMPLETED: "APPOINTMENT_ALREADY_COMPLETED",
   DEPARTMENT_TYPE_NOT_ALLOWED: "DEPARTMENT_TYPE_NOT_ALLOWED",
   DOCTOR_DEPARTMENT_MISMATCH: "DOCTOR_DEPARTMENT_MISMATCH",
+  /**
+   * F13 — the proposed `startAt` falls outside the
+   * `(department, type)` row's `bookingWindowStartMinute` /
+   * `bookingWindowEndMinute` bounds. Surfaces when a direct API caller
+   * bypasses the wizard's window filter on `GET /slots`; the wizard's
+   * slot grid already hides forbidden slots so the user shouldn't hit
+   * this through normal flow.
+   */
+  APPOINTMENT_OUTSIDE_BOOKING_WINDOW: "APPOINTMENT_OUTSIDE_BOOKING_WINDOW",
 } as const;
 
 export type AppointmentErrorCode =
