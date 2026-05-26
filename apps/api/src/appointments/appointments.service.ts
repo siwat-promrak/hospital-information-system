@@ -29,6 +29,7 @@ import {
   type Paginated,
 } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
+import { computeSchedulesSlots } from '../slots/slots.service';
 import type { AuthenticatedUser } from '../users/users.types';
 
 import {
@@ -146,12 +147,20 @@ export class AppointmentsService {
     dto: CreateAppointmentDto,
   ): Promise<AppointmentResponseDto> {
     const startAt = dayjs.utc(dto.startAt);
+    // Capture `now` once at the entry point so every downstream check
+    // (past-cutoff + grid alignment) reasons against the same wall-clock
+    // reading. The transaction body may take 10s of ms; without a shared
+    // `now`, a slot that's "just in the future" at line 1 could become
+    // "exactly now" by the time the grid check runs, surfacing a
+    // misleading `SLOT_NOT_ON_GRID` instead of the real
+    // `APPOINTMENT_START_IN_PAST`.
+    const now = dayjs.utc();
 
-    if (startAt.isSameOrBefore(dayjs.utc())) {
+    if (startAt.isSameOrBefore(now)) {
       throw AppException.badRequest(
         ErrorCode.APPOINTMENT_START_IN_PAST,
         'Appointment start time cannot be in the past.',
-        { startAt: dto.startAt, now: dayjs.utc().toISOString() },
+        { startAt: dto.startAt, now: now.toISOString() },
       );
     }
 
@@ -207,35 +216,41 @@ export class AppointmentsService {
           );
         }
 
+        const endAt = startAt.add(allowed.durationMinutes, 'minute');
+
         // F13 back-stop — the slot finder hides out-of-window slots in
         // the wizard, but a direct API caller could still post one.
         // Compute the local wall-clock minute-of-day at the check site
-        // (CLAUDE.md §9a) and reject when it falls outside the per-pair
-        // window. Either bound may be null (open-ended on that side).
-        const localMin = localMinuteOfDay(startAt.toDate());
+        // (CLAUDE.md §9a) and reject when the WHOLE slot
+        // [startMin, endMin) doesn't fit inside the per-pair window.
+        // Checking only the start would let a 30-min slot at 10:40 pass
+        // a window-end of 11:00 even though it actually ends at 11:10.
+        const slotStartLocalMin = localMinuteOfDay(startAt.toDate());
+        const slotEndLocalMin = localMinuteOfDay(endAt.toDate());
 
         if (
           !isWithinBookingWindow(
-            localMin,
+            slotStartLocalMin,
+            slotEndLocalMin,
             allowed.bookingWindowStartMinute,
             allowed.bookingWindowEndMinute,
           )
         ) {
           throw AppException.badRequest(
             ErrorCode.APPOINTMENT_OUTSIDE_BOOKING_WINDOW,
-            'Requested startAt falls outside the booking window for this (department, type).',
+            'Requested slot falls outside the booking window for this (department, type).',
             {
               departmentId: dto.departmentId,
               appointmentType: dto.appointmentType,
               startAt: dto.startAt,
-              localMinuteOfDay: localMin,
+              endAt: endAt.toISOString(),
+              slotStartLocalMinute: slotStartLocalMin,
+              slotEndLocalMinute: slotEndLocalMin,
               bookingWindowStartMinute: allowed.bookingWindowStartMinute,
               bookingWindowEndMinute: allowed.bookingWindowEndMinute,
             },
           );
         }
-
-        const endAt = startAt.add(allowed.durationMinutes, 'minute');
 
         // 2. Doctor exists + doctor's home dept matches.
         const doctor = await tx.doctor.findFirst({
@@ -349,19 +364,24 @@ export class AppointmentsService {
           }
         }
 
-        // 5. Slot-availability race check — half-open overlap against
-        //    every BOOKED / COMPLETED appointment on the same doctor.
-        const conflicting = await tx.appointment.findFirst({
+        // 5. Slot-availability race check + grid alignment. Fetch every
+        //    BOOKED / COMPLETED appointment that intersects the schedule
+        //    range so both the conflict check (SLOT_TAKEN) AND the grid
+        //    alignment check (SLOT_NOT_ON_GRID) can reason about the same
+        //    blocker set without a second round-trip.
+        const blockers = await tx.appointment.findMany({
           where: {
             doctorId: dto.doctorId,
             status: { in: [...BLOCKING_APPOINTMENT_STATUSES] },
-            AND: [
-              { startAt: { lt: endAt.toDate() } },
-              { endAt: { gt: startAt.toDate() } },
-            ],
+            startAt: { lt: schedule.endAt },
+            endAt: { gt: schedule.startAt },
           },
           select: { id: true, startAt: true, endAt: true },
         });
+
+        const conflicting = blockers.find(
+          (b) => b.startAt < endAt.toDate() && b.endAt > startAt.toDate(),
+        );
 
         if (conflicting) {
           throw AppException.conflict(
@@ -371,6 +391,45 @@ export class AppointmentsService {
               conflictingAppointmentId: conflicting.id,
               slotStartAt: startAt.toISOString(),
               slotEndAt: endAt.toISOString(),
+            },
+          );
+        }
+
+        // 5a. Grid alignment — the slot finder re-anchors the grid at
+        //     each free-interval start (sliding-window). Direct API
+        //     callers MUST land on one of those positions; a freehand
+        //     `startAt` (e.g., 09:07 when the grid offers 09:15 / 10:15)
+        //     would otherwise let bookings slip through that the finder
+        //     never surfaced. Re-uses the pure slot-grid step with a
+        //     throwaway doctor ref (the grid step doesn't check identity)
+        //     and the shared `now` captured at the entry point.
+        const offered = computeSchedulesSlots({
+          schedule: {
+            id: schedule.id,
+            departmentId: dto.departmentId,
+            startAt: schedule.startAt,
+            endAt: schedule.endAt,
+            breakStartAt: schedule.breakStartAt,
+            breakEndAt: schedule.breakEndAt,
+            doctor: { id: dto.doctorId, doctorCode: '', name: '' },
+          },
+          durationMinutes: allowed.durationMinutes,
+          bookingWindowStartMinute: allowed.bookingWindowStartMinute,
+          bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+          blockingAppointments: blockers,
+          now: now.toDate(),
+        });
+
+        const slotStartIso = startAt.toISOString();
+
+        if (!offered.some((s) => s.startAt === slotStartIso)) {
+          throw AppException.badRequest(
+            ErrorCode.SLOT_NOT_ON_GRID,
+            'Requested startAt does not align to a slot offered by the slot finder for this schedule.',
+            {
+              scheduleId: schedule.id,
+              slotStartAt: slotStartIso,
+              durationMinutes: allowed.durationMinutes,
             },
           );
         }

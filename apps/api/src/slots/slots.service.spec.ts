@@ -11,6 +11,7 @@ import type { AuthenticatedUser } from '../users/users.types';
 
 import {
   SlotsService,
+  computeFreeIntervals,
   computeSchedulesSlots,
   overlapsHalfOpen,
   resolveDayBounds,
@@ -295,6 +296,116 @@ describe('computeSchedulesSlots', () => {
     });
   });
 
+  describe('sliding-window re-anchor (gap reclamation)', () => {
+    it("re-anchors after a non-grid-aligned blocker — 15-min booking at 09:00 surfaces a 60-min slot at 09:15", () => {
+      // The motivating case: schedule 09:00–12:00, an existing 15-min
+      // booking of a different type occupies 09:00–09:15, and the caller
+      // searches for a 60-min slot. The previous fixed-grid algorithm
+      // anchored at the schedule start (09:00 / 10:00 / 11:00), dropping
+      // 09:00–10:00 because it overlapped the 09:15 blocker — leaving the
+      // 09:15–10:15 capacity unreclaimed. The sliding-window algorithm
+      // re-anchors at the free interval's start (09:15), so 09:15–10:15
+      // AND 10:15–11:15 both surface (11:15–12:15 would spill past
+      // schedule end, so it's dropped).
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          startAt: dt('2026-06-15T09:00:00Z'),
+          endAt: dt('2026-06-15T12:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
+        blockingAppointments: [
+          {
+            startAt: dt('2026-06-15T09:00:00Z'),
+            endAt: dt('2026-06-15T09:15:00Z'),
+          },
+        ],
+        now: FAR_FUTURE_NOW,
+      });
+
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2026-06-15T09:15:00.000Z',
+        '2026-06-15T10:15:00.000Z',
+      ]);
+    });
+
+    it('re-anchors after each blocker independently (two non-aligned blockers fragment the day)', () => {
+      // Schedule 09:00–13:00, 60-min type. Blockers 09:00–09:15 (15 min)
+      // and 11:30–11:45 (15 min) leave two free intervals:
+      //   [09:15, 11:30) → 09:15–10:15, 10:15–11:15 (11:15–12:15 spills
+      //                    past 11:30, drop)
+      //   [11:45, 13:00) → 11:45–12:45 (12:45–13:45 spills past 13:00,
+      //                    drop)
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          startAt: dt('2026-06-15T09:00:00Z'),
+          endAt: dt('2026-06-15T13:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
+        blockingAppointments: [
+          {
+            startAt: dt('2026-06-15T09:00:00Z'),
+            endAt: dt('2026-06-15T09:15:00Z'),
+          },
+          {
+            startAt: dt('2026-06-15T11:30:00Z'),
+            endAt: dt('2026-06-15T11:45:00Z'),
+          },
+        ],
+        now: FAR_FUTURE_NOW,
+      });
+
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2026-06-15T09:15:00.000Z',
+        '2026-06-15T10:15:00.000Z',
+        '2026-06-15T11:45:00.000Z',
+      ]);
+    });
+
+    it('re-anchors at the post-break boundary when the break is not grid-aligned', () => {
+      // Schedule 09:00–13:00, 60-min type, break 11:30–12:00 (off-grid).
+      // Free intervals: [09:00, 11:30), [12:00, 13:00).
+      //   [09:00, 11:30) → 09:00–10:00, 10:00–11:00 (11:00–12:00 spills
+      //                    past 11:30, drop)
+      //   [12:00, 13:00) → 12:00–13:00 (fits exactly).
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          startAt: dt('2026-06-15T09:00:00Z'),
+          endAt: dt('2026-06-15T13:00:00Z'),
+          breakStartAt: dt('2026-06-15T11:30:00Z'),
+          breakEndAt: dt('2026-06-15T12:00:00Z'),
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
+        blockingAppointments: [],
+        now: FAR_FUTURE_NOW,
+      });
+
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2026-06-15T09:00:00.000Z',
+        '2026-06-15T10:00:00.000Z',
+        '2026-06-15T12:00:00.000Z',
+      ]);
+    });
+  });
+
   describe('appointment exclusion', () => {
     it('excludes a slot overlapping a BOOKED appointment', () => {
       const slots = computeSchedulesSlots({
@@ -496,6 +607,52 @@ describe('computeSchedulesSlots', () => {
       ]);
     });
 
+    it('drops a slot whose START fits the window but whose END spills past windowEnd', () => {
+      // Bug scenario: schedule 09:00–17:00 local with prior bookings at
+      // 09:30–10:00, 10:00–10:20, 10:20–10:40 leaves free intervals
+      // [09:00, 09:30) and [10:40, 17:00). Booking window end = 660
+      // (= 11:00 local). For a 30-min type:
+      //   [09:00, 09:30): 09:00–09:30 (slotEndMin = 570 ≤ 660 → kept)
+      //   [10:40, 17:00): 10:40–11:10 (slotEndMin = 670 > 660 → DROPPED)
+      //   The previous "start-only" check incorrectly kept 10:40–11:10.
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          // 02:00 UTC = 09:00 Asia/Bangkok.
+          startAt: dt('2099-06-15T02:00:00Z'),
+          endAt: dt('2099-06-15T10:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 30,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: 660,
+        blockingAppointments: [
+          {
+            startAt: dt('2099-06-15T02:30:00Z'),
+            endAt: dt('2099-06-15T03:00:00Z'),
+          },
+          {
+            startAt: dt('2099-06-15T03:00:00Z'),
+            endAt: dt('2099-06-15T03:20:00Z'),
+          },
+          {
+            startAt: dt('2099-06-15T03:20:00Z'),
+            endAt: dt('2099-06-15T03:40:00Z'),
+          },
+        ],
+        now: dt('2099-01-01T00:00:00Z'),
+      });
+
+      // Expect ONLY 09:00–09:30 local (02:00–02:30 UTC). 10:40 local
+      // would spill to 11:10 local, past the 11:00 window end.
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2099-06-15T02:00:00.000Z',
+      ]);
+    });
+
     it('keeps the inclusive lower bound + drops the exclusive upper bound', () => {
       // Boundary semantics: start is INCLUSIVE (`localMin >= start`),
       // end is EXCLUSIVE (`localMin < end`). 09:00 local must be kept
@@ -526,6 +683,100 @@ describe('computeSchedulesSlots', () => {
         '2099-06-15T04:00:00.000Z',
       ]);
     });
+  });
+});
+
+describe('computeFreeIntervals', () => {
+  it('returns the full window when there are no blockers', () => {
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T12:00:00Z'),
+      },
+      [],
+    );
+
+    expect(out).toEqual([
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T12:00:00Z'),
+      },
+    ]);
+  });
+
+  it('returns [] for a zero-length window', () => {
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T09:00:00Z'),
+      },
+      [{ startAt: dt('2026-06-15T08:00:00Z'), endAt: dt('2026-06-15T10:00:00Z') }],
+    );
+
+    expect(out).toEqual([]);
+  });
+
+  it('clamps a blocker that pokes out the left edge of the window', () => {
+    // Blocker 08:30–09:15 with window 09:00–10:00 → effective
+    // blocker 09:00–09:15 → free interval [09:15, 10:00).
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T10:00:00Z'),
+      },
+      [{ startAt: dt('2026-06-15T08:30:00Z'), endAt: dt('2026-06-15T09:15:00Z') }],
+    );
+
+    expect(out).toEqual([
+      {
+        startAt: dt('2026-06-15T09:15:00Z'),
+        endAt: dt('2026-06-15T10:00:00Z'),
+      },
+    ]);
+  });
+
+  it('merges overlapping blockers without emitting zero-length intervals', () => {
+    // Blockers 09:15–09:45 and 09:30–10:00 overlap → effective single
+    // blocker 09:15–10:00 → free interval [09:00, 09:15) only (the
+    // post-blocker tail is empty since 10:00 is the window end).
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T10:00:00Z'),
+      },
+      [
+        { startAt: dt('2026-06-15T09:15:00Z'), endAt: dt('2026-06-15T09:45:00Z') },
+        { startAt: dt('2026-06-15T09:30:00Z'), endAt: dt('2026-06-15T10:00:00Z') },
+      ],
+    );
+
+    expect(out).toEqual([
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T09:15:00Z'),
+      },
+    ]);
+  });
+
+  it('emits an interval between two non-touching blockers', () => {
+    // Schedule 09:00–12:00, blockers 09:30–09:45 and 11:00–11:15 →
+    // free intervals [09:00, 09:30), [09:45, 11:00), [11:15, 12:00).
+    const out = computeFreeIntervals(
+      {
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T12:00:00Z'),
+      },
+      [
+        { startAt: dt('2026-06-15T09:30:00Z'), endAt: dt('2026-06-15T09:45:00Z') },
+        { startAt: dt('2026-06-15T11:00:00Z'), endAt: dt('2026-06-15T11:15:00Z') },
+      ],
+    );
+
+    expect(out).toEqual([
+      { startAt: dt('2026-06-15T09:00:00Z'), endAt: dt('2026-06-15T09:30:00Z') },
+      { startAt: dt('2026-06-15T09:45:00Z'), endAt: dt('2026-06-15T11:00:00Z') },
+      { startAt: dt('2026-06-15T11:15:00Z'), endAt: dt('2026-06-15T12:00:00Z') },
+    ]);
   });
 });
 

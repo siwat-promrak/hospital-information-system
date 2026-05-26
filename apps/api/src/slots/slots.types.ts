@@ -59,6 +59,17 @@ export interface ResolvedDayBounds {
 }
 
 /**
+ * Half-open free interval inside a schedule. Produced by
+ * `computeFreeIntervals` (slots.service.ts) and consumed by both the slot
+ * finder (one re-anchored grid per interval) and the booking-side grid
+ * alignment check (`SLOT_NOT_ON_GRID`).
+ */
+export interface FreeInterval {
+  startAt: Date;
+  endAt: Date;
+}
+
+/**
  * Subset of `DoctorSchedule` consumed by `computeSchedulesSlots`. Mirrors
  * the columns selected by `findSlots`; declared narrowly so the pure
  * computation function never depends on the full Prisma model.

@@ -942,7 +942,10 @@ describe('F14 — appointment groups + referrals e2e', () => {
         departmentId: f.deptB.id,
         scheduleId: f.scheduleB.id,
         appointmentType: AppointmentType.FOLLOW_UP,
-        startAt: scratchIso(2, 11, 30),
+        // 11:40 — first 20-min FOLLOW_UP slot after the prev booking
+        // ([11:00, 11:20)) re-anchors the grid. 11:30 would be off-grid
+        // (SLOT_NOT_ON_GRID).
+        startAt: scratchIso(2, 11, 40),
         previousAppointmentId: apptRes.body.id,
       });
     expect(continueRes.status).toBe(201);
@@ -1068,7 +1071,10 @@ describe('F14 — appointment groups + referrals e2e', () => {
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
         appointmentType: AppointmentType.FOLLOW_UP,
-        startAt: scratchIso(1, 17, 30),
+        // 17:40 — first 20-min FOLLOW_UP slot after the prev booking
+        // ([17:00, 17:20)) re-anchors the grid. 17:30 would be off-grid
+        // (SLOT_NOT_ON_GRID).
+        startAt: scratchIso(1, 17, 40),
         previousAppointmentId: firstRes.body.id,
       });
     expect(secondRes.status).toBe(201);
@@ -1110,7 +1116,10 @@ describe('F14 — appointment groups + referrals e2e', () => {
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
         appointmentType: AppointmentType.CONSULTATION,
-        startAt: scratchIso(1, 9, 30),
+        // 09:40 — schedule starts at 09:00 with 20-min step, so the
+        // valid grid is 09:00 / 09:20 / 09:40 / …. 09:30 would be
+        // off-grid (SLOT_NOT_ON_GRID).
+        startAt: scratchIso(1, 9, 40),
       });
     expect(firstRes.status).toBe(201);
 
@@ -1129,7 +1138,10 @@ describe('F14 — appointment groups + referrals e2e', () => {
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
         appointmentType: AppointmentType.FOLLOW_UP,
-        startAt: scratchIso(1, 10, 30),
+        // 10:40 — after the prev booking ([09:40, 10:00)) re-anchors
+        // the grid to start at 10:00, the next valid 20-min FOLLOW_UP
+        // slots are 10:00 / 10:20 / 10:40 / …. 10:30 would be off-grid.
+        startAt: scratchIso(1, 10, 40),
         previousAppointmentId: firstRes.body.id,
       });
     expect(secondRes.status).toBe(201);

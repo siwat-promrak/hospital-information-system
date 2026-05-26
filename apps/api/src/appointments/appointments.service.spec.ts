@@ -465,6 +465,13 @@ describe('AppointmentsService.create — continuation validation', () => {
 
               return null;
             },
+            // Stubbed empty — no concurrent bookings on the doctor's
+            // schedule for these continuation-validation tests. Powers
+            // both the SLOT_TAKEN race check and the SLOT_NOT_ON_GRID
+            // grid-alignment check (no blockers ⇒ single free interval
+            // [scheduleStart, scheduleEnd) so the standard 09:00-anchored
+            // grid surfaces SLOT_START = 10:00 with a 20-min step).
+            findMany: async () => [],
             aggregate: async () => ({ _max: { visitNumber: 1 } }),
             create: createSpy,
             update: async () => baseRow(),

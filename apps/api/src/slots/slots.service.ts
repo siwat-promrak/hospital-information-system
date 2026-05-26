@@ -25,8 +25,8 @@ import type {
   ComputeScheduleSlotsArgs,
   DepartmentTypeRule,
   FindSlotsArgs,
+  FreeInterval,
   ResolvedDayBounds,
-  ScheduleWindow,
   SlotDoctorRef,
   SlotResult,
 } from './slots.types';
@@ -442,6 +442,22 @@ export function resolveDayBounds(isoDate: string): ResolvedDayBounds {
  * (`findMany`, doctor lookup, `(deptId, type)` check, …). Returns slot
  * objects already shaped for the wire (`SlotResult`). See
  * `ComputeScheduleSlotsArgs` in `slots.types.ts` for the input contract.
+ *
+ * Algorithm — sliding-window with re-anchor at free-interval starts:
+ *
+ *  1. Treat the break as just another blocker so step 2 naturally avoids it.
+ *  2. Compute the maximal free intervals inside the schedule's working
+ *     window by walking the (sorted, merged) blocker set.
+ *  3. For each free interval `[freeStart, freeEnd)`, anchor the grid at
+ *     `freeStart` and step by `durationMinutes`. Emit each candidate that
+ *     - starts strictly AFTER `now` (matches the previous strict-`>` cutoff
+ *       so a slot at `now` is excluded), AND
+ *     - sits inside the per-(dept, type) booking window (F13).
+ *
+ * Re-anchoring after each blocker is what reclaims the gap a mixed-duration
+ * day leaves behind in a fixed-grid design — a 15-min booking at 09:00 on
+ * a 09:00–12:00 schedule no longer hides the 09:15–10:15 slot for a 60-min
+ * type.
  */
 export function computeSchedulesSlots(
   args: ComputeScheduleSlotsArgs,
@@ -454,78 +470,136 @@ export function computeSchedulesSlots(
     blockingAppointments,
     now,
   } = args;
-  const slots: SlotResult[] = [];
 
-  const scheduleEnd = dayjs.utc(schedule.endAt);
+  // Fold the break into the blocker set so the free-interval walk
+  // naturally fragments at the break boundary. Past-cutoff stays in the
+  // emit loop (it's a wall-clock comparison, not an interval).
+  const blockers: Array<{ startAt: Date; endAt: Date }> = [
+    ...blockingAppointments,
+  ];
+
+  if (schedule.breakStartAt !== null && schedule.breakEndAt !== null) {
+    blockers.push({
+      startAt: schedule.breakStartAt,
+      endAt: schedule.breakEndAt,
+    });
+  }
+
+  const freeIntervals = computeFreeIntervals(
+    { startAt: schedule.startAt, endAt: schedule.endAt },
+    blockers,
+  );
+
+  const slots: SlotResult[] = [];
   const nowUtc = dayjs.utc(now);
 
-  let slotStart = dayjs.utc(schedule.startAt);
+  for (const free of freeIntervals) {
+    const freeEnd = dayjs.utc(free.endAt);
+    let slotStart = dayjs.utc(free.startAt);
 
-  while (true) {
-    const slotEnd = slotStart.add(durationMinutes, 'minute');
+    while (true) {
+      const slotEnd = slotStart.add(durationMinutes, 'minute');
 
-    // Half-open: the slot fits iff slotEnd <= windowEnd. The grid stops
-    // the moment one more step would spill past the schedule's end.
-    if (slotEnd.isAfter(scheduleEnd)) {
-      break;
-    }
+      if (slotEnd.isAfter(freeEnd)) {
+        break;
+      }
 
-    const slotStartDate = slotStart.toDate();
-    const slotEndDate = slotEnd.toDate();
-
-    // Past-slot rule: drop if startAt <= now. `isAfter` is strict so a
-    // slot starting exactly at "now" is excluded too (consistent with
-    // SCHEDULE_START_IN_PAST in F06).
-    if (slotStart.isAfter(nowUtc)) {
-      const intersectsBreak = scheduleHasBreak(schedule)
-        ? overlapsHalfOpen(
-            { startAt: slotStartDate, endAt: slotEndDate },
-            { startAt: schedule.breakStartAt!, endAt: schedule.breakEndAt! },
-          )
-        : false;
-
-      if (!intersectsBreak) {
-        const blocked = blockingAppointments.some((appt) =>
-          overlapsHalfOpen(
-            { startAt: slotStartDate, endAt: slotEndDate },
-            appt,
-          ),
+      // Past-slot rule (strict `>`): a slot starting exactly at `now`
+      // is excluded — mirrors the previous SCHEDULE_START_IN_PAST guard.
+      if (slotStart.isAfter(nowUtc)) {
+        const slotStartLocalMin = localMinuteOfDay(slotStart.toDate());
+        const slotEndLocalMin = localMinuteOfDay(slotEnd.toDate());
+        const inWindow = isWithinBookingWindow(
+          slotStartLocalMin,
+          slotEndLocalMin,
+          bookingWindowStartMinute,
+          bookingWindowEndMinute,
         );
 
-        if (!blocked) {
-          // F13 — drop the slot when its local wall-clock minute-of-day
-          // sits outside the per-pair booking window. Either bound may
-          // be null (open-ended on that side); both null = pass through.
-          const localMin = localMinuteOfDay(slotStartDate);
-          const inWindow = isWithinBookingWindow(
-            localMin,
-            bookingWindowStartMinute,
-            bookingWindowEndMinute,
-          );
-
-          if (inWindow) {
-            slots.push({
-              startAt: slotStart.toISOString(),
-              endAt: slotEnd.toISOString(),
-              departmentId: schedule.departmentId,
-              scheduleId: schedule.id,
-              doctorId: schedule.doctor.id,
-              doctorCode: schedule.doctor.doctorCode,
-              doctorName: schedule.doctor.name,
-            });
-          }
+        if (inWindow) {
+          slots.push({
+            startAt: slotStart.toISOString(),
+            endAt: slotEnd.toISOString(),
+            departmentId: schedule.departmentId,
+            scheduleId: schedule.id,
+            doctorId: schedule.doctor.id,
+            doctorCode: schedule.doctor.doctorCode,
+            doctorName: schedule.doctor.name,
+          });
         }
       }
-    }
 
-    slotStart = slotEnd;
+      slotStart = slotEnd;
+    }
   }
 
   return slots;
 }
 
-function scheduleHasBreak(schedule: ScheduleWindow): boolean {
-  return schedule.breakStartAt !== null && schedule.breakEndAt !== null;
+/**
+ * Compute the maximal free intervals inside `[window.startAt, window.endAt)`
+ * given a set of blockers. Blockers are clamped to the window and merged
+ * for overlaps before the walk; the result is sorted, non-overlapping, and
+ * contains no zero-length intervals.
+ *
+ * Exported so the booking endpoint can re-use the same algebra when
+ * validating that a requested `startAt` aligns to the grid produced by the
+ * slot finder (see `AppointmentsService#createInTransaction` —
+ * `SLOT_NOT_ON_GRID` check).
+ */
+export function computeFreeIntervals(
+  window: { startAt: Date; endAt: Date },
+  blockers: ReadonlyArray<{ startAt: Date; endAt: Date }>,
+): FreeInterval[] {
+  const winStart = window.startAt.getTime();
+  const winEnd = window.endAt.getTime();
+
+  if (winStart >= winEnd) {
+    return [];
+  }
+
+  // Clamp each blocker to the window; drop any that falls entirely outside
+  // the window or collapses to zero length after clamping.
+  const clamped: Array<{ startAt: number; endAt: number }> = [];
+
+  for (const blocker of blockers) {
+    const start = Math.max(blocker.startAt.getTime(), winStart);
+    const end = Math.min(blocker.endAt.getTime(), winEnd);
+
+    if (start < end) {
+      clamped.push({ startAt: start, endAt: end });
+    }
+  }
+
+  // Sort by start; walk, advancing the cursor past each blocker. Touching
+  // blockers (b1.endAt === b2.startAt) merge naturally — the cursor jumps
+  // straight to b2.endAt without emitting a zero-length interval between.
+  clamped.sort((a, b) => a.startAt - b.startAt);
+
+  const intervals: FreeInterval[] = [];
+  let cursor = winStart;
+
+  for (const blocker of clamped) {
+    if (blocker.startAt > cursor) {
+      intervals.push({
+        startAt: new Date(cursor),
+        endAt: new Date(blocker.startAt),
+      });
+    }
+
+    if (blocker.endAt > cursor) {
+      cursor = blocker.endAt;
+    }
+  }
+
+  if (cursor < winEnd) {
+    intervals.push({
+      startAt: new Date(cursor),
+      endAt: new Date(winEnd),
+    });
+  }
+
+  return intervals;
 }
 
 /**

@@ -794,9 +794,15 @@ describe('F09 — appointments e2e', () => {
       // `(deptHome, PROCEDURE)` carries a per-pair durationMinutes = 90.
       // The day-6 schedule (09:00–12:00 UTC) hosts this booking so it
       // does not collide with the day-5 PROCEDURE-with-reason fixture.
-      // Booking at 09:30 UTC therefore returns endAt = 11:00 UTC — the
-      // duration came from the per-pair row, not the retired global
-      // const map.
+      // Booking at 09:00 UTC therefore returns endAt = 10:30 UTC — the
+      // duration came from the per-pair row (90 min), not the retired
+      // global const map (60 min for PROCEDURE).
+      //
+      // Start time pinned to 09:00 UTC because the sliding-window grid
+      // re-anchored on the day-6 schedule's start (no other bookings on
+      // day-6) emits 09:00 + 90, then 10:30 + 90 (which would spill past
+      // 12:00 and is dropped). 09:30 would be off-grid — see
+      // SLOT_NOT_ON_GRID in appointments.service.ts.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -808,20 +814,29 @@ describe('F09 — appointments e2e', () => {
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHomeF13.id,
           appointmentType: AppointmentType.PROCEDURE,
-          startAt: scratchIso(6, 9, 30),
+          startAt: scratchIso(6, 9),
           reason: 'F13 90-min duration check',
         });
 
       expect(res.status).toBe(201);
-      expect(res.body.startAt).toBe(scratchIso(6, 9, 30));
-      // 09:30 + 90 min = 11:00.
-      expect(res.body.endAt).toBe(scratchIso(6, 11));
+      expect(res.body.startAt).toBe(scratchIso(6, 9));
+      // 09:00 + 90 min = 10:30.
+      expect(res.body.endAt).toBe(scratchIso(6, 10, 30));
     });
 
-    maybe('F13 — in-window booking succeeds for FOLLOW_UP (10:30 UTC = 17:30 local)', async () => {
+    maybe('F13 — in-window booking succeeds for FOLLOW_UP (10:35 UTC = 17:35 local)', async () => {
       // FOLLOW_UP carries a 17:00–18:00 LOCAL booking window. Day-1
-      // schedule (09:00–12:00 UTC). 10:30 UTC = 17:30 Asia/Bangkok →
-      // localMin = 1050 ∈ [1020, 1080) → in-window.
+      // schedule (09:00–12:00 UTC). 10:35 UTC = 17:35 Asia/Bangkok →
+      // localMin = 1055 ∈ [1020, 1080) → in-window.
+      //
+      // Start time pinned to 10:35 (not 10:30) so it lands on the
+      // sliding-window grid: day-1 has prior bookings at 09:00–09:20
+      // (NURSE CONSULTATION) and 11:00–11:20 (DOCTOR CONSULTATION),
+      // leaving free intervals [09:20, 11:00) and [11:20, 12:00). A
+      // FOLLOW_UP step (15 min) anchored at 09:20 emits 09:20, 09:35,
+      // …, 10:35, 10:50 — 10:30 would be off-grid (it sits between
+      // 10:20 and 10:35). See SLOT_NOT_ON_GRID in
+      // appointments.service.ts.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -833,13 +848,13 @@ describe('F09 — appointments e2e', () => {
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHome.id,
           appointmentType: AppointmentType.FOLLOW_UP,
-          startAt: scratchIso(1, 10, 30),
+          startAt: scratchIso(1, 10, 35),
         });
 
       expect(res.status).toBe(201);
-      expect(res.body.startAt).toBe(scratchIso(1, 10, 30));
-      // FOLLOW_UP duration = 15 min → endAt = 10:45 UTC.
-      expect(res.body.endAt).toBe(scratchIso(1, 10, 45));
+      expect(res.body.startAt).toBe(scratchIso(1, 10, 35));
+      // FOLLOW_UP duration = 15 min → endAt = 10:50 UTC.
+      expect(res.body.endAt).toBe(scratchIso(1, 10, 50));
     });
 
     maybe('F13 — out-of-window booking → 400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW', async () => {
