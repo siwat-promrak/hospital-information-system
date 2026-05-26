@@ -127,6 +127,7 @@ below live in `docs/user-stories.md`.
 | F12 | i18n parity + README                      | `chore/i18n-readme`             | Audit all strings to `messages/*.json`, add `Roles.*` / `Permissions.*` namespaces, regenerate keys, write project `README.md`. | US-12.1, US-12.2                                      | F11           | `pnpm type-check` green; manual lang switch shows no raw English on TH; README walkthrough takes a fresh clone to a running app in <15 min.                                                                                | M      | P1       |
 | F13 ✅ | Per-(department, type) booking rules      | `feat/dept-type-rules`          | Move per-`AppointmentType` `durationMinutes` off the global const map onto `department_appointment_types` so each (department, type) pair has its own duration; add nullable `bookingWindowStartMinute` + `bookingWindowEndMinute` columns (wall-clock local minute-of-day in `CLINIC_TIMEZONE`) so a department can restrict a type to part of the day (e.g. Cardiology `NEW_PATIENT_VISIT` before 11:00). Wire enforcement into `SlotsService` (filter slots outside the window) + `AppointmentsService.create` (back-stop `400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW`). Replace `GET /appointment-types`'s per-type duration field with a new `GET /departments/:id/appointment-types` returning `[{ code, label, durationMinutes, bookingWindowStartMinute?, bookingWindowEndMinute? }]`. Adds the `CLINIC_TIMEZONE` env (default `Asia/Bangkok`). | US-13.1, US-13.2, US-13.3, US-13.4 | F09 | Manual: a NURSE booking Cardiology `NEW_PATIENT_VISIT` for 14:00 sees no slots in the wizard AND a direct `POST /appointments` returns `400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW`; a 09:30 slot books normally; per-pair durations override the old global defaults (Orthopedics `PROCEDURE` = 90 min, others unchanged). | L      | P1       |
 | F14 | Appointment groups + referrals            | `feat/referrals`                | New `appointment_groups` table (`id`, `patientId`, `openedAt`, `closedAt?`, audit cluster sans `deleted_*`) + five new columns on `Appointment` (`appointmentGroupId?`, `visitNumber?`, `referredToDepartmentId?`, `referredAt?`, `referralFulfilledByAppointmentId? @unique`). Lazy group creation: `POST /appointments` accepts optional `previousAppointmentId` and materialises a fresh group on first continuation. Doctor-side visit-ending actions are RPC-style POSTs: `POST /appointments/:id/complete` (status only), `POST /appointments/:id/refer` (complete + flag referral, group stays open), `POST /appointment-groups/:id/close` (complete latest visit + close group). Destination NURSE picks up via `GET /appointments?pendingReferralToDepartmentId=<B>`. Permissions reuse `appointment.{read,create,update}.*` — no new permission codes. | US-14.1, US-14.2, US-14.3, US-14.4, US-14.5, US-14.6, US-14.7 | F13 | Manual: DOCTOR refers visit A (cardiology) to neurology → NURSE in neurology sees A in the pending queue → books visit B with `previousAppointmentId=A` → group is created, A gets `visit_number=1`, B gets `visit_number=2`, `referralFulfilledByAppointmentId` is set. DOCTOR closes the case → group's `closedAt` set, B transitions to `COMPLETED`. A subsequent `POST /appointments` with `previousAppointmentId=B` returns `400 APPOINTMENT_GROUP_CLOSED`. | L      | P1       |
+| F15 | Slot finder                               | `feat/slot-finder`              | Dedicated `/find-slot` screen for ad-hoc availability search. Filters: department (visible only in ALL mode), doctor (scoped to effective dept), appointment type (required), date (single-date picker). View mode mirrors F06 — driven by `schedule.read.*` codes. Extends `GET /slots` to make `doctorId` optional (multi-doctor merge when omitted) and widens its permission gate to ALSO accept `schedule.read.all` so MRO can use it read-only. "Book this slot" CTA deep-links into the booking wizard with `doctorScheduleId` + `startAt` + `appointmentType` + `departmentId` pre-filled; CTA only renders when the caller holds `appointment.create.{own,own-department}`. | US-15.1, US-15.2, US-15.3, US-15.4 | F09 (booking wizard deep-link target), F13 (per-pair type catalog) | Manual: NURSE picks `FOLLOW_UP` + today, sees open slots across every doctor in their dept; clicks Book → wizard lands on patient picker with everything else locked. DOCTOR in OWN_PLUS_DEPT defaults to `mine` and sees only their own slots; flipping to `dept` reveals colleagues. MRO sees the slot list but no Book CTA. PHARMACY cannot reach `/find-slot` (no `schedule.read.*`). | M      | P1       |
 
 > **F04, F10 were removed when patient sign-in / self-service was scoped out (2026-05-24).** The feature IDs are intentionally left as gaps — IDs stay stable so commit and PR references continue to resolve. F08 was repurposed for the medical records module and F09 absorbed the original "F08 staff booking" scope when the RBAC overhaul moved booking to NURSE (department-scoped) and DOCTOR (own-doctor) instead of a blanket STAFF role.
 
@@ -1723,6 +1724,148 @@ Expected outcomes are inline in the script. Spot-check the
 exists with `openedAt` set, `closedAt` set after step 5, audit columns
 populated (`created_by` is the NURSE who booked step 4; `updated_by`
 is the DOCTOR who called close in step 5).
+
+---
+
+### F15 — Slot finder (P1, M)
+
+**Why a standalone feature**
+
+The booking wizard (F09) discovers slots only after the caller has
+already committed to a specific patient + department + doctor + date +
+type. That's the wrong shape for the ad-hoc workflow *"any doctor in
+this department who has a 30-minute follow-up open tomorrow?"* — a
+question that comes up when a patient calls in flexibly, when a
+referral lands in a new department and the receiving NURSE needs to
+scan their team's availability, or when an MRO wants to answer a
+cross-department availability question without holding write
+permissions.
+
+The slot finder is the dedicated entry point for that workflow. It
+ends in the booking wizard (deep-link with the slot pre-filled) so
+the actual commit flow stays in one place; F15 is the *exploration*
+surface that feeds it.
+
+**Files expected to change**
+
+Backend (`apps/api/`):
+
+- `src/slots/slots.controller.ts` —
+  - Update the permission gate to ALSO accept `schedule.read.all`
+    (any-of with the existing `appointment.create.{own,own-department}`
+    set). Use the `@RequirePermission()` decorator with the widened
+    list.
+  - Continue forwarding the same query shape; `doctorId` becomes
+    optional in the DTO.
+- `src/slots/dto/find-slots.query.dto.ts` —
+  - `doctorId` becomes `@IsOptional()` (was required). The rest of the
+    DTO is unchanged.
+- `src/slots/slots.service.ts` —
+  - When `doctorId` is omitted, fan out: load every doctor with an
+    active `DoctorSchedule` in `departmentId` on the requested `date`,
+    build each doctor's slot grid, merge, sort by `startAt`.
+  - Existing scope enforcement applies per-doctor (so a NURSE asking
+    for a foreign-dept's slots still gets `403 INSUFFICIENT_PERMISSION_SCOPE`).
+  - Result rows carry `doctorId`, `doctorCode`, and the doctor's
+    display name so the FE doesn't need a second lookup.
+- `src/slots/slots.swagger.ts` —
+  - Document the optional `doctorId` and the widened permission gate.
+- `src/slots/slots.service.spec.ts` + `test/slots.e2e-spec.ts` —
+  - New cases: omit-doctor multi-doctor merge, MRO with
+    `schedule.read.all` succeeds (today returns 403), NURSE cross-dept
+    rejection still fires.
+
+Frontend (`apps/web/`):
+
+- `src/app/[locale]/(app)/find-slot/page.tsx` (new) — server component:
+  - Resolves view mode via the existing
+    `resolveScheduleViewMode(session.user.permissionCodes)` helper.
+    Forbidden card when null.
+  - Renders a filter card (department / doctor / appointment type /
+    date), a scope toggle in OWN_PLUS_DEPT, and a results list below.
+  - URL state: `?scope=mine|dept`, `?departmentId=`, `?doctorId=`,
+    `?type=`, `?date=YYYY-MM-DD`. Defaults: `scope=mine` (OWN_PLUS_DEPT),
+    `date=today`, others empty.
+  - Search button disabled until `type` is picked.
+- `src/components/find-slot/` (new) —
+  - `FindSlotFilterCard.tsx` — composes existing
+    `<DepartmentSelect>` / `<DoctorSelect>` / `<AppointmentTypeSelect>` /
+    date picker.
+  - `FindSlotResultsList.tsx` — grouped by doctor, each row carries the
+    "Book this slot" CTA.
+  - `FindSlotScopeToggle.tsx` — `mine` / `dept` toggle for OWN_PLUS_DEPT.
+- `src/lib/api/slots.api.ts` — extend to allow `doctorId` omitted in
+  the typed call.
+- `src/lib/api/slots.const.ts` — query-param constants.
+- `src/types/slot.types.ts` — extend `SlotRow` with the new
+  `doctorCode` + `doctorName` fields.
+- `src/app-shell/nav-items.const.ts` — add a "Find slot" entry gated
+  on any `schedule.read.*` code.
+- `src/messages/{en,th}.json` — new `FindSlot.*` namespace; regenerate
+  `i18n/keys.generated.ts`.
+- `src/components/appointment/BookingWizard.tsx` — already reads
+  `doctorScheduleId` / `startAt` / `appointmentType` / `departmentId`
+  from search params (existing referral pickup path). Confirm the
+  wizard locks each prefilled field and lands on the patient picker.
+  If F09 doesn't already lock these fields, a minor update here is
+  scoped into F15.
+
+**Wire surface summary**
+
+| Endpoint | Change | Auth |
+| --- | --- | --- |
+| `GET /slots?doctorId?=&departmentId=&date=&type=` | `doctorId` becomes optional; widened permission gate to also accept `schedule.read.all`. | `appointment.create.{own,own-department}` OR `schedule.read.all`. |
+
+No new endpoints, no schema changes, no new permission codes.
+
+**Migration / breaking-change notes**
+
+- No DB migration. No schema changes.
+- `GET /slots` `doctorId` becomes optional — backwards compatible
+  (existing callers continue to pass it).
+- Permission gate widens — backwards compatible (existing callers
+  still authorised; MRO becomes newly authorised).
+
+**Manual smoke test**
+
+```bash
+# 1. NURSE (DEPT view mode) finds open follow-up slots for today
+#    across every doctor in their own department.
+curl -s "http://localhost:3001/api/v1/slots?departmentId=<own>&date=2026-06-01&type=FOLLOW_UP" \
+  -H "Cookie: next-auth.session-token=<nurse-jwt>" | jq
+
+# 2. NURSE attempts cross-dept — rejected.
+curl -i "http://localhost:3001/api/v1/slots?departmentId=<foreign>&date=2026-06-01&type=FOLLOW_UP" \
+  -H "Cookie: next-auth.session-token=<nurse-jwt>"
+# expect 403 INSUFFICIENT_PERMISSION_SCOPE
+
+# 3. MRO (schedule.read.all, no appointment.create) — succeeds.
+curl -s "http://localhost:3001/api/v1/slots?departmentId=<any>&date=2026-06-01&type=FOLLOW_UP" \
+  -H "Cookie: next-auth.session-token=<mro-jwt>" | jq
+# expect 200 with slot list
+
+# 4. PHARMACY (no schedule.read.*) — rejected.
+curl -i "http://localhost:3001/api/v1/slots?departmentId=<any>&date=2026-06-01&type=FOLLOW_UP" \
+  -H "Cookie: next-auth.session-token=<pharmacy-jwt>"
+# expect 403 INSUFFICIENT_PERMISSION
+```
+
+In the browser:
+
+1. Sign in as `nurse1@gmail.com`. Open `/find-slot`. The page
+   pre-pins the department to the caller's home. Pick `FOLLOW_UP` + today.
+   Search lists open slots across multiple doctors. Click "Book this slot"
+   → land on `/appointments/new` with everything locked except the
+   patient picker.
+2. Sign in as a seeded DOCTOR. Open `/find-slot`. Toggle defaults to
+   `mine` — only the caller's own slots appear. Flip to `dept` —
+   colleagues' slots appear; the doctor picker becomes available
+   (scoped to the caller's dept).
+3. Sign in as `records1@gmail.com` (MRO). Open `/find-slot`. The
+   department picker is visible (ALL mode). The slot list renders
+   without a "Book this slot" CTA — pure visibility.
+4. Sign in as `pharmacy1@gmail.com`. The "Find slot" sidebar entry is
+   hidden; direct-URL access to `/find-slot` returns the forbidden card.
 
 ---
 
