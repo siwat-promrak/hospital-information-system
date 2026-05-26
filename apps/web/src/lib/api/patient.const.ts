@@ -7,7 +7,7 @@
  * (CLAUDE.md rule 2b — no magic strings).
  */
 
-import { BE_PATH } from "@/auth/routes";
+import { BE_PATH, BE_PATH_BUILDER } from "@/auth/routes";
 
 /**
  * Re-exported from `BE_PATH` so callers import the patient-specific
@@ -15,6 +15,10 @@ import { BE_PATH } from "@/auth/routes";
  * cross-tier auth catalog.
  */
 export const PATIENT_API_PATH = BE_PATH.PATIENTS;
+
+export const PATIENT_API_PATH_BUILDER = {
+  detail: (id: string) => BE_PATH_BUILDER.patientDetail(id),
+} as const;
 
 export const PATIENT_QUERY_PARAM = {
   /**

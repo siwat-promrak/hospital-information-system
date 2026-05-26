@@ -8,15 +8,18 @@ import type {
   AppointmentResponse,
   AppointmentStatus,
   CancelAppointmentBody,
+  CompleteAppointmentBody,
   CreateAppointmentBody,
+  FollowUpAppointmentBody,
+  ReferAppointmentWithNoteBody,
 } from "@/types/appointment.types";
-import type { ReferAppointmentBody } from "@/types/appointment-group.types";
 import type { Paginated } from "@/types/pagination.types";
 
 import {
   cancelAppointment,
   completeAppointment,
   createAppointment,
+  followUpAppointment,
   listAppointments,
   referAppointment,
 } from "./appointment.api";
@@ -95,16 +98,19 @@ export async function cancelAppointmentAction(
 }
 
 /**
- * F14 — mark an appointment as `COMPLETED`. Surfaces on the appointment
- * detail page as the doctor's "Complete" button.
+ * F17 — mark an appointment as `COMPLETED` with a mandatory clinical note.
+ * Surfaces inside `WorkspaceNotePanel` as the doctor's "Complete visit" action.
+ * The BE creates the medical-records row in the same transaction.
  */
 export async function completeAppointmentAction(
   id: string,
+  body: CompleteAppointmentBody,
 ): Promise<AppointmentActionResult<AppointmentResponse>> {
   try {
-    const completed = await completeAppointment(id);
+    const completed = await completeAppointment(id, body);
 
     revalidatePath(FE_PATH.APPOINTMENTS);
+    revalidatePath(FE_PATH.WORKSPACE);
     revalidatePath(FE_PATH_BUILDER.appointmentDetail(id));
 
     if (completed.appointmentGroupId) {
@@ -120,17 +126,20 @@ export async function completeAppointmentAction(
 }
 
 /**
- * F14 — stamp a referral to another department. Surfaces on the
- * appointment detail page as the doctor's "Refer" button + modal.
+ * F17 — stamp a referral to another department, including the mandatory
+ * clinical note. Surfaces inside `WorkspaceNotePanel` as the doctor's
+ * "Refer" action + modal. The BE creates the medical-records row in the
+ * same transaction.
  */
 export async function referAppointmentAction(
   id: string,
-  body: ReferAppointmentBody,
+  body: ReferAppointmentWithNoteBody,
 ): Promise<AppointmentActionResult<AppointmentResponse>> {
   try {
     const referred = await referAppointment(id, body);
 
     revalidatePath(FE_PATH.APPOINTMENTS);
+    revalidatePath(FE_PATH.WORKSPACE);
     revalidatePath(FE_PATH_BUILDER.appointmentDetail(id));
     revalidatePath(FE_PATH.REFERRALS);
 
@@ -141,6 +150,34 @@ export async function referAppointmentAction(
     }
 
     return { ok: true, data: referred };
+  } catch (err) {
+    return { ok: false, error: toActionError(err) };
+  }
+}
+
+/**
+ * F17 — atomically complete the current visit and create a new FOLLOW_UP
+ * appointment. Surfaces inside `WorkspaceNotePanel` → `FollowUpDialog`.
+ * The BE creates the medical-records row in the same transaction.
+ */
+export async function followUpAppointmentAction(
+  id: string,
+  body: FollowUpAppointmentBody,
+): Promise<AppointmentActionResult<AppointmentResponse>> {
+  try {
+    const followed = await followUpAppointment(id, body);
+
+    revalidatePath(FE_PATH.APPOINTMENTS);
+    revalidatePath(FE_PATH.WORKSPACE);
+    revalidatePath(FE_PATH_BUILDER.appointmentDetail(id));
+
+    if (followed.appointmentGroupId) {
+      revalidatePath(
+        FE_PATH_BUILDER.appointmentGroupDetail(followed.appointmentGroupId),
+      );
+    }
+
+    return { ok: true, data: followed };
   } catch (err) {
     return { ok: false, error: toActionError(err) };
   }
