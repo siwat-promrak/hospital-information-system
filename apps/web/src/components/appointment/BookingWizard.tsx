@@ -72,6 +72,15 @@ interface BookingWizardProps {
    */
   forcedDepartmentId?: string;
   /**
+   * Pre-fill + lock the doctor picker to the caller's own row. Used when
+   * the caller's effective `appointment.create` scope is `.own` only
+   * (DOCTOR self-booking) — the BE forces the doctor to the caller anyway,
+   * so making the user pick a value they don't actually control is pure
+   * friction. The picker stays disabled (greyed out, no dropdown) and the
+   * row threads straight into the `POST /appointments` payload.
+   */
+  lockedDoctor?: DoctorListRow;
+  /**
    * Gates the "Register new patient" CTA on step 1. When `false` the
    * row drops the button entirely — DOCTOR callers (who book but can't
    * register patients) should never see an affordance whose destination
@@ -110,6 +119,7 @@ export default function BookingWizard({
   doctorSeed,
   doctorScopeDepartmentId,
   forcedDepartmentId,
+  lockedDoctor,
   canRegisterPatient,
 }: BookingWizardProps) {
   const tPatient = useTranslations(NS.BookingWizardPatient);
@@ -132,7 +142,9 @@ export default function BookingWizard({
   const [departmentId, setDepartmentId] = useState<string>(
     forcedDepartmentId ?? "",
   );
-  const [doctor, setDoctor] = useState<DoctorListRow | null>(null);
+  const [doctor, setDoctor] = useState<DoctorListRow | null>(
+    lockedDoctor ?? null,
+  );
   const [appointmentType, setAppointmentType] = useState<
     AppointmentType | ""
   >("");
@@ -478,6 +490,12 @@ export default function BookingWizard({
                       K.BookingWizard.Slot.doctorPlaceholder,
                     )}
                     required
+                    disabled={Boolean(lockedDoctor)}
+                    helperText={
+                      lockedDoctor
+                        ? tSlot(K.BookingWizard.Slot.doctorLockedHelper)
+                        : undefined
+                    }
                   />
                 </Box>
                 {/* Appointment-type Select narrows to the picked

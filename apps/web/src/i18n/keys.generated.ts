@@ -128,6 +128,7 @@ export const K = {
       departmentLockedHelper: "departmentLockedHelper",
       doctorLabel: "doctorLabel",
       doctorLoadingMore: "doctorLoadingMore",
+      doctorLockedHelper: "doctorLockedHelper",
       doctorNoMatches: "doctorNoMatches",
       doctorPlaceholder: "doctorPlaceholder",
       doctorSearchScopedHint: "doctorSearchScopedHint",
