@@ -678,6 +678,150 @@ describe('F07 — appointment types + slot finder e2e', () => {
     expect(starts).toContain(slotIso(13, 20));
   });
 
+  // Reproduction of the user-reported regression: GET /slots was returning
+  // slots that had already been booked via POST /appointments. The existing
+  // "BOOKED appointment excludes its slot" test only creates the appointment
+  // via `prisma.appointment.create`, so it could pass while the real booking
+  // path persists a row that the slot finder fails to exclude. This test
+  // exercises the FULL path — POST /appointments then GET /slots — to lock
+  // the wire-to-wire contract.
+  maybe(
+    'STAFF: POST /appointments then GET /slots excludes the booked slot (wire-to-wire)',
+    async () => {
+      // Fresh schedule on +5h so it doesn't collide with the earlier 09:00,
+      // 11:00, 13:00, 15:00 windows used by the other tests in this suite.
+      const wireSchedule = await prisma.doctorSchedule.create({
+        data: {
+          doctorId: fixtures!.doctor.id,
+          departmentId: fixtures!.deptPrimary.id,
+          startAt: slotDate(16, 0),
+          endAt: slotDate(17, 0),
+          createdBy: fixtures!.superAdminId,
+        },
+      });
+
+      const jwt = await jwtFor(fixtures!.nurse);
+      const patientId = await ensureScratchPatient(
+        prisma,
+        fixtures!.superAdminId,
+      );
+
+      // 1. Confirm the slot grid contains the 16:20 slot before we book.
+      const beforeRes = await request(server)
+        .get(
+          `/api/v1/slots?doctorId=${fixtures!.doctor.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(beforeRes.status).toBe(200);
+
+      const beforeStarts = beforeRes.body
+        .filter((s: { scheduleId: string }) => s.scheduleId === wireSchedule.id)
+        .map((s: { startAt: string }) => s.startAt);
+
+      expect(beforeStarts).toContain(slotIso(16, 20));
+
+      // 2. Book the 16:20 slot via the real booking endpoint.
+      const bookRes = await request(server)
+        .post('/api/v1/appointments')
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({
+          patientId,
+          doctorId: fixtures!.doctor.id,
+          departmentId: fixtures!.deptPrimary.id,
+          scheduleId: wireSchedule.id,
+          appointmentType: AppointmentType.CONSULTATION,
+          startAt: slotIso(16, 20),
+        });
+
+      expect(bookRes.status).toBe(201);
+      expect(bookRes.body.status).toBe('BOOKED');
+      expect(bookRes.body.startAt).toBe(slotIso(16, 20));
+      expect(bookRes.body.endAt).toBe(slotIso(16, 40));
+
+      // 3. Re-query GET /slots — the 16:20 slot MUST now be excluded.
+      const afterRes = await request(server)
+        .get(
+          `/api/v1/slots?doctorId=${fixtures!.doctor.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(afterRes.status).toBe(200);
+
+      const afterStarts = afterRes.body
+        .filter((s: { scheduleId: string }) => s.scheduleId === wireSchedule.id)
+        .map((s: { startAt: string }) => s.startAt);
+
+      expect(afterStarts).toContain(slotIso(16, 0));
+      expect(afterStarts).not.toContain(slotIso(16, 20));
+      expect(afterStarts).toContain(slotIso(16, 40));
+    },
+  );
+
+  // Day-boundary edge case: a schedule that spans midnight UTC. The slot
+  // finder fetches schedules with `startAt < dayEnd && endAt > dayStart`
+  // and uses the SAME bounds for the blocking-appointments fetch. An
+  // appointment booked into the schedule's "after midnight" portion has a
+  // `startAt >= dayEnd`, so it is silently dropped from the blocker set —
+  // and the slot finder emits the slot as still-available even though it
+  // is already booked. This is the regression: querying with the schedule's
+  // earlier UTC day re-emits a booked slot that lives in the next UTC day.
+  maybe(
+    'STAFF: a BOOKED appointment past UTC midnight excludes its slot (day-boundary)',
+    async () => {
+      // Schedule spans 23:00 (SCHEDULE_DAY) UTC → 01:00 (SCHEDULE_DAY+1) UTC.
+      const pad = (n: number): string => n.toString().padStart(2, '0');
+      const boundaryStartIso = `${SCHEDULE_YEAR}-${pad(SCHEDULE_MONTH)}-${pad(SCHEDULE_DAY)}T23:00:00.000Z`;
+      const boundaryEndIso = `${SCHEDULE_YEAR}-${pad(SCHEDULE_MONTH)}-${pad(SCHEDULE_DAY + 1)}T01:00:00.000Z`;
+      const blockedSlotStartIso = `${SCHEDULE_YEAR}-${pad(SCHEDULE_MONTH)}-${pad(SCHEDULE_DAY + 1)}T00:20:00.000Z`;
+      const blockedSlotEndIso = `${SCHEDULE_YEAR}-${pad(SCHEDULE_MONTH)}-${pad(SCHEDULE_DAY + 1)}T00:40:00.000Z`;
+
+      const boundarySchedule = await prisma.doctorSchedule.create({
+        data: {
+          doctorId: fixtures!.doctor.id,
+          departmentId: fixtures!.deptPrimary.id,
+          startAt: new Date(boundaryStartIso),
+          endAt: new Date(boundaryEndIso),
+          createdBy: fixtures!.superAdminId,
+        },
+      });
+
+      // Block the post-midnight slot (next UTC day) with a BOOKED appt.
+      await prisma.appointment.create({
+        data: {
+          patientId: await ensureScratchPatient(prisma, fixtures!.superAdminId),
+          doctorId: fixtures!.doctor.id,
+          departmentId: fixtures!.deptPrimary.id,
+          scheduleId: boundarySchedule.id,
+          appointmentType: AppointmentType.CONSULTATION,
+          status: AppointmentStatus.BOOKED,
+          startAt: new Date(blockedSlotStartIso),
+          endAt: new Date(blockedSlotEndIso),
+          createdBy: fixtures!.superAdminId,
+        },
+      });
+
+      const jwt = await jwtFor(fixtures!.nurse);
+      const res = await request(server)
+        .get(
+          `/api/v1/slots?doctorId=${fixtures!.doctor.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(res.status).toBe(200);
+
+      const starts = res.body
+        .filter(
+          (s: { scheduleId: string }) => s.scheduleId === boundarySchedule.id,
+        )
+        .map((s: { startAt: string }) => s.startAt);
+
+      // The booked post-midnight slot MUST NOT appear in the slot grid for
+      // the schedule's earlier UTC day.
+      expect(starts).not.toContain(blockedSlotStartIso);
+    },
+  );
+
   maybe('STAFF: a fully-past date returns [] (200, not 400)', async () => {
     // Seed a schedule on a year-2000 day — fully past relative to "now".
     await prisma.doctorSchedule.create({

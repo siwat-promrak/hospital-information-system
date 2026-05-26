@@ -593,6 +593,50 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
     ]);
   });
 
+  it('queries blocking appointments across the schedule union (not just the requested UTC day)', async () => {
+    // A schedule spans 23:00 (day N) UTC → 01:00 (day N+1) UTC. The
+    // blocking-appointment filter MUST cover the schedule's full range,
+    // not just the requested date's UTC bounds — otherwise an appointment
+    // booked into the post-midnight portion would be silently dropped
+    // from the blocker set and the slot finder would re-emit a slot that
+    // is already booked. This test pins the Prisma `where` bounds to the
+    // union [min(schedule.startAt), max(schedule.endAt)).
+    const apptFindMany = jest.fn().mockResolvedValue([]);
+
+    const prisma = buildPrisma({
+      doctorSchedule: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'sched-boundary',
+            departmentId: DEPARTMENT_ID,
+            startAt: new Date('2099-06-15T23:00:00.000Z'),
+            endAt: new Date('2099-06-16T01:00:00.000Z'),
+            breakStartAt: null,
+            breakEndAt: null,
+          },
+        ]),
+      },
+      appointment: { findMany: apptFindMany },
+    });
+    const service = await buildService(prisma);
+
+    await service.findSlots(NURSE_CALLER, {
+      doctorId: DOCTOR_ID,
+      departmentId: DEPARTMENT_ID,
+      date: '2099-06-15',
+      type: AppointmentType.CONSULTATION,
+    });
+
+    expect(apptFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          startAt: { lt: new Date('2099-06-16T01:00:00.000Z') },
+          endAt: { gt: new Date('2099-06-15T23:00:00.000Z') },
+        }),
+      }),
+    );
+  });
+
   it('returns [] (200) for a fully-past date', async () => {
     // Mocked Prisma still echoes a schedule on the date, but every slot
     // sits in the past and gets dropped — the response is `[]`, never 404

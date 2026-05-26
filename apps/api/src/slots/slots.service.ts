@@ -96,14 +96,30 @@ export class SlotsService {
       return [];
     }
 
+    // Cover the FULL range of schedules being processed, not just the
+    // requested UTC day. A schedule that spans midnight UTC emits slots
+    // on both sides of the boundary, so a booking in the next-day portion
+    // would otherwise be silently dropped from the blocker set (its
+    // `startAt >= dayEnd`) and the slot finder would re-emit an already-
+    // booked slot. Compute the union [min(startAt), max(endAt)) across
+    // fetched schedules and use that as the half-open filter bound.
+    const scheduleRangeStart = schedules.reduce<Date>(
+      (acc, s) => (s.startAt < acc ? s.startAt : acc),
+      schedules[0].startAt,
+    );
+    const scheduleRangeEnd = schedules.reduce<Date>(
+      (acc, s) => (s.endAt > acc ? s.endAt : acc),
+      schedules[0].endAt,
+    );
+
     const blockingAppointments = await this.prisma.appointment.findMany({
       where: {
         doctorId: args.doctorId,
         status: { in: [...BLOCKING_APPOINTMENT_STATUSES] },
-        // Day-narrowed for index efficiency; the per-slot overlap check is
-        // still half-open. Use the same day bounds as the schedule fetch.
-        startAt: { lt: dayEnd },
-        endAt: { gt: dayStart },
+        // Half-open overlap against the schedule union — keeps the query
+        // indexable AND covers slots that spill past midnight UTC.
+        startAt: { lt: scheduleRangeEnd },
+        endAt: { gt: scheduleRangeStart },
       },
       select: { startAt: true, endAt: true },
     });
