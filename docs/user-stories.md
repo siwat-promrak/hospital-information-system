@@ -1257,6 +1257,277 @@ take-home end-to-end.
 
 ---
 
+## E13 — Per-(department, type) booking rules (P1, F13 `feat/dept-type-rules`)
+
+Today the per-`AppointmentType` slot duration (`NEW_PATIENT_VISIT=30`,
+`FOLLOW_UP=15`, `CONSULTATION=20`, `PROCEDURE=60`) lives in a single
+global const map and every type is bookable any time of day a doctor is
+working. Real clinics need per-department control: an ortho `PROCEDURE`
+may need 90 minutes; cardiology may want `NEW_PATIENT_VISIT` confined to
+mornings so the doctor can run follow-ups in the afternoon.
+
+This feature moves both rules onto the existing `department_appointment_types`
+join table — per-pair `durationMinutes` + nullable `bookingWindowStartMinute`
+/ `bookingWindowEndMinute` (wall-clock local minute-of-day in the new
+`CLINIC_TIMEZONE` env, default `Asia/Bangkok`). Booking-window
+enforcement: `SlotsService` filters slots whose `startAt` (converted to
+local time) falls outside the window; `AppointmentsService.create`
+back-stops with `400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW`.
+
+See CLAUDE.md §9a — booking windows are wall-clock local time, not UTC
+minute-of-day; the comparison happens at the check site via
+`dayjs.utc(startAt).tz(CLINIC_TIMEZONE)`.
+
+### US-13.1 — Per-department appointment-type catalog
+
+**US-13.1** — As a NURSE or DOCTOR opening the booking wizard for a
+department, I want to see the appointment types that department offers
+along with each type's duration and booking window, so that I understand
+the slot grid the wizard is about to render.
+
+**Acceptance criteria:**
+
+- `GET /departments/:id/appointment-types` returns
+  `[{ code, label, durationMinutes, bookingWindowStartMinute?,
+       bookingWindowEndMinute? }]` — one row per
+  `department_appointment_types` entry for that department.
+- The booking wizard's type chip renders the window copy when set
+  (e.g. "Before 11:00 only" or "09:00 – 12:00"), so the user understands
+  why later slots may be hidden.
+- The legacy `GET /appointment-types` becomes a pure label catalog
+  (drops `durationMinutes` from the wire). Any FE consumer reading
+  `durationMinutes` from the global endpoint MUST switch to the
+  per-department endpoint.
+
+### US-13.2 — Slot finder hides slots outside the booking window
+
+**US-13.2** — As a NURSE booking `NEW_PATIENT_VISIT` in a department
+that restricts the type to mornings, I want the slot grid to omit
+afternoon slots automatically, so that I never offer the patient a
+forbidden slot.
+
+**Acceptance criteria:**
+
+- `SlotsService` reads `bookingWindowStartMinute` /
+  `bookingWindowEndMinute` from the `(departmentId, type)` row it
+  already loads for the `DEPARTMENT_TYPE_NOT_ALLOWED` check (no extra
+  round-trip).
+- For each grid slot, computes
+  `local = dayjs.utc(startAt).tz(CLINIC_TIMEZONE)` minute-of-day; drops
+  the slot when `start ≤ local < end` is violated (either bound may be
+  null = open-ended on that side).
+- Slots already excluded by past-time / booked / break-window logic
+  continue to be excluded; window filtering composes.
+
+### US-13.3 — Appointment create rejects bookings outside the window
+
+**US-13.3** — As the backend, I want `POST /appointments` to back-stop
+the wizard's window filter, so that a direct API caller bypassing the
+wizard cannot book a forbidden slot.
+
+**Acceptance criteria:**
+
+- After the existing `(departmentId, appointmentType)` validation,
+  `AppointmentsService.create` recomputes the local minute-of-day for
+  the proposed `startAt` and rejects bookings outside the window with
+  `400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW`.
+- The new code is added to `apps/api/src/common/errors.ts`.
+
+### US-13.4 — Per-pair duration drives `endAt`
+
+**US-13.4** — As the backend, I want
+`Appointment.endAt = startAt + departmentAppointmentType.durationMinutes`,
+so that the slot length matches each department's policy.
+
+**Acceptance criteria:**
+
+- The global `APPOINTMENT_TYPE_DURATION_MINUTES` map is removed.
+- `SlotsService` slot grid step + `AppointmentsService.create` both
+  read `durationMinutes` from the `(departmentId, type)` join row.
+- Existing appointments keep their baked-in `endAt` — no migration
+  retro-fits historical rows.
+- Seed includes at least one non-default duration (e.g. Orthopedics
+  `PROCEDURE = 90`) so reviewers can spot-check the override works.
+
+---
+
+## E14 — Appointment groups + transfers (P1, F14 `feat/appointment-groups`)
+
+Today every appointment is a standalone row. Real clinics need to link
+visits within a clinical thread: a follow-up to a prior `NEW_PATIENT_VISIT`
+belongs in the same case, and a referral to another specialist
+continues that case in a different department. Without grouping, "all
+visits for Mrs. Smith's diabetes thread" is unrecoverable from the
+patient's mixed timeline of unrelated complaints.
+
+This feature adds an `appointment_groups` table and lazily materialises
+a group whenever a continuation is booked. Transfer state lives as three
+columns on `Appointment` (no separate transfer table) — the originating
+row IS the transfer record. Permissions reuse the existing
+`appointment.*` family — no new permission codes.
+
+**Schema additions:**
+- `AppointmentGroup { id, patientId, openedAt, closedAt?, audit }` —
+  `openedAt` is the clinical source-of-truth for case start, distinct
+  from audit `created_at`. No `deleted_at` / `deleted_by` (mirrors
+  `Appointment`).
+- `Appointment.appointmentGroupId String?` — NULL for standalone visits.
+- `Appointment.visitNumber Int?` — 1-indexed within group; NULL when
+  standalone. Partial unique on `(group_id, visit_number)`.
+- `Appointment.transferredToDepartmentId String?` — destination, free
+  choice.
+- `Appointment.transferredAt DateTime?` — when the transfer was
+  initiated.
+- `Appointment.transferFulfilledByAppointmentId String?` — `@unique`,
+  links to the receiving appointment once B picks up the transfer.
+
+### US-14.1 — Front-desk continues an existing case
+
+**US-14.1** — As a NURSE booking a follow-up or transfer pickup, I want
+to pick "Continue case" from a list of the patient's prior visits, so
+that the new appointment is linked into the same clinical thread.
+
+**Acceptance criteria:**
+
+- The booking wizard adds a step after patient selection:
+  "Is this a continuation of a prior visit?" — default **No**.
+- **Yes** branch shows a picker listing the patient's prior
+  non-cancelled appointments (open groups + ungrouped). Each row shows
+  date, department, doctor, and (if grouped) `visit_number`.
+- Picking a row sets `previousAppointmentId` in the `POST /appointments`
+  payload.
+- `GET /appointment-groups?patientId=&status=open|closed|all` provides
+  the data (open + closed groups filterable, with member count + latest
+  visit summary). Gated on `appointment.read.*`.
+
+### US-14.2 — Group materialises lazily on continuation booking
+
+**US-14.2** — As the backend, I want a group to be created
+automatically inside `POST /appointments` when `previousAppointmentId`
+is supplied, so that the front-desk never has to call a separate
+"open case" endpoint.
+
+**Acceptance criteria:**
+
+- `POST /appointments` accepts optional `previousAppointmentId`. The
+  service runs the following in one transaction:
+  1. Validate prev exists, same patient, `status != CANCELLED` (else
+     `400 PREVIOUS_APPOINTMENT_CANCELLED`).
+  2. If prev has a group → assert `closed_at IS NULL`; new row joins
+     same `group_id` with `visit_number = max(group.visit_number) + 1`.
+     Group-closed → `400 APPOINTMENT_GROUP_CLOSED`.
+  3. If prev has no group → create a fresh `AppointmentGroup` →
+     back-link prev (`group_id`, `visit_number = 1`) → insert new
+     (`group_id`, `visit_number = 2`).
+  4. If prev's `transferredToDepartmentId` is set AND new's
+     `departmentId` matches → also set
+     `prev.transferFulfilledByAppointmentId = new.id`. Mismatch →
+     `400 TRANSFER_DEPARTMENT_MISMATCH`. Already fulfilled →
+     `409 TRANSFER_ALREADY_FULFILLED`.
+- Existing appointments (pre-F14) remain ungrouped — no backfill.
+
+### US-14.3 — Doctor completes a visit
+
+**US-14.3** — As a DOCTOR finishing a visit that does not transfer and
+does not end the case, I want a "Complete visit" action that marks the
+appointment `COMPLETED` without committing to a next step, so that the
+front-desk can book the follow-up later.
+
+**Acceptance criteria:**
+
+- `POST /appointments/:id/complete` transitions `status` from `BOOKED`
+  to `COMPLETED`. Idempotent on `COMPLETED`; rejects from `CANCELLED`
+  with `409 APPOINTMENT_NOT_BOOKED`.
+- Auth: caller must be the doctor on the appointment
+  (`appointment.update.own`).
+- No group / transfer side-effect — this is the "completion-only"
+  ending, symmetric with `cancel`.
+
+### US-14.4 — Doctor transfers a visit to another department
+
+**US-14.4** — As a DOCTOR finishing a visit and deciding to refer the
+patient to another specialist, I want a single "Transfer to department"
+action that completes my visit AND records the transfer, so that the
+destination department's queue picks it up.
+
+**Acceptance criteria:**
+
+- `POST /appointments/:id/transfer` body
+  `{ toDepartmentId: <any departmentId> }`. Atomic:
+  - `status` → `COMPLETED`.
+  - `transferredToDepartmentId` ← body.
+  - `transferredAt` ← `now()`.
+- The group stays open — closing is a separate action (US-14.6).
+- Auth: caller must be the doctor on the appointment
+  (`appointment.update.own`).
+- Free department choice — the patient may have never visited the
+  destination department before.
+- A second transfer attempt on the same row returns
+  `409 APPOINTMENT_ALREADY_TRANSFERRED` (the transfer pair is set
+  exactly once per row).
+
+### US-14.5 — Destination NURSE picks up a pending transfer
+
+**US-14.5** — As a NURSE in the destination department, I want to see
+patients pending transfer to my department and book their next
+appointment, so that the transfer flow completes end-to-end.
+
+**Acceptance criteria:**
+
+- `GET /appointments?pendingTransferToDepartmentId=<myDept>` returns
+  rows where `transferred_to_department_id = myDept` AND
+  `transfer_fulfilled_by_appointment_id IS NULL`. Existing
+  `appointment.read.own-department` scope applies — a NURSE only sees
+  pending transfers TO their own dept.
+- Booking from the queue routes to the standard `POST /appointments`
+  wizard with `previousAppointmentId` pre-filled to the source row.
+  US-14.2 step (4) sets the fulfilment FK in the same transaction.
+- The booked appointment joins (or creates) the source row's group —
+  the patient's case now spans two departments with consecutive
+  `visit_number` values.
+
+### US-14.6 — Doctor closes a case
+
+**US-14.6** — As the DOCTOR of the latest non-cancelled appointment in
+a group, I want a single "Complete + close case" action that completes
+my visit AND ends the case, so that subsequent visits cannot accidentally
+attach to a resolved case.
+
+**Acceptance criteria:**
+
+- `POST /appointment-groups/:id/close` atomically:
+  - Sets the group's `closedAt = now()`.
+  - Transitions the latest non-cancelled appointment in the group from
+    `BOOKED` to `COMPLETED` (idempotent on `COMPLETED`).
+- Auth: caller must be the doctor on the latest non-cancelled
+  appointment; else `403 APPOINTMENT_GROUP_CLOSE_FORBIDDEN`.
+- A `POST /appointments` later with `previousAppointmentId` pointing
+  into a closed group returns `400 APPOINTMENT_GROUP_CLOSED` (the
+  case is over).
+
+### US-14.7 — Read a patient's clinical timeline by group
+
+**US-14.7** — As a NURSE / DOCTOR / MRO / PHARMACY (per existing read
+scopes), I want to see a patient's clinical threads grouped, so that I
+can review each case as a unit instead of an undifferentiated mixed
+timeline.
+
+**Acceptance criteria:**
+
+- `GET /appointment-groups?patientId=<uuid>&status=open|closed|all`
+  returns paginated groups for that patient, each with `member_count`,
+  `latest_visit_summary` (`startAt`, `departmentName`, `doctorName`),
+  and `openedAt` / `closedAt?`. Gated on `appointment.read.*` — caller
+  must hold a scope covering at least one member appointment.
+- `GET /appointment-groups/:id` returns the full chronological member
+  list with each appointment's `visit_number`, `department`, `doctor`,
+  `status`, `transferredToDepartmentId?`,
+  `transferFulfilledByAppointmentId?`. Same auth.
+- Ungrouped (standalone) appointments are NOT listed by these endpoints
+  — they remain visible via the existing `GET /appointments?patientId=`.
+
+---
+
 ## Constraints reference
 
 DB-level CHECK constraints, all appended as raw SQL to the init migration

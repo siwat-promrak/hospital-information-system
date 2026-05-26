@@ -565,3 +565,25 @@ Both `apps/api` and `apps/web` MUST use `dayjs` for any date/time math — now-c
 - BE math always runs in UTC (`dayjs.utc()`). FE renders in the user's locale via `dayjs(iso).locale(locale)`.
 
 This rule is the source of truth for past-schedule validation on the BE (`schedule.startAt > dayjs.utc()` on create AND on the merged row when editing) and the read-only predicate on the FE.
+
+### 9a. Instants in UTC, recurring daily rules in local time
+
+Two distinct categories of "time" need two distinct storage strategies — mixing them silently corrupts behaviour the moment a clinic's day crosses the UTC date line.
+
+**Instants** — a specific moment in time (one row, one event). Stored in **UTC** as a full `Timestamptz`. Examples: `DoctorSchedule.startAt`, `DoctorSchedule.endAt`, `Appointment.startAt`, `Appointment.endAt`, `AuthLog.createdAt`, any `created_at` / `updated_at` audit column. UTC is the canonical way to write down one moment; the FE renders it in the viewer's locale at display time.
+
+**Recurring daily rules** — a wall-clock boundary that repeats every day (cutoffs, opening hours, booking windows). Stored as an **integer minute-of-day in the clinic's local timezone**, with the timezone supplied by the `CLINIC_TIMEZONE` env (default `Asia/Bangkok`). Examples: `DepartmentAppointmentType.bookingWindowStartMinute` / `bookingWindowEndMinute` (F13). Comparison happens at the check site by converting the instant to local time first:
+
+```ts
+const localMin =
+  dayjs.utc(startAt).tz(CLINIC_TIMEZONE).hour() * 60 +
+  dayjs.utc(startAt).tz(CLINIC_TIMEZONE).minute();
+
+if (endMin !== null && localMin >= endMin) {
+  throw new AppException(ErrorCode.APPOINTMENT_OUTSIDE_BOOKING_WINDOW, ...);
+}
+```
+
+**Why not UTC minute-of-day for daily rules?** Minute-of-day wraps at local midnight, not UTC midnight. The moment a clinic's day spans the UTC date boundary (DST, timezone move, early-morning slots in any non-UTC zone), a UTC minute-of-day comparison silently passes or rejects the wrong slots — a slot at 06:00 local that lands on the *previous* UTC date has a UTC minute-of-day near 1440, which compares wrong against a "before 11:00 local" cutoff stored as a UTC minute. Local minute + per-site timezone is immune; a timezone change becomes an env flip rather than a row-by-row data migration.
+
+The shorthand: **UTC is for instants. Local minute-of-day is for daily boundaries. Never store a UTC minute-of-day.**
