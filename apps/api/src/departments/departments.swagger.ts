@@ -2,20 +2,44 @@ import { applyDecorators } from '@nestjs/common';
 import {
   ApiExtraModels,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
 } from '@nestjs/swagger';
 
+import { PERMISSION } from '../auth/permissions';
 import { ErrorCode } from '../common/errors';
 import { PaginatedDto } from '../common/pagination';
 
+import { DepartmentAppointmentTypeResponseDto } from './dto/department-appointment-type.response.dto';
 import { DepartmentResponseDto } from './dto/department.response.dto';
 
-const FORBIDDEN_EXAMPLE = {
+const FORBIDDEN_LIST_EXAMPLE = {
   statusCode: 403,
   code: ErrorCode.INSUFFICIENT_PERMISSION,
   message: 'Caller is missing the required permission(s).',
-  details: { required: ['doctor.read'], held: [] },
+  details: { required: [PERMISSION.DOCTOR_READ], held: [] },
+};
+
+const FORBIDDEN_APPOINTMENT_TYPES_EXAMPLE = {
+  statusCode: 403,
+  code: ErrorCode.INSUFFICIENT_PERMISSION,
+  message: 'Caller is missing the required permission(s).',
+  details: {
+    required: [
+      PERMISSION.APPOINTMENT_READ_OWN,
+      PERMISSION.APPOINTMENT_READ_OWN_DEPARTMENT,
+      PERMISSION.APPOINTMENT_READ_ALL,
+    ],
+    held: [],
+  },
+};
+
+const NOT_FOUND_DEPARTMENT_EXAMPLE = {
+  statusCode: 404,
+  code: ErrorCode.NOT_FOUND,
+  message: 'Department not found.',
 };
 
 const PaginatedDepartmentDto = PaginatedDto(DepartmentResponseDto);
@@ -37,7 +61,43 @@ export function ApiListDepartments(): MethodDecorator & ClassDecorator {
     }),
     ApiForbiddenResponse({
       description: 'Caller is missing the `doctor.read` permission.',
-      schema: { example: FORBIDDEN_EXAMPLE },
+      schema: { example: FORBIDDEN_LIST_EXAMPLE },
+    }),
+  );
+}
+
+export function ApiListDepartmentAppointmentTypes(): MethodDecorator & ClassDecorator {
+  return applyDecorators(
+    ApiExtraModels(DepartmentAppointmentTypeResponseDto),
+    ApiOperation({
+      summary: 'List per-(department, type) booking rules for one department',
+      description:
+        'Returns one row per `department_appointment_types` entry for the ' +
+        'chosen department with `code` + `label` + `durationMinutes` + ' +
+        'nullable `bookingWindowStartMinute` / `bookingWindowEndMinute` ' +
+        '(wall-clock minutes-of-day in `CLINIC_TIMEZONE`). Consumed by the ' +
+        'booking wizard after the user picks a department so the type chip ' +
+        'can render the window copy (e.g. "Before 11:00 only"). Gated on ' +
+        'any-of the `appointment.read.*` family.',
+    }),
+    ApiParam({
+      name: 'id',
+      type: 'string',
+      format: 'uuid',
+      description: 'Department id.',
+    }),
+    ApiOkResponse({
+      description: 'Per-(department, type) booking-rule catalog.',
+      type: DepartmentAppointmentTypeResponseDto,
+      isArray: true,
+    }),
+    ApiForbiddenResponse({
+      description: 'Caller holds none of the required `appointment.read.*` permissions.',
+      schema: { example: FORBIDDEN_APPOINTMENT_TYPES_EXAMPLE },
+    }),
+    ApiNotFoundResponse({
+      description: 'Department not found (or soft-deleted).',
+      schema: { example: NOT_FOUND_DEPARTMENT_EXAMPLE },
     }),
   );
 }

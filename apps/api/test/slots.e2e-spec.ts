@@ -289,6 +289,17 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
   // exercise `DEPARTMENT_TYPE_NOT_ALLOWED` for `(deptPrimary, PROCEDURE)`
   // without crossing a department boundary first (which would short-
   // circuit on the scope guard).
+  //
+  // Durations mirror the pre-F13 global defaults (NEW_PATIENT_VISIT=30,
+  // FOLLOW_UP=15, CONSULTATION=20) so the existing slot-grid expectations
+  // continue to hold.
+  const TYPE_DURATIONS_FOR_SLOTS_TEST: Record<AppointmentType, number> = {
+    [AppointmentType.NEW_PATIENT_VISIT]: 30,
+    [AppointmentType.FOLLOW_UP]: 15,
+    [AppointmentType.CONSULTATION]: 20,
+    [AppointmentType.PROCEDURE]: 60,
+  };
+
   for (const appointmentType of [
     AppointmentType.NEW_PATIENT_VISIT,
     AppointmentType.FOLLOW_UP,
@@ -298,6 +309,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
       data: {
         departmentId: deptPrimary.id,
         appointmentType,
+        durationMinutes: TYPE_DURATIONS_FOR_SLOTS_TEST[appointmentType],
         createdBy: superAdmin.id,
       },
     });
@@ -309,6 +321,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     data: {
       departmentId: deptWithoutType.id,
       appointmentType: AppointmentType.CONSULTATION,
+      durationMinutes: TYPE_DURATIONS_FOR_SLOTS_TEST[AppointmentType.CONSULTATION],
       createdBy: superAdmin.id,
     },
   });
@@ -490,7 +503,9 @@ describe('F07 — appointment types + slot finder e2e', () => {
 
   // ─── /appointment-types ────────────────────────────────────────────────────
 
-  maybe('STAFF: GET /appointment-types returns the canonical 4-row catalog', async () => {
+  maybe('STAFF: GET /appointment-types returns the 4-row label catalog (F13)', async () => {
+    // Post-F13 the global catalog no longer carries `durationMinutes` —
+    // per-pair duration lives on `GET /departments/:id/appointment-types`.
     const jwt = await jwtFor(fixtures!.nurse);
 
     const res = await request(server)
@@ -501,24 +516,27 @@ describe('F07 — appointment types + slot finder e2e', () => {
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body).toHaveLength(4);
 
-    const byCode = new Map<string, { label: string; durationMinutes: number }>();
+    const byCode = new Map<string, { label: string }>();
 
     for (const row of res.body) {
-      byCode.set(row.code, {
-        label: row.label,
-        durationMinutes: row.durationMinutes,
-      });
+      byCode.set(row.code, { label: row.label });
+      // Wire contract — durationMinutes MUST NOT appear on the global
+      // catalog after F13.
+      expect(row).not.toHaveProperty('durationMinutes');
     }
 
-    expect(byCode.get(AppointmentType.NEW_PATIENT_VISIT)?.durationMinutes).toBe(30);
-    expect(byCode.get(AppointmentType.FOLLOW_UP)?.durationMinutes).toBe(15);
-    expect(byCode.get(AppointmentType.CONSULTATION)?.durationMinutes).toBe(20);
-    expect(byCode.get(AppointmentType.PROCEDURE)?.durationMinutes).toBe(60);
-
     // Sanity-check the label shape (English non-empty string).
-    for (const entry of byCode.values()) {
-      expect(typeof entry.label).toBe('string');
-      expect(entry.label.length).toBeGreaterThan(0);
+    for (const code of [
+      AppointmentType.NEW_PATIENT_VISIT,
+      AppointmentType.FOLLOW_UP,
+      AppointmentType.CONSULTATION,
+      AppointmentType.PROCEDURE,
+    ]) {
+      const entry = byCode.get(code);
+
+      expect(entry).toBeDefined();
+      expect(typeof entry!.label).toBe('string');
+      expect(entry!.label.length).toBeGreaterThan(0);
     }
   });
 

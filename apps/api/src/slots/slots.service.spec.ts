@@ -88,6 +88,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: null,
         },
         durationMinutes: 20,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -125,6 +127,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: null,
         },
         durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -147,6 +151,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: null,
         },
         durationMinutes: 25,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -174,6 +180,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: dt('2026-06-15T11:00:00Z'),
         },
         durationMinutes: 20,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -203,6 +211,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: null,
         },
         durationMinutes: 20,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [],
         now: dt('2026-06-15T09:30:00Z'),
       });
@@ -227,6 +237,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: null,
         },
         durationMinutes: 20,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [],
         now: dt('2026-06-15T09:00:00Z'),
       });
@@ -248,6 +260,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: null,
         },
         durationMinutes: 20,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [],
         now: dt('2026-06-15T00:00:00Z'),
       });
@@ -268,6 +282,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: null,
         },
         durationMinutes: 20,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [
           {
             startAt: dt('2026-06-15T09:20:00Z'),
@@ -295,6 +311,8 @@ describe('computeSchedulesSlots', () => {
           breakEndAt: null,
         },
         durationMinutes: 20,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: null,
         blockingAppointments: [
           {
             startAt: dt('2026-06-15T09:20:00Z'),
@@ -320,6 +338,8 @@ describe('computeSchedulesSlots', () => {
         breakEndAt: null,
       },
       durationMinutes: 20,
+      bookingWindowStartMinute: null,
+      bookingWindowEndMinute: null,
       blockingAppointments: [],
       now: FAR_FUTURE_NOW,
     });
@@ -338,6 +358,8 @@ describe('computeSchedulesSlots', () => {
         breakEndAt: null,
       },
       durationMinutes: 20,
+      bookingWindowStartMinute: null,
+      bookingWindowEndMinute: null,
       blockingAppointments: [],
       now: FAR_FUTURE_NOW,
     });
@@ -358,6 +380,8 @@ describe('computeSchedulesSlots', () => {
         breakEndAt: null,
       },
       durationMinutes: 20,
+      bookingWindowStartMinute: null,
+      bookingWindowEndMinute: null,
       blockingAppointments: [],
       now: FAR_FUTURE_NOW,
     });
@@ -365,6 +389,145 @@ describe('computeSchedulesSlots', () => {
     for (const slot of slots) {
       expect(slot.scheduleId).toBe('specific-schedule-id');
     }
+  });
+
+  describe('booking-window filter (F13)', () => {
+    // The test runs in Asia/Bangkok (UTC+7, no DST). The fixtures use a
+    // schedule that spans 02:00–05:00 UTC = 09:00–12:00 local so the
+    // local minute-of-day math is intuitive (09:00 local = 540 min,
+    // 11:00 local = 660 min).
+    const ORIGINAL_TZ = process.env.CLINIC_TIMEZONE;
+
+    beforeAll(() => {
+      process.env.CLINIC_TIMEZONE = 'Asia/Bangkok';
+    });
+
+    afterAll(() => {
+      if (ORIGINAL_TZ === undefined) {
+        delete process.env.CLINIC_TIMEZONE;
+      } else {
+        process.env.CLINIC_TIMEZONE = ORIGINAL_TZ;
+      }
+    });
+
+    it('keeps in-window slots AND drops out-of-window slots (end bound = 11:00 local)', () => {
+      // 09:00–12:00 local with a 60-min step → slots at 09:00, 10:00,
+      // 11:00 local. End bound = 660 min (= "before 11:00 local") drops
+      // the 11:00 slot but keeps 09:00 + 10:00.
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          // 02:00 UTC = 09:00 Asia/Bangkok.
+          startAt: dt('2099-06-15T02:00:00Z'),
+          endAt: dt('2099-06-15T05:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: 660,
+        blockingAppointments: [],
+        now: dt('2099-01-01T00:00:00Z'),
+      });
+
+      // 09:00 local = 02:00 UTC, 10:00 local = 03:00 UTC. 11:00 local
+      // (= 04:00 UTC) is dropped because localMin >= 660 → out-of-window.
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2099-06-15T02:00:00.000Z',
+        '2099-06-15T03:00:00.000Z',
+      ]);
+    });
+
+    it('drops a single out-of-window slot when the start bound is set', () => {
+      // Start bound = 600 min (= "from 10:00 local"). Schedule
+      // 09:00–12:00 local with 60-min step → drop 09:00, keep 10:00 + 11:00.
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          startAt: dt('2099-06-15T02:00:00Z'),
+          endAt: dt('2099-06-15T05:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: 600,
+        bookingWindowEndMinute: null,
+        blockingAppointments: [],
+        now: dt('2099-01-01T00:00:00Z'),
+      });
+
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2099-06-15T03:00:00.000Z',
+        '2099-06-15T04:00:00.000Z',
+      ]);
+    });
+
+    it('keeps the inclusive lower bound + drops the exclusive upper bound', () => {
+      // Boundary semantics: start is INCLUSIVE (`localMin >= start`),
+      // end is EXCLUSIVE (`localMin < end`). 09:00 local must be kept
+      // when start = 540; 12:00 local must be dropped when end = 720.
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          startAt: dt('2099-06-15T02:00:00Z'), // 09:00 local
+          endAt: dt('2099-06-15T05:00:00Z'),   // 12:00 local
+          breakStartAt: null,
+          breakEndAt: null,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: 540,
+        bookingWindowEndMinute: 720,
+        blockingAppointments: [],
+        now: dt('2099-01-01T00:00:00Z'),
+      });
+
+      // 09:00 (540) kept; 10:00, 11:00 kept; 12:00 (720) would be a slot
+      // start but the schedule ends at 12:00 local so it's never emitted
+      // by the grid loop. Keep all three emitted slots.
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2099-06-15T02:00:00.000Z',
+        '2099-06-15T03:00:00.000Z',
+        '2099-06-15T04:00:00.000Z',
+      ]);
+    });
+  });
+});
+
+describe('localMinuteOfDay (F13)', () => {
+  const ORIGINAL_TZ = process.env.CLINIC_TIMEZONE;
+
+  beforeAll(() => {
+    process.env.CLINIC_TIMEZONE = 'Asia/Bangkok';
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_TZ === undefined) {
+      delete process.env.CLINIC_TIMEZONE;
+    } else {
+      process.env.CLINIC_TIMEZONE = ORIGINAL_TZ;
+    }
+  });
+
+  it('returns 540 for 02:00 UTC = 09:00 Asia/Bangkok', async () => {
+    const { localMinuteOfDay } = await import('../common/clinic/clinic');
+
+    expect(localMinuteOfDay('2099-06-15T02:00:00.000Z')).toBe(540);
+  });
+
+  it('returns 660 for 04:00 UTC = 11:00 Asia/Bangkok', async () => {
+    const { localMinuteOfDay } = await import('../common/clinic/clinic');
+
+    expect(localMinuteOfDay('2099-06-15T04:00:00.000Z')).toBe(660);
+  });
+
+  it('rolls correctly across the UTC date boundary (23:00 local = 16:00 UTC)', async () => {
+    const { localMinuteOfDay } = await import('../common/clinic/clinic');
+
+    // 16:00 UTC on day N = 23:00 Asia/Bangkok the same day. 23 * 60 = 1380.
+    expect(localMinuteOfDay('2099-06-15T16:00:00.000Z')).toBe(1380);
   });
 });
 
@@ -401,7 +564,14 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
         findFirst: jest.fn().mockResolvedValue({ id: DOCTOR_ID }),
       },
       departmentAppointmentType: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'dat-1' }),
+        // Default mock — 20-min CONSULTATION duration with no booking
+        // window. Tests that need a different duration override the
+        // whole mock; tests that need a window pass through here as well.
+        findFirst: jest.fn().mockResolvedValue({
+          durationMinutes: 20,
+          bookingWindowStartMinute: null,
+          bookingWindowEndMinute: null,
+        }),
       },
       doctorSchedule: { findMany: jest.fn().mockResolvedValue([]) },
       appointment: { findMany: jest.fn().mockResolvedValue([]) },
@@ -557,6 +727,15 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
 
   it('merges slots from multiple schedules on the same day in chronological order', async () => {
     const prisma = buildPrisma({
+      // Test asks for PROCEDURE (60-min slot) — override the default
+      // 20-min mock so each 60-min window produces exactly one slot.
+      departmentAppointmentType: {
+        findFirst: jest.fn().mockResolvedValue({
+          durationMinutes: 60,
+          bookingWindowStartMinute: null,
+          bookingWindowEndMinute: null,
+        }),
+      },
       doctorSchedule: {
         findMany: jest.fn().mockResolvedValue([
           {

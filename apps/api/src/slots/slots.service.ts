@@ -9,10 +9,13 @@ import { Injectable } from '@nestjs/common';
 import { AppointmentType } from '@prisma/client';
 import dayjs from 'dayjs';
 
-import { APPOINTMENT_TYPE_DURATION_MINUTES } from '../appointment-types/appointment-types.const';
 import { PERMISSION } from '../auth/permissions';
 import { resolveAppointmentWriteScope, SCOPE } from '../auth/scope';
 import { AppException } from '../common/app-exception';
+import {
+  isWithinBookingWindow,
+  localMinuteOfDay,
+} from '../common/clinic/clinic';
 import { ErrorCode } from '../common/errors';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../users/users.types';
@@ -20,6 +23,7 @@ import type { AuthenticatedUser } from '../users/users.types';
 import { BLOCKING_APPOINTMENT_STATUSES, SLOT_ERROR_CODE } from './slots.const';
 import type {
   ComputeScheduleSlotsArgs,
+  DepartmentTypeRule,
   FindSlotsArgs,
   ResolvedDayBounds,
   ScheduleWindow,
@@ -35,19 +39,22 @@ import type {
  *  1. **Validate inputs at the domain layer**: doctor must exist (and not
  *     be soft-deleted); the `(departmentId, type)` pair must appear in
  *     `department_appointment_types` (US-6.2 — `400
- *     DEPARTMENT_TYPE_NOT_ALLOWED`).
+ *     DEPARTMENT_TYPE_NOT_ALLOWED`). The same lookup also yields the
+ *     per-pair `durationMinutes` + nullable booking-window bounds (F13).
  *  2. **Fetch the day's working windows**: every active (non-soft-deleted)
  *     `DoctorSchedule` for `(doctorId, departmentId)` whose
  *     `[startAt, endAt)` intersects the UTC calendar day, AND whose
  *     `acceptsBooking = true`. Each schedule contributes its own slot grid.
  *  3. **Step the grid + apply exclusions**: for each schedule, step
- *     `[startAt, endAt)` by `APPOINTMENT_TYPE_DURATION_MINUTES[type]`,
- *     yielding `[step, step + duration)` slots. Exclude any slot that
+ *     `[startAt, endAt)` by `durationMinutes`, yielding
+ *     `[step, step + duration)` slots. Exclude any slot that
  *     - intersects the schedule's break window (when set), OR
  *     - intersects an appointment on that doctor that day with status
  *       `BOOKED` or `COMPLETED` (CANCELLED frees the slot — there is no
  *       tombstone column on `Appointment`), OR
- *     - starts at or before `now` (server `dayjs.utc()`).
+ *     - starts at or before `now` (server `dayjs.utc()`), OR
+ *     - falls outside the per-pair booking window (F13 — local wall-clock
+ *       minute-of-day check).
  *
  * Returns a chronologically-sorted flat array. Empty array (never 404)
  * when nothing matches — including a fully-past `date`, which still
@@ -66,7 +73,11 @@ export class SlotsService {
   ): Promise<SlotResult[]> {
     await this.assertScope(caller, args.doctorId, args.departmentId);
     await this.assertDoctorExists(args.doctorId);
-    await this.assertDepartmentAllowsType(args.departmentId, args.type);
+
+    const rule = await this.loadDepartmentTypeRule(
+      args.departmentId,
+      args.type,
+    );
 
     const { dayStart, dayEnd } = resolveDayBounds(args.date);
 
@@ -125,14 +136,15 @@ export class SlotsService {
     });
 
     const now = dayjs.utc();
-    const durationMinutes = APPOINTMENT_TYPE_DURATION_MINUTES[args.type];
 
     const slots: SlotResult[] = [];
 
     for (const schedule of schedules) {
       const scheduleSlots = computeSchedulesSlots({
         schedule,
-        durationMinutes,
+        durationMinutes: rule.durationMinutes,
+        bookingWindowStartMinute: rule.bookingWindowStartMinute,
+        bookingWindowEndMinute: rule.bookingWindowEndMinute,
         blockingAppointments,
         now: now.toDate(),
       });
@@ -239,26 +251,43 @@ export class SlotsService {
     }
   }
 
-  private async assertDepartmentAllowsType(
+  /**
+   * Single `department_appointment_types` lookup — verifies the
+   * `(departmentId, type)` pair is allowed AND returns the per-pair
+   * `durationMinutes` + booking-window bounds. Replaces the previous
+   * boolean existence check + global const lookup with one round-trip
+   * that yields everything the grid step needs (F13).
+   */
+  private async loadDepartmentTypeRule(
     departmentId: string,
     appointmentType: AppointmentType,
-  ): Promise<void> {
-    const link = await this.prisma.departmentAppointmentType.findFirst({
+  ): Promise<DepartmentTypeRule> {
+    const row = await this.prisma.departmentAppointmentType.findFirst({
       where: {
         departmentId,
         appointmentType,
         deletedAt: null,
       },
-      select: { id: true },
+      select: {
+        durationMinutes: true,
+        bookingWindowStartMinute: true,
+        bookingWindowEndMinute: true,
+      },
     });
 
-    if (!link) {
+    if (!row) {
       throw AppException.badRequest(
         SLOT_ERROR_CODE.DEPARTMENT_TYPE_NOT_ALLOWED,
         'Department does not offer this appointment type.',
         { departmentId, appointmentType },
       );
     }
+
+    return {
+      durationMinutes: row.durationMinutes,
+      bookingWindowStartMinute: row.bookingWindowStartMinute,
+      bookingWindowEndMinute: row.bookingWindowEndMinute,
+    };
   }
 }
 
@@ -292,7 +321,14 @@ export function resolveDayBounds(isoDate: string): ResolvedDayBounds {
 export function computeSchedulesSlots(
   args: ComputeScheduleSlotsArgs,
 ): SlotResult[] {
-  const { schedule, durationMinutes, blockingAppointments, now } = args;
+  const {
+    schedule,
+    durationMinutes,
+    bookingWindowStartMinute,
+    bookingWindowEndMinute,
+    blockingAppointments,
+    now,
+  } = args;
   const slots: SlotResult[] = [];
 
   const scheduleEnd = dayjs.utc(schedule.endAt);
@@ -332,12 +368,24 @@ export function computeSchedulesSlots(
         );
 
         if (!blocked) {
-          slots.push({
-            startAt: slotStart.toISOString(),
-            endAt: slotEnd.toISOString(),
-            departmentId: schedule.departmentId,
-            scheduleId: schedule.id,
-          });
+          // F13 — drop the slot when its local wall-clock minute-of-day
+          // sits outside the per-pair booking window. Either bound may
+          // be null (open-ended on that side); both null = pass through.
+          const localMin = localMinuteOfDay(slotStartDate);
+          const inWindow = isWithinBookingWindow(
+            localMin,
+            bookingWindowStartMinute,
+            bookingWindowEndMinute,
+          );
+
+          if (inWindow) {
+            slots.push({
+              startAt: slotStart.toISOString(),
+              endAt: slotEnd.toISOString(),
+              departmentId: schedule.departmentId,
+              scheduleId: schedule.id,
+            });
+          }
         }
       }
     }
