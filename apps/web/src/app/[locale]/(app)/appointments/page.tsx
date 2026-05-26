@@ -222,9 +222,17 @@ export default async function AppointmentsPage({
       <AppointmentListFilter
         departments={departmentsResult.data}
         doctorSeed={doctorSeed}
-        doctorScopeDepartmentId={
-          callerDepartmentId ?? departmentIdParam ?? undefined
-        }
+        // The hard scope the FE picker MUST stay inside even when the
+        // user clears their locally-picked department — for NURSE /
+        // DOCTOR this is their caller dept (the BE-side scope auto-
+        // narrow); for `.all` callers (MRO / future ADMIN) this is
+        // `undefined` so clearing the local department widens the
+        // picker back to the full catalog. Do NOT fall back to the URL
+        // `departmentIdParam` here: that param is the active filter
+        // value, not a scope ceiling. Conflating the two was the bug —
+        // the picker stayed narrowed to the URL dept even after the
+        // user cleared it locally.
+        doctorScopeDepartmentId={callerDepartmentId}
         activeDepartmentId={departmentIdParam ?? null}
         activeDoctorId={forcedDoctorId ?? doctorIdParam ?? null}
         activeStatus={status ?? null}

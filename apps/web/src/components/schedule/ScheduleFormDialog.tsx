@@ -132,6 +132,24 @@ interface ScheduleFormDialogProps {
    * department mirrors the picked doctor's department.
    */
   prefilledDepartmentId?: string;
+  /**
+   * When `true`, the department field is pinned to `prefilledDepartmentId`
+   * for the entire create flow and the doctor-drives-dept auto-fill is
+   * suppressed — the picked doctor's department CANNOT overwrite the
+   * locked value. The doctor picker is additionally scoped to
+   * `doctorDepartmentId` (the caller's dept) so the user can't pick a
+   * foreign-dept doctor in the first place; this prop is the belt-and-
+   * braces defence that ensures a stale or wider picker list cannot
+   * drift the form's department into a value the caller's write scope
+   * doesn't authorise.
+   *
+   * Set to `true` by the page for callers whose schedule WRITE scope is
+   * narrower than `.all` (NURSE `.own-department`, DOCTOR `.own`). For
+   * `.all` callers (no seeded role today; future ADMIN if self-granted)
+   * the page leaves this `false` so the legacy doctor-drives-dept model
+   * stays in effect.
+   */
+  lockDepartmentToCaller?: boolean;
   /** Existing schedule to edit; `null` opens the dialog in create mode. */
   editing: ScheduleResponse | null;
   /**
@@ -174,6 +192,7 @@ export default function ScheduleFormDialog({
   canDelete,
   departments,
   prefilledDepartmentId,
+  lockDepartmentToCaller,
   editing,
   prefill,
 }: ScheduleFormDialogProps) {
@@ -386,11 +405,28 @@ export default function ScheduleFormDialog({
       return;
     }
 
+    // When the caller's write scope is narrower than `.all`, the dept
+    // is pinned to `prefilledDepartmentId` for the whole create flow
+    // — DO NOT let the picked doctor's `departmentId` override it.
+    // The picker is already scoped to `doctorDepartmentId` (caller's
+    // dept) so in practice the doctor's dept matches the locked value,
+    // but the guard protects against a stale picker list / future
+    // change that widens the option set.
+    //
+    // The edit path still runs this effect (the dialog is keyed on
+    // `editing` for `isEdit`), but edit-mode also sets `pickedDoctor`
+    // to null and `selectedDoctor` resolves from `editing.doctor`,
+    // whose `departmentId` already matches `editing.departmentId`.
+    // The sync is harmless there.
+    if (lockDepartmentToCaller && !editing) {
+      return;
+    }
+
     setValue("departmentId", selectedDoctor.departmentId, {
       shouldValidate: false,
       shouldDirty: false,
     });
-  }, [selectedDoctor, setValue]);
+  }, [selectedDoctor, setValue, lockDepartmentToCaller, editing]);
 
   // Display-side wiring for the (always-disabled) department picker.
   // The form's `departmentId` is the authoritative value (it's what
@@ -409,11 +445,16 @@ export default function ScheduleFormDialog({
   const departmentDisplayValue = watchedDepartmentId ?? "";
   const departmentDisplayOptions = useMemo<readonly DepartmentRow[]>(() => {
     if (selectedDoctor) {
+      // The schedule form's department field is always disabled — the
+      // `allowedAppointmentTypes` is irrelevant here (the type Select is
+      // only on the booking wizard). Synthesize an empty array so the
+      // shape conforms to `DepartmentRow` without bloating the picker.
       return [
         {
           id: selectedDoctor.departmentId,
           name: selectedDoctor.department.name,
           description: null,
+          allowedAppointmentTypes: [],
         },
       ];
     }
@@ -431,7 +472,12 @@ export default function ScheduleFormDialog({
     }
 
     return [
-      { id: departmentDisplayValue, name: "", description: null },
+      {
+        id: departmentDisplayValue,
+        name: "",
+        description: null,
+        allowedAppointmentTypes: [],
+      },
     ];
   }, [selectedDoctor, departmentDisplayValue, departments]);
 

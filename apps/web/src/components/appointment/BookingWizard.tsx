@@ -173,15 +173,61 @@ export default function BookingWizard({
     }
   }, [doctor, departmentId]);
 
-  // Not every department offers every appointment type — when the user
-  // changes (or clears) the department, drop any previously-picked type
-  // so the BE doesn't 400 with `DEPARTMENT_TYPE_NOT_ALLOWED`. The
-  // `<AppointmentTypeSelect>` below is also disabled until a department
-  // is picked, so this effect mostly kicks in when the user goes back
-  // and changes their mind.
+  // Per-department type catalog: the FE narrows the type Select to the
+  // `allowedAppointmentTypes` of the picked department (BE field on
+  // `DepartmentResponseDto`). When no department is picked the full
+  // catalog stays visible — the Select is disabled in that state so the
+  // user can't choose a type before a department, but the option list is
+  // kept full so the Select doesn't briefly flash empty during the
+  // initial paint.
+  const allowedTypes = useMemo<readonly AppointmentTypeResponse[]>(() => {
+    if (!departmentId) {
+      return appointmentTypes;
+    }
+
+    const dept = departments.find((d) => d.id === departmentId);
+
+    if (!dept) {
+      return appointmentTypes;
+    }
+
+    const allowed = new Set(dept.allowedAppointmentTypes);
+
+    return appointmentTypes.filter((t) => allowed.has(t.code));
+  }, [appointmentTypes, departments, departmentId]);
+
+  // When the user changes (or clears) the department, drop any
+  // previously-picked type if it's no longer in the new department's
+  // allowed set. Without this guard a `(deptA → PROCEDURE → deptB)`
+  // sequence would leave PROCEDURE selected even when deptB doesn't
+  // offer it; submitting that pair would 400 with
+  // `DEPARTMENT_TYPE_NOT_ALLOWED`. Clearing the picked type when the
+  // dept changes is the matching write-side cascade for the
+  // `allowedTypes` narrowing above. Also clears on dept=undefined
+  // (user cleared the department) so the state stays consistent.
   useEffect(() => {
-    setAppointmentType("");
-  }, [departmentId]);
+    if (!appointmentType) {
+      return;
+    }
+
+    if (!departmentId) {
+      setAppointmentType("");
+
+      return;
+    }
+
+    const dept = departments.find((d) => d.id === departmentId);
+
+    if (!dept) {
+      setAppointmentType("");
+
+      return;
+    }
+
+    if (!dept.allowedAppointmentTypes.includes(appointmentType)) {
+      setAppointmentType("");
+    }
+  }, [departmentId, appointmentType, departments]);
 
   const handlePickPatient = useCallback((next: PatientResponse | null) => {
     setPatient(next);
@@ -422,26 +468,17 @@ export default function BookingWizard({
                     required
                   />
                 </Box>
-                {/*
-                  TODO(F09 follow-up): pre-filter the appointment-type
-                  options to those the picked department actually offers.
-                  The BE knows the `department_appointment_types` join
-                  table but does not currently surface it on the wire
-                  (see `DepartmentResponseDto` — no `allowedAppointmentTypes`
-                  field, no `GET /departments/:id/appointment-types`
-                  route). For now the wizard shows the full catalog and
-                  the BE rejects mismatches with
-                  `400 DEPARTMENT_TYPE_NOT_ALLOWED`, which `useNotify`
-                  surfaces via the existing `ERROR_CODE_TO_KEY` map
-                  (`Snackbar.Errors.departmentTypeNotAllowed`). Picking
-                  the right wire shape (extra field on
-                  `DepartmentResponseDto` vs. a dedicated lookup endpoint)
-                  is a backend ticket — kept out of scope here.
-                */}
+                {/* Appointment-type Select narrows to the picked
+                    department's `allowedAppointmentTypes` (BE field on
+                    `DepartmentResponseDto`). Disabled until a department
+                    is picked so the user can't choose before a
+                    department; cleared automatically when the picked
+                    type isn't offered by the newly-picked department
+                    (see the cascade effect above). */}
                 <AppointmentTypeSelect
                   value={appointmentType}
                   onChange={setAppointmentType}
-                  types={appointmentTypes}
+                  types={allowedTypes}
                   label={tSlot(K.BookingWizard.Slot.typeLabel)}
                   required
                   disabled={!departmentId}

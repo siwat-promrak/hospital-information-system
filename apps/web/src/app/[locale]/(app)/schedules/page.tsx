@@ -31,7 +31,6 @@ import { resolveScheduleWriteCapabilities } from "@/schedule/permissions";
 import {
   resolveScheduleViewMode,
   SCHEDULE_VIEW_MODE,
-  type ScheduleViewMode,
 } from "@/schedule/view-mode";
 import { requireSession } from "@/lib/server/session";
 import {
@@ -294,6 +293,25 @@ export default async function SchedulesPage({
     session.user.permissionCodes,
   );
 
+  // Pin the dialog's department field to the caller's home whenever the
+  // active surface authorises writes narrower than `.all`. Three cases
+  // collapse here:
+  //   - DOCTOR in `OWN_PLUS_DEPT` + "dept" with `createsLockedToCaller`
+  //     (fallback to `.own`): department MUST be the caller's home.
+  //   - NURSE (`DEPT` view): write scope is `.own-department`, so the
+  //     dept is necessarily the caller's home — pin it explicitly so
+  //     the doctor-drives-dept auto-fill cannot silently overwrite it
+  //     if the picker ever broadens.
+  //   - DOCTOR in `OWN_PLUS_DEPT` + "mine": doctor is already pinned to
+  //     the caller via `lockedDoctorId`, so the dept is implicitly
+  //     locked, but the explicit `lockDepartmentToCaller` is the
+  //     belt-and-braces guard against a future picker change.
+  // `ALL` (MRO) and any future role with `.all` writes keeps the legacy
+  // doctor-drives-dept model — the picker can broaden across departments
+  // and the dept follows whichever doctor the user picks.
+  const lockDepartmentToCaller =
+    viewMode !== SCHEDULE_VIEW_MODE.ALL && writeCapabilities.canCreate;
+
   // For modes that effectively pin the calendar to the caller's own
   // doctor row, surface that as `lockedDoctorId` so the dialog disables
   // the doctor picker — a DOCTOR creating a row from this surface cannot
@@ -443,6 +461,7 @@ export default async function SchedulesPage({
         colorByDepartment={colorByDepartment}
         extraPreserveParams={calendarExtraPreserve}
         prefilledDepartmentId={session.user.departmentId ?? undefined}
+        lockDepartmentToCaller={lockDepartmentToCaller}
       />
     </Stack>
   );

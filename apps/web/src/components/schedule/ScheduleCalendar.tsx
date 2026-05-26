@@ -131,6 +131,15 @@ interface ScheduleCalendarProps {
    * the department to the doctor's row on selection.
    */
   prefilledDepartmentId?: string;
+  /**
+   * When `true`, the create dialog pins the department field to
+   * `prefilledDepartmentId` AND suppresses the doctor-drives-dept
+   * auto-fill — the picked doctor's department CANNOT overwrite the
+   * locked value. Driven from the page when the caller's write scope
+   * is narrower than `.all` (NURSE `.own-department`, DOCTOR `.own`
+   * fallback under `createsLockedToCaller`).
+   */
+  lockDepartmentToCaller?: boolean;
 }
 
 /**
@@ -177,6 +186,7 @@ export default function ScheduleCalendar({
   colorByDepartment,
   extraPreserveParams,
   prefilledDepartmentId,
+  lockDepartmentToCaller,
 }: ScheduleCalendarProps) {
   const tSchedules = useTranslations(NS.Schedules);
 
@@ -458,6 +468,7 @@ export default function ScheduleCalendar({
         canDelete={canDelete}
         departments={departments}
         prefilledDepartmentId={prefilledDepartmentId}
+        lockDepartmentToCaller={lockDepartmentToCaller}
         editing={editing}
         prefill={prefill}
       />
