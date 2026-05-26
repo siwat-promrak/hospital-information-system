@@ -190,9 +190,19 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     },
   });
 
-  // Both depts offer CONSULTATION + FOLLOW_UP so the booking
-  // transaction has something to match. Booking window kept wide-open
+  // Both depts offer NEW_PATIENT_VISIT + CONSULTATION + FOLLOW_UP so the
+  // booking transaction has something to match. Booking window kept wide-open
   // (NULL on both sides) so the F13 window guard never trips.
+  // NEW_PATIENT_VISIT is required for standalone bookings (Bug-1 fix).
+  await prisma.departmentAppointmentType.create({
+    data: {
+      departmentId: deptA.id,
+      appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+      durationMinutes: 30,
+      createdBy: superAdmin.id,
+    },
+  });
+
   await prisma.departmentAppointmentType.create({
     data: {
       departmentId: deptA.id,
@@ -207,6 +217,15 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
       departmentId: deptA.id,
       appointmentType: AppointmentType.FOLLOW_UP,
       durationMinutes: 20,
+      createdBy: superAdmin.id,
+    },
+  });
+
+  await prisma.departmentAppointmentType.create({
+    data: {
+      departmentId: deptB.id,
+      appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+      durationMinutes: 30,
       createdBy: superAdmin.id,
     },
   });
@@ -565,7 +584,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 9),
       });
 
@@ -680,7 +699,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 10),
       });
     expect(apptRes.status).toBe(201);
@@ -709,7 +728,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 11),
       });
     expect(apptRes.status).toBe(201);
@@ -741,7 +760,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 12),
       });
     expect(apptRes.status).toBe(201);
@@ -772,7 +791,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 13),
       });
     expect(apptRes.status).toBe(201);
@@ -802,7 +821,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 14),
       });
     expect(apptRes.status).toBe(201);
@@ -838,7 +857,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 15),
       });
     expect(apptRes.status).toBe(201);
@@ -880,7 +899,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 16),
       });
     expect(apptRes.status).toBe(201);
@@ -914,6 +933,9 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const nurseBJwt = await jwtFor(f.nurseB);
     const doctorBJwt = await jwtFor(f.doctorBUser);
 
+    // The smoke test already booked scheduleB at 09:00 (FOLLOW_UP, 20 min,
+    // COMPLETED). The free interval for NEW_PATIENT_VISIT (30 min) starts at
+    // 09:20; the first on-grid slot is 09:20.
     const apptRes = await request(server)
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseBJwt}`)
@@ -922,8 +944,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorB.id,
         departmentId: f.deptB.id,
         scheduleId: f.scheduleB.id,
-        appointmentType: AppointmentType.CONSULTATION,
-        startAt: scratchIso(2, 11),
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+        startAt: scratchIso(2, 9, 20),
       });
     expect(apptRes.status).toBe(201);
 
@@ -942,10 +964,10 @@ describe('F14 — appointment groups + referrals e2e', () => {
         departmentId: f.deptB.id,
         scheduleId: f.scheduleB.id,
         appointmentType: AppointmentType.FOLLOW_UP,
-        // 11:40 — first 20-min FOLLOW_UP slot after the prev booking
-        // ([11:00, 11:20)) re-anchors the grid. 11:30 would be off-grid
-        // (SLOT_NOT_ON_GRID).
-        startAt: scratchIso(2, 11, 40),
+        // 11:30 — after blockers [09:00,09:20) and [09:20,09:50), the free
+        // interval starts at 09:50. The 20-min FOLLOW_UP grid from 09:50
+        // gives 09:50, 10:10, 10:30, 10:50, 11:10, 11:30 (5 steps × 20 min).
+        startAt: scratchIso(2, 11, 30),
         previousAppointmentId: apptRes.body.id,
       });
     expect(continueRes.status).toBe(201);
@@ -957,6 +979,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const f = fixtures!;
     const nurseBJwt = await jwtFor(f.nurseB);
 
+    // 10:20 — after prior blockers on scheduleB, the first available
+    // 30-min NEW_PATIENT_VISIT slot is 10:20 (free interval 09:50–11:30).
     const apptRes = await request(server)
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseBJwt}`)
@@ -965,8 +989,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorB.id,
         departmentId: f.deptB.id,
         scheduleId: f.scheduleB.id,
-        appointmentType: AppointmentType.CONSULTATION,
-        startAt: scratchIso(2, 12),
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+        startAt: scratchIso(2, 10, 20),
       });
     expect(apptRes.status).toBe(201);
 
@@ -994,6 +1018,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const nurseBJwt = await jwtFor(f.nurseB);
     const doctorBJwt = await jwtFor(f.doctorBUser);
 
+    // 10:50 — after prior blockers on scheduleB, the on-grid slot at
+    // 10:50 is available (free interval 10:50–11:30).
     const apptRes = await request(server)
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseBJwt}`)
@@ -1002,8 +1028,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorB.id,
         departmentId: f.deptB.id,
         scheduleId: f.scheduleB.id,
-        appointmentType: AppointmentType.CONSULTATION,
-        startAt: scratchIso(2, 13),
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+        startAt: scratchIso(2, 10, 50),
       });
     expect(apptRes.status).toBe(201);
 
@@ -1050,7 +1076,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
         startAt: scratchIso(1, 17),
       });
     expect(firstRes.status).toBe(201);
@@ -1071,10 +1097,10 @@ describe('F14 — appointment groups + referrals e2e', () => {
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
         appointmentType: AppointmentType.FOLLOW_UP,
-        // 17:40 — first 20-min FOLLOW_UP slot after the prev booking
-        // ([17:00, 17:20)) re-anchors the grid. 17:30 would be off-grid
-        // (SLOT_NOT_ON_GRID).
-        startAt: scratchIso(1, 17, 40),
+        // 17:30 — NEW_PATIENT_VISIT at 17:00 occupies [17:00, 17:30).
+        // The next free interval starts at 17:30; the 20-min FOLLOW_UP
+        // grid anchors there. 17:40 would be off-grid (SLOT_NOT_ON_GRID).
+        startAt: scratchIso(1, 17, 30),
         previousAppointmentId: firstRes.body.id,
       });
     expect(secondRes.status).toBe(201);
@@ -1115,11 +1141,11 @@ describe('F14 — appointment groups + referrals e2e', () => {
         doctorId: f.doctorA.id,
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
-        appointmentType: AppointmentType.CONSULTATION,
-        // 09:40 — schedule starts at 09:00 with 20-min step, so the
-        // valid grid is 09:00 / 09:20 / 09:40 / …. 09:30 would be
-        // off-grid (SLOT_NOT_ON_GRID).
-        startAt: scratchIso(1, 9, 40),
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+        // 09:30 — schedule starts at 09:00 with 30-min step for
+        // NEW_PATIENT_VISIT; valid slots are 09:00 / 09:30 / 10:00 / …
+        // 09:00 is already claimed by the smoke test, so we use 09:30.
+        startAt: scratchIso(1, 9, 30),
       });
     expect(firstRes.status).toBe(201);
 
@@ -1138,10 +1164,11 @@ describe('F14 — appointment groups + referrals e2e', () => {
         departmentId: f.deptA.id,
         scheduleId: f.scheduleA.id,
         appointmentType: AppointmentType.FOLLOW_UP,
-        // 10:40 — after the prev booking ([09:40, 10:00)) re-anchors
-        // the grid to start at 10:00, the next valid 20-min FOLLOW_UP
-        // slots are 10:00 / 10:20 / 10:40 / …. 10:30 would be off-grid.
-        startAt: scratchIso(1, 10, 40),
+        // 10:30 — NEW_PATIENT_VISIT at 09:30 occupies [09:30, 10:00).
+        // The next free interval starts at 10:30 (10:00–10:30 is taken
+        // by the "Refer rejects" test). The 20-min FOLLOW_UP grid anchors
+        // at 10:30; 10:40 or 10:50 would be off-grid (SLOT_NOT_ON_GRID).
+        startAt: scratchIso(1, 10, 30),
         previousAppointmentId: firstRes.body.id,
       });
     expect(secondRes.status).toBe(201);

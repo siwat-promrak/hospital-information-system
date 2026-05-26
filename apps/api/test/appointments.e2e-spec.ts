@@ -7,19 +7,22 @@
  *
  * What is covered:
  *  - POST /appointments
- *    - Happy NURSE booking → 201.
+ *    - Happy NURSE booking → 201 (NEW_PATIENT_VISIT in booking window).
  *    - Happy DOCTOR self-booking (`.own`) → 201.
  *    - Duplicate slot → 409 SLOT_TAKEN.
  *    - `(department, type)` mismatch → 400 DEPARTMENT_TYPE_NOT_ALLOWED.
  *    - Doctor home dept mismatch → 400 DOCTOR_DEPARTMENT_MISMATCH.
  *    - Past startAt → 400 APPOINTMENT_START_IN_PAST.
- *    - PROCEDURE without reason → 400 VALIDATION_FAILED.
- *    - PROCEDURE with reason → 201.
- *    - Slot outside schedule → 400 SLOT_OUTSIDE_SCHEDULE.
+ *    - Standalone PROCEDURE (no previousAppointmentId) →
+ *      400 STANDALONE_APPOINTMENT_TYPE_INVALID (Bug-1 fix).
+ *    - NEW_PATIENT_VISIT with reason → 201 (reason fully optional, Bug-2 fix).
+ *    - Out-of-window slot → 400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW.
  *    - Schedule not bookable (`acceptsBooking=false`) → 400
  *      SCHEDULE_NOT_BOOKABLE.
- *    - NURSE booking in foreign dept → 403 INSUFFICIENT_PERMISSION_SCOPE.
- *    - DOCTOR booking for foreign doctor → 403 INSUFFICIENT_PERMISSION_SCOPE.
+ *    - Standalone CONSULTATION in foreign dept → 400
+ *      STANDALONE_APPOINTMENT_TYPE_INVALID (Bug-1 fires before scope check).
+ *    - Standalone CONSULTATION for foreign doctor → 400
+ *      STANDALONE_APPOINTMENT_TYPE_INVALID (Bug-1 fires before scope check).
  *  - GET /appointments
  *    - NURSE narrowed to own dept; DOCTOR narrowed to own doctor; MRO
  *      sees all.
@@ -122,6 +125,7 @@ interface Fixtures {
   scheduleHomeNoBook: DoctorSchedule;
   scheduleHomeProcedure: DoctorSchedule;
   scheduleHomeF13: DoctorSchedule;
+  scheduleHomeCancel: DoctorSchedule;
   superAdminId: string;
 }
 
@@ -193,22 +197,38 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     },
   });
 
-  // Allow CONSULTATION + PROCEDURE + FOLLOW_UP in home; only CONSULTATION
-  // in foreign so the (dept, type) mismatch test has a real foreign type
-  // to send against home.
+  // deptHome offers NEW_PATIENT_VISIT + CONSULTATION + PROCEDURE + FOLLOW_UP.
+  // deptForeign offers only CONSULTATION so the (dept, type) mismatch test
+  // can send NEW_PATIENT_VISIT to deptForeign and hit DEPARTMENT_TYPE_NOT_ALLOWED.
   //
   // F13 — durations mirror the pre-F13 defaults EXCEPT `(deptHome,
   // PROCEDURE)` which is the per-pair override (90 min) so the
-  // duration-drives-endAt assertion is meaningful. The booking-window
-  // tests below add a separate (deptHome, FOLLOW_UP) window.
+  // duration-drives-endAt assertion is meaningful. The booking-window tests
+  // below use a 17:00–18:00 LOCAL window on NEW_PATIENT_VISIT (the type
+  // used for all standalone bookings post-Bug-1 fix).
   //
-  // The 09:00–12:00 local window matches a wall-clock minute-of-day
-  // range of 540–720 in Asia/Bangkok. Test schedules sit at
-  // `scratchDate(d, hour)` which is UTC; with the default
-  // `CLINIC_TIMEZONE=Asia/Bangkok` the local minute-of-day = `(hour + 7) *
-  // 60` (mod 1440). Day-1 schedule starts at 09:00 UTC = 16:00 local
-  // (= 960 min). The F13 fixture below uses a separate scratch day with
-  // a more permissive layout so the existing tests stay green.
+  // The 09:00–12:00 local window matches a wall-clock minute-of-day range
+  // of 540–720 in Asia/Bangkok. Test schedules sit at `scratchDate(d, hour)`
+  // which is UTC; with the default `CLINIC_TIMEZONE=Asia/Bangkok` the local
+  // minute-of-day = `(hour + 7) * 60` (mod 1440). Day-1 schedule starts at
+  // 09:00 UTC = 16:00 local (= 960 min). The F13 fixture below uses a
+  // separate scratch day with a more permissive layout so the existing
+  // tests stay green.
+  await prisma.departmentAppointmentType.create({
+    data: {
+      departmentId: deptHome.id,
+      appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+      durationMinutes: 30,
+      // F13 booking window — only allow NEW_PATIENT_VISIT in the local
+      // 17:00–18:00 hour. With `CLINIC_TIMEZONE=Asia/Bangkok` (+7) that's
+      // 10:00–11:00 UTC. The day-1 schedule (09:00–12:00 UTC) overlaps part
+      // of that local window; 10:35 UTC = 17:35 local falls inside it.
+      bookingWindowStartMinute: 17 * 60,
+      bookingWindowEndMinute: 18 * 60,
+      createdBy: superAdmin.id,
+    },
+  });
+
   await prisma.departmentAppointmentType.create({
     data: {
       departmentId: deptHome.id,
@@ -233,12 +253,6 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
       departmentId: deptHome.id,
       appointmentType: AppointmentType.FOLLOW_UP,
       durationMinutes: 15,
-      // F13 booking window — only allow FOLLOW_UP in the local 17:00–18:00
-      // hour. With `CLINIC_TIMEZONE=Asia/Bangkok` (+7) that's 10:00–11:00
-      // UTC. The day-1 schedule (09:00–12:00 UTC) overlaps part of that
-      // local window; out-of-window scratch days exist below.
-      bookingWindowStartMinute: 17 * 60,
-      bookingWindowEndMinute: 18 * 60,
       createdBy: superAdmin.id,
     },
   });
@@ -440,14 +454,26 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     },
   });
 
-  // F13 — day-6 schedule wide enough to host the 90-min PROCEDURE
-  // duration-drives-endAt assertion without colliding with day-5.
+  // F13 — day-6 schedule wide enough to host the per-pair duration
+  // assertion and the F13 in-window test without colliding with day-5.
   const scheduleHomeF13 = await prisma.doctorSchedule.create({
     data: {
       doctorId: doctor.id,
       departmentId: deptHome.id,
       startAt: scratchDate(6, 9),
       endAt: scratchDate(6, 12),
+      createdBy: superAdmin.id,
+    },
+  });
+
+  // Day-7 — dedicated schedule for the cancel + re-book test so no
+  // other test claims the in-window slot (10:00 UTC).
+  const scheduleHomeCancel = await prisma.doctorSchedule.create({
+    data: {
+      doctorId: doctor.id,
+      departmentId: deptHome.id,
+      startAt: scratchDate(7, 9),
+      endAt: scratchDate(7, 12),
       createdBy: superAdmin.id,
     },
   });
@@ -470,6 +496,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     scheduleHomeNoBook,
     scheduleHomeProcedure,
     scheduleHomeF13,
+    scheduleHomeCancel,
     superAdminId: superAdmin.id,
   };
 }
@@ -615,6 +642,13 @@ describe('F09 — appointments e2e', () => {
 
   describe('POST /appointments', () => {
     maybe('Happy NURSE booking → 201', async () => {
+      // Standalone bookings MUST use NEW_PATIENT_VISIT (Bug-1 fix).
+      // NEW_PATIENT_VISIT has durationMinutes=30 → endAt = startAt + 30 min.
+      // The booking-window on NEW_PATIENT_VISIT is 17:00–18:00 LOCAL (10:00–11:00 UTC).
+      // 09:00 UTC = 16:00 local → out-of-window. Use 10:35 UTC = 17:35 local
+      // so the slot falls inside the window. Grid-anchor at schedule start
+      // (09:00 UTC, no prior bookings) → 09:00, 09:30, 10:00, 10:30,
+      // 11:00, 11:30 — 10:30 is on-grid AND in-window.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -625,20 +659,20 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.CONSULTATION,
-          startAt: scratchIso(1, 9),
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchIso(1, 10, 30),
         });
 
       expect(res.status).toBe(201);
       expect(res.body.id).toEqual(expect.any(String));
       expect(res.body.status).toBe('BOOKED');
       expect(res.body.scheduleId).toBe(fixtures!.scheduleHome.id);
-      expect(res.body.startAt).toBe(scratchIso(1, 9));
-      expect(res.body.endAt).toBe(scratchIso(1, 9, 20));
+      expect(res.body.startAt).toBe(scratchIso(1, 10, 30));
+      expect(res.body.endAt).toBe(scratchIso(1, 11));
     });
 
     maybe('Duplicate slot → 409 SLOT_TAKEN', async () => {
-      // Happy path above booked 09:00–09:20 — second booking on the
+      // Happy path above booked 10:30 — second booking on the
       // SAME slot must trip the race guard.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
@@ -650,8 +684,8 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.CONSULTATION,
-          startAt: scratchIso(1, 9),
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchIso(1, 10, 30),
         });
 
       expect(res.status).toBe(409);
@@ -660,7 +694,10 @@ describe('F09 — appointments e2e', () => {
 
     maybe('Happy DOCTOR self-booking (.own) → 201', async () => {
       // DOCTOR books for themselves in a different slot on day 1 so it
-      // doesn't collide with the NURSE happy-path booking.
+      // doesn't collide with the NURSE happy-path booking (10:30 UTC).
+      // 10:00 UTC = 17:00 local falls inside the 17:00–18:00 window;
+      // end = 10:30 UTC = 17:30 local → in-window. On-grid: 30-min step
+      // from 09:00 UTC gives 09:00, 09:30, 10:00, 10:30 → 10:00 is valid.
       const jwt = await jwtFor(fixtures!.doctorUser);
 
       const res = await request(server)
@@ -671,21 +708,21 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.CONSULTATION,
-          startAt: scratchIso(1, 11),
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchIso(1, 10),
         });
 
       expect(res.status).toBe(201);
       expect(res.body.doctorId).toBe(fixtures!.doctor.id);
-      expect(res.body.startAt).toBe(scratchIso(1, 11));
+      expect(res.body.startAt).toBe(scratchIso(1, 10));
     });
 
     maybe('(department, type) mismatch → 400 DEPARTMENT_TYPE_NOT_ALLOWED', async () => {
-      // The foreign dept allows ONLY CONSULTATION; ask for PROCEDURE.
-      // Sign in as MRO so the scope check (foreign dept) doesn't trip
-      // first — wait, MRO doesn't have appointment.create. Instead use
-      // the foreign nurse so the scope passes and the type check is
-      // what trips.
+      // The foreign dept allows ONLY CONSULTATION; ask for NEW_PATIENT_VISIT.
+      // Standalone bookings must be NEW_PATIENT_VISIT (Bug-1 fix), so we
+      // pass that type — the standalone guard clears, and the
+      // (dept, type) check is what trips first.
+      // Sign in as the foreign nurse so the scope check passes.
       const jwt = await jwtFor(fixtures!.nurseForeign);
 
       const res = await request(server)
@@ -696,9 +733,8 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctorOther.id,
           departmentId: fixtures!.deptForeign.id,
           scheduleId: fixtures!.scheduleForeign.id,
-          appointmentType: AppointmentType.PROCEDURE,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
           startAt: scratchIso(2, 9),
-          reason: 'Test',
         });
 
       expect(res.status).toBe(400);
@@ -707,10 +743,11 @@ describe('F09 — appointments e2e', () => {
 
     maybe('Doctor home dept mismatch → 400 DOCTOR_DEPARTMENT_MISMATCH', async () => {
       // Foreign doctor lives in deptForeign; book against deptHome
-      // (which DOES allow CONSULTATION). Sign in as MRO? No —
+      // (which DOES allow NEW_PATIENT_VISIT). Sign in as MRO? No —
       // MRO lacks create. Use the home nurse: their dept matches the
-      // requested dept so the scope check passes; the doctor's home
-      // dept does NOT match, so the mismatch trips.
+      // requested dept so the scope check passes; the standalone guard
+      // clears (NEW_PATIENT_VISIT); the doctor's home dept does NOT
+      // match, so the mismatch trips.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -721,7 +758,7 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctorOther.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleForeign.id,
-          appointmentType: AppointmentType.CONSULTATION,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
           startAt: scratchIso(2, 10),
         });
 
@@ -740,7 +777,7 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.CONSULTATION,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
           startAt: '2020-01-01T09:00:00.000Z',
         });
 
@@ -748,7 +785,11 @@ describe('F09 — appointments e2e', () => {
       expect(res.body.code).toBe(ErrorCode.APPOINTMENT_START_IN_PAST);
     });
 
-    maybe('PROCEDURE without reason → 400 VALIDATION_FAILED', async () => {
+    maybe('PROCEDURE without reason → 400 STANDALONE_APPOINTMENT_TYPE_INVALID', async () => {
+      // Bug-2 fix: reason is now fully optional, so a PROCEDURE without reason
+      // no longer fails with VALIDATION_FAILED. Instead, Bug-1 fix rejects
+      // standalone PROCEDURE (no previousAppointmentId) as
+      // STANDALONE_APPOINTMENT_TYPE_INVALID before the transaction even opens.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -764,10 +805,15 @@ describe('F09 — appointments e2e', () => {
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.code).toBe(ErrorCode.VALIDATION_FAILED);
+      expect(res.body.code).toBe(ErrorCode.STANDALONE_APPOINTMENT_TYPE_INVALID);
     });
 
-    maybe('PROCEDURE with reason → 201', async () => {
+    maybe('NEW_PATIENT_VISIT with reason → 201 (reason is optional but stored when supplied)', async () => {
+      // Bug-2 fix: reason is fully optional. When provided it must be stored.
+      // Standalone bookings must be NEW_PATIENT_VISIT (Bug-1 fix).
+      // NEW_PATIENT_VISIT has durationMinutes=30 and window 10:00–11:00 UTC
+      // (17:00–18:00 Asia/Bangkok). 10:00 UTC is on-grid (30-min step from
+      // 09:00) and in-window (end 10:30 UTC = 17:30 local ≤ 18:00 local).
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -778,31 +824,25 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHomeProcedure.id,
-          appointmentType: AppointmentType.PROCEDURE,
-          startAt: scratchIso(5, 9),
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchIso(5, 10),
           reason: 'Routine pacemaker check-up',
         });
 
       expect(res.status).toBe(201);
       expect(res.body.reason).toBe('Routine pacemaker check-up');
-      // F13 — `(deptHome, PROCEDURE)` carries a 90-min duration override
-      // (vs the pre-F13 60-min default); endAt = startAt + 90 min.
+      // NEW_PATIENT_VISIT duration = 30 min → endAt = startAt + 30 min.
       expect(res.body.endAt).toBe(scratchIso(5, 10, 30));
     });
 
-    maybe('F13 — per-pair duration drives endAt (PROCEDURE = 90 min)', async () => {
-      // `(deptHome, PROCEDURE)` carries a per-pair durationMinutes = 90.
+    maybe('F13 — per-pair duration drives endAt (NEW_PATIENT_VISIT = 30 min)', async () => {
+      // `(deptHome, NEW_PATIENT_VISIT)` carries a per-pair durationMinutes = 30.
       // The day-6 schedule (09:00–12:00 UTC) hosts this booking so it
-      // does not collide with the day-5 PROCEDURE-with-reason fixture.
-      // Booking at 09:00 UTC therefore returns endAt = 10:30 UTC — the
-      // duration came from the per-pair row (90 min), not the retired
-      // global const map (60 min for PROCEDURE).
-      //
-      // Start time pinned to 09:00 UTC because the sliding-window grid
-      // re-anchored on the day-6 schedule's start (no other bookings on
-      // day-6) emits 09:00 + 90, then 10:30 + 90 (which would spill past
-      // 12:00 and is dropped). 09:30 would be off-grid — see
-      // SLOT_NOT_ON_GRID in appointments.service.ts.
+      // does not collide with the day-5 fixture.
+      // NEW_PATIENT_VISIT has a 17:00–18:00 LOCAL window (10:00–11:00 UTC).
+      // Start at 10:00 UTC (17:00 local, on-grid from 09:00 with 30-min step).
+      // endAt = 10:00 + 30 min = 10:30 UTC — duration came from the per-pair
+      // row, confirming F13 per-pair duration is wired end-to-end.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -813,30 +853,25 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHomeF13.id,
-          appointmentType: AppointmentType.PROCEDURE,
-          startAt: scratchIso(6, 9),
-          reason: 'F13 90-min duration check',
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchIso(6, 10),
         });
 
       expect(res.status).toBe(201);
-      expect(res.body.startAt).toBe(scratchIso(6, 9));
-      // 09:00 + 90 min = 10:30.
+      expect(res.body.startAt).toBe(scratchIso(6, 10));
+      // 10:00 + 30 min = 10:30.
       expect(res.body.endAt).toBe(scratchIso(6, 10, 30));
     });
 
-    maybe('F13 — in-window booking succeeds for FOLLOW_UP (10:35 UTC = 17:35 local)', async () => {
-      // FOLLOW_UP carries a 17:00–18:00 LOCAL booking window. Day-1
-      // schedule (09:00–12:00 UTC). 10:35 UTC = 17:35 Asia/Bangkok →
-      // localMin = 1055 ∈ [1020, 1080) → in-window.
-      //
-      // Start time pinned to 10:35 (not 10:30) so it lands on the
-      // sliding-window grid: day-1 has prior bookings at 09:00–09:20
-      // (NURSE CONSULTATION) and 11:00–11:20 (DOCTOR CONSULTATION),
-      // leaving free intervals [09:20, 11:00) and [11:20, 12:00). A
-      // FOLLOW_UP step (15 min) anchored at 09:20 emits 09:20, 09:35,
-      // …, 10:35, 10:50 — 10:30 would be off-grid (it sits between
-      // 10:20 and 10:35). See SLOT_NOT_ON_GRID in
-      // appointments.service.ts.
+    maybe('F13 — in-window booking succeeds for NEW_PATIENT_VISIT (10:30 UTC = 17:30 local)', async () => {
+      // NEW_PATIENT_VISIT carries a 17:00–18:00 LOCAL booking window
+      // (10:00–11:00 UTC with Asia/Bangkok +7). The F13 duration test above
+      // books 10:00 UTC on day-6 (scheduleHomeF13). The next on-grid slot
+      // (30-min step re-anchored after 10:00–10:30) is 10:30 UTC = 17:30
+      // local, end = 11:00 UTC = 18:00 local. slotEndMin = 1080 ≤
+      // windowEndMin = 1080 (isWithinBookingWindow uses `>` for rejection,
+      // so exactly-at-window-end passes). This confirms the window predicate
+      // accepts the boundary case.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -846,19 +881,19 @@ describe('F09 — appointments e2e', () => {
           patientId: fixtures!.patient.id,
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
-          scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.FOLLOW_UP,
-          startAt: scratchIso(1, 10, 35),
+          scheduleId: fixtures!.scheduleHomeF13.id,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchIso(6, 10, 30),
         });
 
       expect(res.status).toBe(201);
-      expect(res.body.startAt).toBe(scratchIso(1, 10, 35));
-      // FOLLOW_UP duration = 15 min → endAt = 10:50 UTC.
-      expect(res.body.endAt).toBe(scratchIso(1, 10, 50));
+      expect(res.body.startAt).toBe(scratchIso(6, 10, 30));
+      // NEW_PATIENT_VISIT duration = 30 min → endAt = 11:00 UTC.
+      expect(res.body.endAt).toBe(scratchIso(6, 11));
     });
 
     maybe('F13 — out-of-window booking → 400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW', async () => {
-      // FOLLOW_UP window is 17:00–18:00 LOCAL. 09:00 UTC = 16:00
+      // NEW_PATIENT_VISIT window is 17:00–18:00 LOCAL. 09:00 UTC = 16:00
       // Asia/Bangkok → localMin = 960 < 1020 → out-of-window.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
@@ -870,7 +905,7 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.FOLLOW_UP,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
           startAt: scratchIso(1, 9),
         });
 
@@ -878,8 +913,13 @@ describe('F09 — appointments e2e', () => {
       expect(res.body.code).toBe(ErrorCode.APPOINTMENT_OUTSIDE_BOOKING_WINDOW);
     });
 
-    maybe('Slot outside schedule → 400 SLOT_OUTSIDE_SCHEDULE', async () => {
-      // Schedule day 1 runs 09:00–12:00; ask for 13:00.
+    maybe('Out-of-window slot → 400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW', async () => {
+      // Schedule day 1 runs 09:00–12:00; ask for 13:00 UTC = 20:00 local.
+      // NEW_PATIENT_VISIT has a 17:00–18:00 LOCAL window (10:00–11:00 UTC).
+      // 13:00 UTC is outside the schedule AND outside the window. The
+      // booking-window guard fires inside the transaction before the
+      // schedule-outside check, so the returned code is
+      // APPOINTMENT_OUTSIDE_BOOKING_WINDOW.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -890,17 +930,20 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.CONSULTATION,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
           startAt: scratchIso(1, 13),
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.code).toBe(ErrorCode.SLOT_OUTSIDE_SCHEDULE);
+      expect(res.body.code).toBe(ErrorCode.APPOINTMENT_OUTSIDE_BOOKING_WINDOW);
     });
 
     maybe('Slot overlaps break → 400 SLOT_OVERLAPS_BREAK', async () => {
-      // scheduleHomeBreak (day 3) has break 10:00–11:00; ask for
-      // 10:00–10:20 which falls inside.
+      // scheduleHomeBreak (day 3) has break 10:00–11:00. NEW_PATIENT_VISIT
+      // has the 17:00–18:00 LOCAL window (10:00–11:00 UTC). Ask for
+      // 10:00 UTC: the window check passes (start = 17:00 local ≥ 17:00,
+      // end = 10:30 UTC = 17:30 local ≤ 18:00). The slot 10:00–10:30
+      // overlaps the break 10:00–11:00 → SLOT_OVERLAPS_BREAK fires next.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -911,7 +954,7 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHomeBreak.id,
-          appointmentType: AppointmentType.CONSULTATION,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
           startAt: scratchIso(3, 10),
         });
 
@@ -920,6 +963,10 @@ describe('F09 — appointments e2e', () => {
     });
 
     maybe('Schedule not bookable → 400 SCHEDULE_NOT_BOOKABLE', async () => {
+      // Use NEW_PATIENT_VISIT (standalone booking rule). The booking window
+      // check fires before the schedule bookable check; to reach
+      // SCHEDULE_NOT_BOOKABLE we pick 10:00 UTC = 17:00 local which is
+      // in-window (window 17:00–18:00 local, end 10:30 UTC = 17:30 local).
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -930,16 +977,20 @@ describe('F09 — appointments e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
           scheduleId: fixtures!.scheduleHomeNoBook.id,
-          appointmentType: AppointmentType.CONSULTATION,
-          startAt: scratchIso(4, 9),
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchIso(4, 10),
         });
 
       expect(res.status).toBe(400);
       expect(res.body.code).toBe(ErrorCode.SCHEDULE_NOT_BOOKABLE);
     });
 
-    maybe('NURSE booking in foreign dept → 403 INSUFFICIENT_PERMISSION_SCOPE', async () => {
-      // Home nurse tries to book at the foreign doctor's schedule.
+    maybe('NURSE booking in foreign dept → 400 STANDALONE_APPOINTMENT_TYPE_INVALID', async () => {
+      // Home nurse tries to book at the foreign doctor's schedule. With
+      // Bug-1, standalone CONSULTATION is rejected before entering the
+      // transaction by the standalone-type guard, surfacing as
+      // STANDALONE_APPOINTMENT_TYPE_INVALID (400). The nurse is still
+      // rejected (coverage preserved), just at an earlier guard.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)
@@ -954,11 +1005,13 @@ describe('F09 — appointments e2e', () => {
           startAt: scratchIso(2, 11),
         });
 
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe(ErrorCode.STANDALONE_APPOINTMENT_TYPE_INVALID);
     });
 
-    maybe('DOCTOR booking for foreign doctor → 403 INSUFFICIENT_PERMISSION_SCOPE', async () => {
+    maybe('DOCTOR booking for foreign doctor → 400 STANDALONE_APPOINTMENT_TYPE_INVALID', async () => {
+      // Same reasoning as NURSE test above: standalone CONSULTATION
+      // is rejected by the new standalone-type guard before scope check.
       const jwt = await jwtFor(fixtures!.doctorUser);
 
       const res = await request(server)
@@ -973,8 +1026,8 @@ describe('F09 — appointments e2e', () => {
           startAt: scratchIso(2, 11, 20),
         });
 
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe(ErrorCode.STANDALONE_APPOINTMENT_TYPE_INVALID);
     });
   });
 
@@ -1080,16 +1133,19 @@ describe('F09 — appointments e2e', () => {
 
     maybe('Happy cancel → slot is freed (re-book same slot returns 201)', async () => {
       // Seed a brand-new BOOKED appointment so the test is independent
-      // of the order other suites ran in.
+      // of the order other suites ran in. Use scheduleHomeCancel (day-7,
+      // no other tests touch this day) at 10:00 UTC = 17:00 local, which
+      // is in-window for NEW_PATIENT_VISIT (window 17:00–18:00 local).
+      // Seeded directly via Prisma (bypasses service validation).
       const booked = await prisma.appointment.create({
         data: {
           patientId: fixtures!.patient.id,
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
-          scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.CONSULTATION,
-          startAt: scratchDate(1, 11, 20),
-          endAt: scratchDate(1, 11, 40),
+          scheduleId: fixtures!.scheduleHomeCancel.id,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchDate(7, 10),
+          endAt: scratchDate(7, 10, 30),
           createdBy: fixtures!.superAdminId,
         },
       });
@@ -1107,8 +1163,8 @@ describe('F09 — appointments e2e', () => {
       expect(cancelRes.body.cancellationReason).toBe('Patient no-show');
       expect(cancelRes.body.cancelledAt).toEqual(expect.any(String));
 
-      // Now re-book the same slot — must succeed since CANCELLED rows
-      // do NOT block.
+      // Now re-book the same slot via API — must succeed since CANCELLED
+      // rows do NOT block. NEW_PATIENT_VISIT is the standalone type.
       const rebookRes = await request(server)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${jwt}`)
@@ -1116,9 +1172,9 @@ describe('F09 — appointments e2e', () => {
           patientId: fixtures!.patient.id,
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptHome.id,
-          scheduleId: fixtures!.scheduleHome.id,
-          appointmentType: AppointmentType.CONSULTATION,
-          startAt: scratchIso(1, 11, 20),
+          scheduleId: fixtures!.scheduleHomeCancel.id,
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: scratchIso(7, 10),
         });
 
       expect(rebookRes.status).toBe(201);

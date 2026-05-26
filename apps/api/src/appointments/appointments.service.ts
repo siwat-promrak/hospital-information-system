@@ -39,6 +39,8 @@ import {
   BLOCKING_APPOINTMENT_STATUSES,
   CONTINUATION_APPOINTMENT_TYPES,
   type ContinuationAppointmentType,
+  STANDALONE_APPOINTMENT_TYPES,
+  type StandaloneAppointmentType,
 } from './appointments.const';
 import type { ListAppointmentsArgs } from './appointments.types';
 import type { CancelAppointmentDto } from './dto/cancel-appointment.dto';
@@ -188,6 +190,27 @@ export class AppointmentsService {
         // `CONTINUATION_APPOINTMENT_TYPE_INVALID` rather than the
         // generic `DEPARTMENT_TYPE_NOT_ALLOWED`.
         const grouping = await this.resolveGrouping(tx, caller, dto);
+
+        // 0a. Standalone bookings (no prev) MUST be NEW_PATIENT_VISIT.
+        // Continuation bookings already validated FOLLOW_UP / PROCEDURE
+        // inside resolveGrouping above — don't repeat the check here.
+        if (!dto.previousAppointmentId) {
+          if (
+            !(STANDALONE_APPOINTMENT_TYPES as readonly AppointmentType[]).includes(
+              dto.appointmentType,
+            )
+          ) {
+            throw AppException.badRequest(
+              ErrorCode.STANDALONE_APPOINTMENT_TYPE_INVALID,
+              'Standalone bookings must use NEW_PATIENT_VISIT.',
+              {
+                appointmentType: dto.appointmentType,
+                allowedAppointmentTypes:
+                  STANDALONE_APPOINTMENT_TYPES as readonly StandaloneAppointmentType[],
+              },
+            );
+          }
+        }
 
         // 1. (department, type) is allowed — same lookup yields the
         // per-pair duration + booking-window bounds (F13).

@@ -786,10 +786,12 @@ describe('F07 — appointment types + slot finder e2e', () => {
         fixtures!.superAdminId,
       );
 
-      // 1. Confirm the slot grid contains the 16:20 slot before we book.
+      // 1. Confirm the slot grid contains the 16:00 slot before we book.
+      // Uses NEW_PATIENT_VISIT (30-min step) — standalone bookings MUST
+      // use NEW_PATIENT_VISIT after the Bug-1 fix.
       const beforeRes = await request(server)
         .get(
-          `/api/v1/slots?doctorId=${fixtures!.doctor.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+          `/api/v1/slots?doctorId=${fixtures!.doctor.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.NEW_PATIENT_VISIT}`,
         )
         .set('Authorization', `Bearer ${jwt}`);
 
@@ -799,9 +801,10 @@ describe('F07 — appointment types + slot finder e2e', () => {
         .filter((s: { scheduleId: string }) => s.scheduleId === wireSchedule.id)
         .map((s: { startAt: string }) => s.startAt);
 
-      expect(beforeStarts).toContain(slotIso(16, 20));
+      expect(beforeStarts).toContain(slotIso(16, 0));
 
-      // 2. Book the 16:20 slot via the real booking endpoint.
+      // 2. Book the 16:00 slot via the real booking endpoint.
+      // Standalone bookings MUST be NEW_PATIENT_VISIT (Bug-1).
       const bookRes = await request(server)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${jwt}`)
@@ -810,19 +813,20 @@ describe('F07 — appointment types + slot finder e2e', () => {
           doctorId: fixtures!.doctor.id,
           departmentId: fixtures!.deptPrimary.id,
           scheduleId: wireSchedule.id,
-          appointmentType: AppointmentType.CONSULTATION,
-          startAt: slotIso(16, 20),
+          appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+          startAt: slotIso(16, 0),
         });
 
       expect(bookRes.status).toBe(201);
       expect(bookRes.body.status).toBe('BOOKED');
-      expect(bookRes.body.startAt).toBe(slotIso(16, 20));
-      expect(bookRes.body.endAt).toBe(slotIso(16, 40));
+      expect(bookRes.body.startAt).toBe(slotIso(16, 0));
+      // NEW_PATIENT_VISIT duration is 30 min.
+      expect(bookRes.body.endAt).toBe(slotIso(16, 30));
 
-      // 3. Re-query GET /slots — the 16:20 slot MUST now be excluded.
+      // 3. Re-query GET /slots — the 16:00 slot MUST now be excluded.
       const afterRes = await request(server)
         .get(
-          `/api/v1/slots?doctorId=${fixtures!.doctor.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+          `/api/v1/slots?doctorId=${fixtures!.doctor.id}&departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.NEW_PATIENT_VISIT}`,
         )
         .set('Authorization', `Bearer ${jwt}`);
 
@@ -832,9 +836,8 @@ describe('F07 — appointment types + slot finder e2e', () => {
         .filter((s: { scheduleId: string }) => s.scheduleId === wireSchedule.id)
         .map((s: { startAt: string }) => s.startAt);
 
-      expect(afterStarts).toContain(slotIso(16, 0));
-      expect(afterStarts).not.toContain(slotIso(16, 20));
-      expect(afterStarts).toContain(slotIso(16, 40));
+      expect(afterStarts).not.toContain(slotIso(16, 0));
+      expect(afterStarts).toContain(slotIso(16, 30));
     },
   );
 
