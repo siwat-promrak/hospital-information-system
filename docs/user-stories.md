@@ -1528,6 +1528,146 @@ timeline.
 
 ---
 
+## E15 — Slot finder (P1, F15 `feat/slot-finder`)
+
+Today the only way to discover available slots is to start the booking
+wizard (F09), pick a patient, then drill down through department → doctor
+→ date → type to reach the slot grid. That workflow is fine when the
+caller knows "I want Dr. Smith at time Y." It is the wrong shape for
+**"any doctor in this department who has a 30-minute follow-up open
+tomorrow"** — a workflow that comes up when a patient calls in flexibly,
+or when a referral lands in a new department and the NURSE needs to
+scan the team's availability fast.
+
+This feature delivers a dedicated `/find-slot` screen that lets the
+caller filter by department / doctor / appointment type / date, lists
+the matching open slots across one or many doctors, and offers a
+"Book this slot" CTA that deep-links into the booking wizard with the
+slot pre-selected.
+
+**Wire model:**
+- Extends F07's `GET /slots` to make `doctorId` **optional**. When
+  omitted, the service iterates over every doctor with an active
+  schedule in `departmentId` on the requested `date` and merges their
+  slot grids.
+- Extends the `/slots` permission gate to accept `schedule.read.all`
+  IN ADDITION TO the existing `appointment.create.{own,own-department}`.
+  This widens the endpoint's audience to cross-department read roles
+  (currently MRO) so they can use the slot finder as a read-only
+  visibility tool. PHARMACY stays excluded — they hold no
+  `schedule.read.*` permission.
+
+**View mode is driven by `schedule.read.*` codes** — mirrors F06's
+schedule page (lift `resolveScheduleViewMode()` verbatim):
+
+| Caller permissions | View mode | UI |
+| --- | --- | --- |
+| `schedule.read.all` | **ALL** | Department picker visible. Doctor picker not scoped. |
+| `schedule.read.own-department` + `schedule.read.own` | **OWN_PLUS_DEPT** | "Show mine" / "Show department" toggle (defaults to `mine`). `mine` pins the caller's doctor; `dept` shows a doctor picker scoped to the caller's department. Department always pinned to caller. |
+| `schedule.read.own-department` only | **DEPT** | Doctor picker scoped to caller's department. Department pinned (not selectable). |
+| `schedule.read.own` only | **OWN** | No filters. Caller's doctor pinned. |
+| None of the above | Forbidden card. Sidebar entry hidden. |
+
+### US-15.1 — Caller filters open slots for a chosen day
+
+**US-15.1** — As any caller authorised to view the slot finder, I want
+to pick a department / doctor / appointment type / date and see the
+open slots that match, so that I can find a bookable time without
+walking the booking wizard first.
+
+**Acceptance criteria:**
+
+- Route `/find-slot`. Filter card at the top, results list below.
+- **Appointment type is required** — the Search button stays disabled
+  until a type is picked. Type catalog comes from
+  `GET /departments/:id/appointment-types` (F13) so durations + booking
+  windows render per-pair correctly.
+- **Date** is a single-date picker, defaults to today (FE timezone:
+  `CLINIC_TIMEZONE`).
+- **Department** filter visible only in ALL mode (MRO). For DEPT /
+  OWN_PLUS_DEPT callers, the department is pinned to
+  `session.user.departmentId` and hidden.
+- **Doctor** filter visible in ALL, DEPT, and OWN_PLUS_DEPT+dept.
+  Doctor picker is scoped to the **effective department** in scope —
+  the same narrowing pattern as F06's schedule page doctor filter.
+  When the doctor is left empty, the result includes every doctor with
+  schedules on that day.
+- Results: list grouped by doctor, each slot row shows time
+  (`HH:mm – HH:mm` in `CLINIC_TIMEZONE`), the doctor's name + code, and
+  the booking-window context when relevant.
+- Empty result renders a "no open slots" message keyed by i18n.
+
+### US-15.2 — View mode adapts to the caller's schedule-read scope
+
+**US-15.2** — As a DOCTOR who can see their own AND their department's
+schedules, I want a "Show mine" / "Show department" toggle on the slot
+finder, so that I can flip between scanning my own availability and
+finding a colleague to refer to, without leaving the page.
+
+**Acceptance criteria:**
+
+- The toggle is rendered only in OWN_PLUS_DEPT mode. Default scope is
+  `mine` (matches F06's default).
+- `mine` scope: doctor pinned to `caller.doctor.id`, doctor picker
+  hidden, results limited to caller's slots.
+- `dept` scope: doctor picker appears (scoped to caller's department);
+  results include every doctor in that dept unless the picker narrows.
+- Department is always pinned to caller's `departmentId` in this mode
+  (no department picker).
+- NURSE in DEPT mode sees no toggle. ALL-scope MRO sees no toggle
+  either — they pick department + doctor freely.
+- The toggle and filter state are reflected in the URL (`?scope=mine|dept`,
+  `?doctorId=`, etc.) so deep-links and Back-button navigation behave
+  correctly. Matches F06's URL contract.
+
+### US-15.3 — `/slots` endpoint accepts `schedule.read.all` callers
+
+**US-15.3** — As an MRO with `schedule.read.all` but no
+`appointment.create.*` permission, I want to use the slot finder as a
+read-only visibility tool, so that I can answer cross-department
+availability questions without holding write permissions.
+
+**Acceptance criteria:**
+
+- `GET /slots` permission gate widens from
+  `appointment.create.{own,own-department}` (current) to ALSO accept
+  `schedule.read.all` (any-of). Existing callers continue to pass via
+  the create-permission branch.
+- `doctorId` query param becomes optional. When omitted, the service
+  iterates over every doctor with an active schedule in
+  `departmentId` on the requested `date` and merges their slot grids.
+- Response shape unchanged — array of slot objects each carrying
+  `startAt`, `endAt`, `doctorId`, `doctorCode`, `doctorName`,
+  `departmentId`.
+- For MRO callers, the "Book this slot" CTA is hidden on the FE (they
+  hold neither `appointment.create.own` nor `.own-department`). The
+  slot list remains visible.
+
+### US-15.4 — "Book this slot" deep-links into the booking wizard
+
+**US-15.4** — As a NURSE / DOCTOR with appointment-create scope, I
+want clicking "Book this slot" to take me into the booking wizard with
+the slot, doctor, department, and type already populated, so that the
+only thing left to choose is the patient.
+
+**Acceptance criteria:**
+
+- "Book this slot" CTA is rendered per row only when the caller holds
+  `appointment.create.{own,own-department}` (any-of, scope-narrowed
+  against the row's doctor/department).
+- The CTA links to
+  `/appointments/new?doctorScheduleId=<id>&startAt=<iso>&appointmentType=<code>&departmentId=<id>`.
+- The booking wizard, on detecting these query params, skips its
+  department / doctor / date / type steps (locked, read-only) and
+  lands on the patient picker as the first user-actionable step.
+- After successful booking, the user returns to the standard
+  appointment-detail page (not back to the slot finder).
+- A DOCTOR caller in `mine` scope sees the CTA on their own slots only
+  (BE rejects `appointment.create.own` for foreign doctors — the FE
+  hides the CTA in advance to prevent the dead click).
+
+---
+
 ## Constraints reference
 
 DB-level CHECK constraints, all appended as raw SQL to the init migration
