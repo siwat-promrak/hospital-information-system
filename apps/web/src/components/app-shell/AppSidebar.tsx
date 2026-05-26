@@ -1,5 +1,7 @@
 "use client";
 
+import AddBoxIcon from "@mui/icons-material/AddBox";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DashboardIcon from "@mui/icons-material/Dashboard";
@@ -7,6 +9,7 @@ import EventNoteIcon from "@mui/icons-material/EventNote";
 import FolderSharedIcon from "@mui/icons-material/FolderShared";
 import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
 import PeopleIcon from "@mui/icons-material/People";
+import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
@@ -295,5 +298,8 @@ const ICON_FOR: Readonly<
   [NAV_ICON.DOCTORS]: PeopleIcon,
   [NAV_ICON.SCHEDULES]: EventNoteIcon,
   [NAV_ICON.MEDICAL_RECORDS]: FolderSharedIcon,
+  [NAV_ICON.APPOINTMENTS]: CalendarMonthIcon,
+  [NAV_ICON.APPOINTMENTS_NEW]: AddBoxIcon,
+  [NAV_ICON.PATIENTS_NEW]: PersonAddIcon,
 };
 

@@ -20,6 +20,8 @@
  */
 
 import { K } from "@/i18n/keys.generated";
+import { APPOINTMENT_ERROR_CODE } from "@/lib/api/appointment.const";
+import { PATIENT_ERROR_CODE } from "@/lib/api/patient.const";
 import { SCHEDULE_ERROR_CODE } from "@/lib/api/schedule.const";
 
 /**
@@ -31,6 +33,9 @@ export const SNACKBAR_SUCCESS_KEY = {
   SCHEDULE_UPDATED: "scheduleUpdated",
   SCHEDULE_DELETED: "scheduleDeleted",
   SIGNED_OUT: "signedOut",
+  PATIENT_CREATED: "patientCreated",
+  APPOINTMENT_CREATED: "appointmentCreated",
+  APPOINTMENT_CANCELLED: "appointmentCancelled",
 } as const;
 
 export type SnackbarSuccessKey =
@@ -50,6 +55,7 @@ type SnackbarErrorMessageKey = keyof typeof K.Snackbar.Errors;
 export const ERROR_CODE_TO_KEY: Readonly<
   Record<string, SnackbarErrorMessageKey>
 > = {
+  // Schedules (F06)
   [SCHEDULE_ERROR_CODE.OVERLAP]: K.Snackbar.Errors.overlap,
   [SCHEDULE_ERROR_CODE.DOCTOR_NOT_IN_DEPARTMENT]:
     K.Snackbar.Errors.doctorNotInDepartment,
@@ -57,6 +63,33 @@ export const ERROR_CODE_TO_KEY: Readonly<
     K.Snackbar.Errors.scopeViolation,
   [SCHEDULE_ERROR_CODE.INSUFFICIENT_PERMISSION]: K.Snackbar.Errors.forbidden,
   [SCHEDULE_ERROR_CODE.START_IN_PAST]: K.Snackbar.Errors.startInPast,
+
+  // Patients (F09)
+  [PATIENT_ERROR_CODE.PATIENT_EMAIL_EXISTS]:
+    K.Snackbar.Errors.patientEmailExists,
+
+  // Appointments / booking (F09)
+  [APPOINTMENT_ERROR_CODE.SLOT_TAKEN]: K.Snackbar.Errors.slotTaken,
+  [APPOINTMENT_ERROR_CODE.SLOT_OUTSIDE_SCHEDULE]:
+    K.Snackbar.Errors.slotOutsideSchedule,
+  [APPOINTMENT_ERROR_CODE.SLOT_OVERLAPS_BREAK]:
+    K.Snackbar.Errors.slotOverlapsBreak,
+  [APPOINTMENT_ERROR_CODE.SCHEDULE_NOT_FOUND_FOR_BOOKING]:
+    K.Snackbar.Errors.scheduleNotFoundForBooking,
+  [APPOINTMENT_ERROR_CODE.SCHEDULE_NOT_BOOKABLE]:
+    K.Snackbar.Errors.scheduleNotBookable,
+  [APPOINTMENT_ERROR_CODE.APPOINTMENT_START_IN_PAST]:
+    K.Snackbar.Errors.appointmentStartInPast,
+  [APPOINTMENT_ERROR_CODE.APPOINTMENT_NOT_FOUND]:
+    K.Snackbar.Errors.appointmentNotFound,
+  [APPOINTMENT_ERROR_CODE.APPOINTMENT_ALREADY_CANCELLED]:
+    K.Snackbar.Errors.appointmentAlreadyCancelled,
+  [APPOINTMENT_ERROR_CODE.APPOINTMENT_ALREADY_COMPLETED]:
+    K.Snackbar.Errors.appointmentAlreadyCompleted,
+  [APPOINTMENT_ERROR_CODE.DEPARTMENT_TYPE_NOT_ALLOWED]:
+    K.Snackbar.Errors.departmentTypeNotAllowed,
+  [APPOINTMENT_ERROR_CODE.DOCTOR_DEPARTMENT_MISMATCH]:
+    K.Snackbar.Errors.doctorDepartmentMismatch,
 };
 
 /** Single key for the generic-error path — defined once so the hook + tests share it. */

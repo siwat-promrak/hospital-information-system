@@ -14,10 +14,8 @@ import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { getMe } from "@/lib/api/auth.api";
 import { listDepartments } from "@/lib/api/department.api";
-import { listDoctors } from "@/lib/api/doctor.api";
-import { DOCTOR_INFINITE_SCROLL_PAGE_SIZE } from "@/lib/api/doctor.const";
+import { fetchDoctorPickerSeed } from "@/lib/api/doctor.actions";
 import {
-  DEFAULT_PAGE,
   MAX_PAGE_SIZE,
   PAGE_SIZE_ALL,
 } from "@/lib/api/pagination.const";
@@ -259,13 +257,11 @@ export default async function SchedulesPage({
     return { me, schedules };
   }
 
-  const [{ me, schedules: schedulesResult }, departmentsResult, doctorsResult] =
+  const [{ me, schedules: schedulesResult }, departmentsResult, doctorSeed] =
     await Promise.all([
       fetchMeAndSchedules(),
       listDepartments({ pageSize: MAX_PAGE_SIZE }),
-      listDoctors({
-        page: DEFAULT_PAGE,
-        pageSize: DOCTOR_INFINITE_SCROLL_PAGE_SIZE,
+      fetchDoctorPickerSeed({
         departmentId: doctorFilterScopeDepartmentId,
       }),
     ]);
@@ -399,9 +395,7 @@ export default async function SchedulesPage({
           ) : null}
           {showDoctorFilter ? (
             <ScheduleDoctorFilter
-              doctors={doctorsResult.data}
-              doctorsTotal={doctorsResult.total}
-              initialDoctorPage={doctorsResult.page}
+              doctorSeed={doctorSeed}
               scopeDepartmentId={doctorFilterScopeDepartmentId}
               activeDoctorId={urlDoctorId ?? null}
               preserveParams={doctorFilterPreserve}
@@ -414,9 +408,7 @@ export default async function SchedulesPage({
       ) : null}
       <ScheduleCalendar
         schedules={schedulesResult.data}
-        doctors={doctorsResult.data}
-        doctorsTotal={doctorsResult.total}
-        initialDoctorPage={doctorsResult.page}
+        doctorSeed={doctorSeed}
         doctorDepartmentId={doctorFilterScopeDepartmentId}
         departments={departmentsResult.data}
         view={view}

@@ -24,6 +24,10 @@ export const FE_PATH = {
   DOCTORS: "/doctors",
   SCHEDULES: "/schedules",
   MEDICAL_RECORDS: "/medical-records",
+  APPOINTMENTS: "/appointments",
+  APPOINTMENTS_NEW: "/appointments/new",
+  PATIENTS: "/patients",
+  PATIENTS_NEW: "/patients/new",
 } as const;
 
 export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];
@@ -34,6 +38,7 @@ export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];
  */
 export const FE_PATH_BUILDER = {
   doctorDetail: (id: string) => `${FE_PATH.DOCTORS}/${id}`,
+  appointmentDetail: (id: string) => `${FE_PATH.APPOINTMENTS}/${id}`,
 } as const;
 
 export const BE_PATH = {
@@ -46,6 +51,8 @@ export const BE_PATH = {
   SCHEDULES: "/schedules",
   SLOTS: "/slots",
   MEDICAL_RECORDS: "/medical-records",
+  APPOINTMENTS: "/appointments",
+  PATIENTS: "/patients",
 } as const;
 
 export type BePath = (typeof BE_PATH)[keyof typeof BE_PATH];
@@ -66,4 +73,7 @@ export type BePath = (typeof BE_PATH)[keyof typeof BE_PATH];
 export const BE_PATH_BUILDER = {
   doctorDetail: (doctorId: string) => `${BE_PATH.DOCTORS}/${doctorId}`,
   medicalRecord: (id: string) => `${BE_PATH.MEDICAL_RECORDS}/${id}`,
+  appointmentDetail: (id: string) => `${BE_PATH.APPOINTMENTS}/${id}`,
+  appointmentCancel: (id: string) =>
+    `${BE_PATH.APPOINTMENTS}/${id}/cancel`,
 } as const;
