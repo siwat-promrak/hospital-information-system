@@ -11,8 +11,8 @@ import type { AppointmentType } from '@prisma/client';
  * - `date` — query param, ISO calendar date `YYYY-MM-DD`. Interpreted as a
  *   UTC calendar day for the slot grid.
  * - `type` — query param, `AppointmentType`. Drives the step size of the
- *   slot grid and is also gated on `(departmentId, type)` membership in
- *   `department_appointment_types`.
+ *   slot grid (via the per-pair `durationMinutes`) and is also gated on
+ *   `(departmentId, type)` membership in `department_appointment_types`.
  */
 export interface FindSlotsArgs {
   doctorId: string;
@@ -66,10 +66,32 @@ export interface ScheduleWindow {
 }
 
 /**
+ * Per-(department, type) booking rule loaded from
+ * `department_appointment_types` (F13). Returned by
+ * `SlotsService#loadDepartmentTypeRule` and consumed by
+ * `computeSchedulesSlots` for the slot-grid step + booking-window filter.
+ *
+ *  - `durationMinutes` — slot step (and slot length). Replaces the
+ *    pre-F13 global `APPOINTMENT_TYPE_DURATION_MINUTES` map.
+ *  - `bookingWindowStartMinute` / `bookingWindowEndMinute` — nullable
+ *    wall-clock minutes-of-day in `CLINIC_TIMEZONE`. Either side may be
+ *    null = open-ended on that side; both null = always inside.
+ */
+export interface DepartmentTypeRule {
+  durationMinutes: number;
+  bookingWindowStartMinute: number | null;
+  bookingWindowEndMinute: number | null;
+}
+
+/**
  * Arguments for `computeSchedulesSlots` — the pure slot-grid step.
  *
  *  - `schedule` — half-open working window + optional break window.
  *  - `durationMinutes` — slot step (and slot length).
+ *  - `bookingWindowStartMinute` / `bookingWindowEndMinute` — per-pair
+ *    booking window (F13). Slots whose local wall-clock minute-of-day
+ *    falls outside `[start, end)` are dropped. Either side may be null
+ *    (open-ended on that side); both null = no window filter.
  *  - `blockingAppointments` — every BOOKED + COMPLETED appointment on the
  *    same doctor that day. A slot is dropped if any blocker overlaps.
  *  - `now` — wall-clock cutoff. Slots whose `startAt <= now` are dropped.
@@ -77,6 +99,8 @@ export interface ScheduleWindow {
 export interface ComputeScheduleSlotsArgs {
   schedule: ScheduleWindow;
   durationMinutes: number;
+  bookingWindowStartMinute: number | null;
+  bookingWindowEndMinute: number | null;
   blockingAppointments: ReadonlyArray<{ startAt: Date; endAt: Date }>;
   now: Date;
 }

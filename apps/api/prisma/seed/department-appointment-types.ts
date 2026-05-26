@@ -1,12 +1,19 @@
 /**
- * Seeds the per-department allowed `AppointmentType` set. Each
- * `(departmentId, appointmentType)` row declares that the department
- * offers that category of appointment; appointment creation must check
- * the pair exists here before booking.
+ * Seeds the per-department `(departmentId, appointmentType)` booking
+ * rules. Each row declares that the department offers the category AND
+ * carries the per-pair `durationMinutes` + optional booking window
+ * (`bookingWindowStartMinute` / `bookingWindowEndMinute`).
  *
  * Depends on departments.ts (to resolve `departmentId` by name) and the
  * super-admin (for the `createdBy` audit column). Idempotent via upsert
- * keyed on the `(departmentId, appointmentType)` unique pair.
+ * keyed on the `(departmentId, appointmentType)` unique pair — the
+ * `update` block re-applies the rule fields so re-seeding picks up
+ * spec changes.
+ *
+ * F13 overrides (reviewers can spot-check these without grep):
+ *  - Orthopedics `PROCEDURE` → 90 min (vs the 60-min default).
+ *  - Cardiology `NEW_PATIENT_VISIT` → bookingWindowEndMinute = 660
+ *    (= "before 11:00 local" — Asia/Bangkok wall clock).
  */
 import {
   AppointmentType,
@@ -15,95 +22,125 @@ import {
   type User,
 } from '@prisma/client';
 
+/**
+ * Per-`AppointmentType` default slot duration (in minutes). Mirrors the
+ * pre-F13 global `APPOINTMENT_TYPE_DURATION_MINUTES` const map; per-pair
+ * overrides land in `SPECS` below.
+ */
+const DEFAULT_DURATION_MINUTES: Record<AppointmentType, number> = {
+  [AppointmentType.NEW_PATIENT_VISIT]: 30,
+  [AppointmentType.FOLLOW_UP]: 15,
+  [AppointmentType.CONSULTATION]: 20,
+  [AppointmentType.PROCEDURE]: 60,
+};
+
+interface AppointmentTypeRuleSpec {
+  appointmentType: AppointmentType;
+  durationMinutes?: number;
+  bookingWindowStartMinute?: number | null;
+  bookingWindowEndMinute?: number | null;
+}
+
 interface DepartmentTypeSpec {
   departmentName: string;
-  appointmentTypes: AppointmentType[];
+  rules: AppointmentTypeRuleSpec[];
 }
 
 const SPECS: DepartmentTypeSpec[] = [
   {
     departmentName: 'Cardiology',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.FOLLOW_UP,
-      AppointmentType.CONSULTATION,
-      AppointmentType.PROCEDURE,
+    rules: [
+      {
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+        // F13 override — confine new-patient visits to before 11:00
+        // local (660 min after midnight in CLINIC_TIMEZONE) so the
+        // afternoon stays clear for follow-ups.
+        bookingWindowEndMinute: 660,
+      },
+      { appointmentType: AppointmentType.FOLLOW_UP },
+      { appointmentType: AppointmentType.CONSULTATION },
+      { appointmentType: AppointmentType.PROCEDURE },
     ],
   },
   {
     departmentName: 'Internal Medicine',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.FOLLOW_UP,
-      AppointmentType.CONSULTATION,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
+      { appointmentType: AppointmentType.CONSULTATION },
     ],
   },
   {
     departmentName: 'Pediatrics',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.FOLLOW_UP,
-      AppointmentType.CONSULTATION,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
+      { appointmentType: AppointmentType.CONSULTATION },
     ],
   },
   {
     departmentName: 'Orthopedics',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.FOLLOW_UP,
-      AppointmentType.CONSULTATION,
-      AppointmentType.PROCEDURE,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
+      { appointmentType: AppointmentType.CONSULTATION },
+      {
+        appointmentType: AppointmentType.PROCEDURE,
+        // F13 override — orthopedic procedures need 90 min vs the 60-min
+        // global default.
+        durationMinutes: 90,
+      },
     ],
   },
   {
     departmentName: 'Obstetrics & Gynecology',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.FOLLOW_UP,
-      AppointmentType.CONSULTATION,
-      AppointmentType.PROCEDURE,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
+      { appointmentType: AppointmentType.CONSULTATION },
+      { appointmentType: AppointmentType.PROCEDURE },
     ],
   },
   {
     departmentName: 'Dermatology',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.FOLLOW_UP,
-      AppointmentType.CONSULTATION,
-      AppointmentType.PROCEDURE,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
+      { appointmentType: AppointmentType.CONSULTATION },
+      { appointmentType: AppointmentType.PROCEDURE },
     ],
   },
   {
     departmentName: 'Ophthalmology',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.FOLLOW_UP,
-      AppointmentType.CONSULTATION,
-      AppointmentType.PROCEDURE,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
+      { appointmentType: AppointmentType.CONSULTATION },
+      { appointmentType: AppointmentType.PROCEDURE },
     ],
   },
   {
     departmentName: 'Otolaryngology (ENT)',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.FOLLOW_UP,
-      AppointmentType.CONSULTATION,
-      AppointmentType.PROCEDURE,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
+      { appointmentType: AppointmentType.CONSULTATION },
+      { appointmentType: AppointmentType.PROCEDURE },
     ],
   },
   {
     departmentName: 'General Surgery',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.CONSULTATION,
-      AppointmentType.PROCEDURE,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.CONSULTATION },
+      { appointmentType: AppointmentType.PROCEDURE },
     ],
   },
   {
     departmentName: 'Emergency Medicine',
-    appointmentTypes: [
-      AppointmentType.NEW_PATIENT_VISIT,
-      AppointmentType.CONSULTATION,
+    rules: [
+      { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.CONSULTATION },
     ],
   },
 ];
@@ -126,18 +163,31 @@ export async function seedDepartmentAppointmentTypes(
       );
     }
 
-    for (const appointmentType of spec.appointmentTypes) {
+    for (const rule of spec.rules) {
+      const durationMinutes =
+        rule.durationMinutes ?? DEFAULT_DURATION_MINUTES[rule.appointmentType];
+      const bookingWindowStartMinute = rule.bookingWindowStartMinute ?? null;
+      const bookingWindowEndMinute = rule.bookingWindowEndMinute ?? null;
+
       await prisma.departmentAppointmentType.upsert({
         where: {
           departmentId_appointmentType: {
             departmentId: department.id,
-            appointmentType,
+            appointmentType: rule.appointmentType,
           },
         },
-        update: {},
+        update: {
+          durationMinutes,
+          bookingWindowStartMinute,
+          bookingWindowEndMinute,
+          updatedBy: superAdmin.id,
+        },
         create: {
           departmentId: department.id,
-          appointmentType,
+          appointmentType: rule.appointmentType,
+          durationMinutes,
+          bookingWindowStartMinute,
+          bookingWindowEndMinute,
           createdBy: superAdmin.id,
         },
       });

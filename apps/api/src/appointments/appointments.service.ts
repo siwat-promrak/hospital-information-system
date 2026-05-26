@@ -9,7 +9,6 @@ import { Injectable } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import dayjs from 'dayjs';
 
-import { APPOINTMENT_TYPE_DURATION_MINUTES } from '../appointment-types/appointment-types.const';
 import { PERMISSION } from '../auth/permissions';
 import {
   resolveAppointmentCreateScope,
@@ -18,6 +17,10 @@ import {
   SCOPE,
 } from '../auth/scope';
 import { AppException } from '../common/app-exception';
+import {
+  isWithinBookingWindow,
+  localMinuteOfDay,
+} from '../common/clinic/clinic';
 import { ErrorCode } from '../common/errors';
 import {
   buildPaginatedResponse,
@@ -130,9 +133,7 @@ export class AppointmentsService {
     caller: AuthenticatedUser,
     dto: CreateAppointmentDto,
   ): Promise<AppointmentResponseDto> {
-    const durationMinutes = APPOINTMENT_TYPE_DURATION_MINUTES[dto.appointmentType];
     const startAt = dayjs.utc(dto.startAt);
-    const endAt = startAt.add(durationMinutes, 'minute');
 
     if (startAt.isSameOrBefore(dayjs.utc())) {
       throw AppException.badRequest(
@@ -144,14 +145,20 @@ export class AppointmentsService {
 
     const row = await this.prisma.$transaction(
       async (tx) => {
-        // 1. (department, type) is allowed.
+        // 1. (department, type) is allowed — same lookup yields the
+        // per-pair duration + booking-window bounds (F13).
         const allowed = await tx.departmentAppointmentType.findFirst({
           where: {
             departmentId: dto.departmentId,
             appointmentType: dto.appointmentType,
             deletedAt: null,
           },
-          select: { id: true },
+          select: {
+            id: true,
+            durationMinutes: true,
+            bookingWindowStartMinute: true,
+            bookingWindowEndMinute: true,
+          },
         });
 
         if (!allowed) {
@@ -164,6 +171,36 @@ export class AppointmentsService {
             },
           );
         }
+
+        // F13 back-stop — the slot finder hides out-of-window slots in
+        // the wizard, but a direct API caller could still post one.
+        // Compute the local wall-clock minute-of-day at the check site
+        // (CLAUDE.md §9a) and reject when it falls outside the per-pair
+        // window. Either bound may be null (open-ended on that side).
+        const localMin = localMinuteOfDay(startAt.toDate());
+
+        if (
+          !isWithinBookingWindow(
+            localMin,
+            allowed.bookingWindowStartMinute,
+            allowed.bookingWindowEndMinute,
+          )
+        ) {
+          throw AppException.badRequest(
+            ErrorCode.APPOINTMENT_OUTSIDE_BOOKING_WINDOW,
+            'Requested startAt falls outside the booking window for this (department, type).',
+            {
+              departmentId: dto.departmentId,
+              appointmentType: dto.appointmentType,
+              startAt: dto.startAt,
+              localMinuteOfDay: localMin,
+              bookingWindowStartMinute: allowed.bookingWindowStartMinute,
+              bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+            },
+          );
+        }
+
+        const endAt = startAt.add(allowed.durationMinutes, 'minute');
 
         // 2. Doctor exists + doctor's home dept matches.
         const doctor = await tx.doctor.findFirst({

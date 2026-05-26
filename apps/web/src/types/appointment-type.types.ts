@@ -27,9 +27,14 @@ export type AppointmentType =
  * Returned by `GET /appointment-types`. The BE-emitted English `label` is
  * the i18n fallback; F12 re-keys these through `Common.AppointmentType.<code>`
  * for Thai parity.
+ *
+ * F13 moved per-pair `durationMinutes` (and the new optional booking-window
+ * bounds) off this global label catalog onto the per-department
+ * `GET /departments/:id/appointment-types` response. The booking wizard
+ * fetches the department-scoped catalog after a department is picked —
+ * see `DepartmentAppointmentTypeRow` in `types/department.types.ts`.
  */
 export interface AppointmentTypeResponse {
   code: AppointmentType;
   label: string;
-  durationMinutes: number;
 }

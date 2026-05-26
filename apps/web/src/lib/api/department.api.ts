@@ -1,9 +1,15 @@
 import "server-only";
 
-import { BE_PATH } from "@/auth/routes";
-import type { DepartmentRow } from "@/types/department.types";
+import type {
+  DepartmentAppointmentTypeRow,
+  DepartmentRow,
+} from "@/types/department.types";
 import type { Paginated, PaginationParams } from "@/types/pagination.types";
 
+import {
+  DEPARTMENT_API_PATH,
+  DEPARTMENT_API_PATH_BUILDER,
+} from "./department.const";
 import { buildPaginationQuery } from "./pagination";
 import { userFetch } from "./server-fetch";
 
@@ -24,6 +30,21 @@ export function listDepartments(
   params?: PaginationParams,
 ): Promise<Paginated<DepartmentRow>> {
   return userFetch<Paginated<DepartmentRow>>(
-    `${BE_PATH.DEPARTMENTS}${buildPaginationQuery(params)}`,
+    `${DEPARTMENT_API_PATH}${buildPaginationQuery(params)}`,
+  );
+}
+
+/**
+ * F13 per-(department, type) booking-rule catalog. The booking wizard
+ * calls this once a department is picked: each row carries the
+ * department-specific `durationMinutes` plus optional wall-clock
+ * minute-of-day bounds that gate which slots the BE will let through.
+ * Gated on `appointment.read.{own, own-department, all}` (any-of).
+ */
+export function getDepartmentAppointmentTypes(
+  departmentId: string,
+): Promise<DepartmentAppointmentTypeRow[]> {
+  return userFetch<DepartmentAppointmentTypeRow[]>(
+    DEPARTMENT_API_PATH_BUILDER.appointmentTypes(departmentId),
   );
 }

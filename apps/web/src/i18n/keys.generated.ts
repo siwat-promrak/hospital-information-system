@@ -179,6 +179,11 @@ export const K = {
       NEW_PATIENT_VISIT: "NEW_PATIENT_VISIT",
       PROCEDURE: "PROCEDURE",
     },
+    AppointmentTypeWindow: {
+      beforeOnly: "beforeOnly",
+      fromOnly: "fromOnly",
+      range: "range",
+    },
     BloodGroup: {
       A_NEGATIVE: "A_NEGATIVE",
       A_POSITIVE: "A_POSITIVE",
@@ -507,6 +512,7 @@ export const K = {
       forbidden: "forbidden",
       generic: "generic",
       network: "network",
+      outsideBookingWindow: "outsideBookingWindow",
       overlap: "overlap",
       patientEmailExists: "patientEmailExists",
       scheduleNotBookable: "scheduleNotBookable",
@@ -562,6 +568,7 @@ export const NS = {
   Common: "Common",
   CommonAppointmentStatus: "Common.AppointmentStatus",
   CommonAppointmentType: "Common.AppointmentType",
+  CommonAppointmentTypeWindow: "Common.AppointmentTypeWindow",
   CommonBloodGroup: "Common.BloodGroup",
   CommonDoctorPicker: "Common.DoctorPicker",
   CommonGender: "Common.Gender",

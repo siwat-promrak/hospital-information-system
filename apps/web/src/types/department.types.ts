@@ -20,3 +20,31 @@ export interface DepartmentRow {
    */
   allowedAppointmentTypes: readonly AppointmentType[];
 }
+
+/**
+ * F13 — one row of the per-department appointment-type catalog returned
+ * by `GET /departments/:id/appointment-types`. Replaces the global
+ * `AppointmentTypeResponse.durationMinutes` (the global catalog no longer
+ * carries duration) and adds the optional booking-window bounds.
+ *
+ * Booking-window minutes are wall-clock minute-of-day in the clinic's
+ * local timezone (BE-side `CLINIC_TIMEZONE`, default `Asia/Bangkok`).
+ * The BE has already converted UTC instants to local minute-of-day, so
+ * the FE just formats `HH:mm` via dayjs without any further timezone
+ * arithmetic — see CLAUDE.md §9 / §9a.
+ */
+export interface DepartmentAppointmentTypeRow {
+  code: AppointmentType;
+  label: string;
+  durationMinutes: number;
+  /**
+   * Open-ended lower bound. `null` / `undefined` means no morning cutoff
+   * (slots earlier than the window start are allowed).
+   */
+  bookingWindowStartMinute?: number;
+  /**
+   * Open-ended upper bound. `null` / `undefined` means no afternoon
+   * cutoff (slots later than the window end are allowed).
+   */
+  bookingWindowEndMinute?: number;
+}

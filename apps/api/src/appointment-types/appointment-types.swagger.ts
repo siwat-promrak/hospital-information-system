@@ -22,14 +22,16 @@ export function ApiListAppointmentTypes(): MethodDecorator & ClassDecorator {
   return applyDecorators(
     ApiExtraModels(AppointmentTypeResponseDto),
     ApiOperation({
-      summary: 'List supported appointment types with their slot durations',
+      summary: 'List supported appointment types (label catalog)',
       description:
         'Returns the canonical catalog of `AppointmentType` enum values ' +
-        'paired with their English label and slot duration in minutes. ' +
-        'Static per-deploy — the per-type duration map lives in application ' +
-        'code (`appointment-types.const.ts`), not the database. Gated on ' +
-        '`appointment.create.own-department` because the caller is about to book; NURSE ' +
-        'holds it by default, ADMIN / MEDICAL_RECORDS_OFFICER / PHARMACY do not.',
+        'paired with their English label. Static per-deploy. ' +
+        'Per-pair `durationMinutes` + booking-window bounds moved off this ' +
+        'global endpoint in F13 — read them from ' +
+        '`GET /departments/:id/appointment-types` after the user picks a ' +
+        'department. Gated on `appointment.create.own-department` because ' +
+        'the caller is about to book; NURSE holds it by default, ADMIN / ' +
+        'MEDICAL_RECORDS_OFFICER / PHARMACY do not.',
     }),
     ApiOkResponse({
       description: 'Appointment type catalog',

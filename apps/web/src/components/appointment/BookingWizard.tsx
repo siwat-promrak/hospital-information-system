@@ -35,21 +35,21 @@ import { K, NS } from "@/i18n/keys.generated";
 import { useRouter } from "@/i18n/navigation";
 import { dayjs } from "@/lib/dayjs";
 import { createAppointmentAction } from "@/lib/api/appointment.actions";
+import { getDepartmentAppointmentTypesAction } from "@/lib/api/department.actions";
 import { SNACKBAR_SUCCESS_KEY } from "@/lib/notifications/messages.const";
 import { useNotify } from "@/lib/notifications/use-notify";
 import type { PaginatedListInitial } from "@/lib/hooks/use-paginated-list";
 import { todayLocalISODate } from "@/lib/utils/date";
+import type { AppointmentType } from "@/types/appointment-type.types";
 import type {
-  AppointmentType,
-  AppointmentTypeResponse,
-} from "@/types/appointment-type.types";
-import type { DepartmentRow } from "@/types/department.types";
+  DepartmentAppointmentTypeRow,
+  DepartmentRow,
+} from "@/types/department.types";
 import type { DoctorListRow } from "@/types/doctor.types";
 import type { PatientResponse } from "@/types/patient.types";
 import type { SlotResponse } from "@/types/slot.types";
 
 interface BookingWizardProps {
-  appointmentTypes: readonly AppointmentTypeResponse[];
   departments: readonly DepartmentRow[];
   /**
    * Page-1 SSR seed for the doctor picker. The picker streams subsequent
@@ -106,7 +106,6 @@ const PROCEDURE_TYPE: AppointmentType = "PROCEDURE";
  * to the new appointment's detail page.
  */
 export default function BookingWizard({
-  appointmentTypes,
   departments,
   doctorSeed,
   doctorScopeDepartmentId,
@@ -173,28 +172,40 @@ export default function BookingWizard({
     }
   }, [doctor, departmentId]);
 
-  // Per-department type catalog: the FE narrows the type Select to the
-  // `allowedAppointmentTypes` of the picked department (BE field on
-  // `DepartmentResponseDto`). When no department is picked the full
-  // catalog stays visible — the Select is disabled in that state so the
-  // user can't choose a type before a department, but the option list is
-  // kept full so the Select doesn't briefly flash empty during the
-  // initial paint.
-  const allowedTypes = useMemo<readonly AppointmentTypeResponse[]>(() => {
+  // F13 per-(department, type) booking-rule catalog. Once the user
+  // picks a department, we fetch `GET /departments/:id/appointment-types`
+  // through the server action — each row carries the department-scoped
+  // `durationMinutes` plus the optional `bookingWindowStartMinute` /
+  // `bookingWindowEndMinute` bounds that drive both the type Select's
+  // window chip copy ("Before 11:00 only" / "From 13:00" / "09:00 –
+  // 11:00") AND the confirm-step duration summary. Before any
+  // department is picked the type Select is disabled, so an empty list
+  // is the correct skeleton state.
+  const [departmentTypes, setDepartmentTypes] = useState<
+    readonly DepartmentAppointmentTypeRow[]
+  >([]);
+
+  useEffect(() => {
     if (!departmentId) {
-      return appointmentTypes;
+      setDepartmentTypes([]);
+
+      return;
     }
 
-    const dept = departments.find((d) => d.id === departmentId);
+    let cancelled = false;
 
-    if (!dept) {
-      return appointmentTypes;
-    }
+    (async () => {
+      const rows = await getDepartmentAppointmentTypesAction(departmentId);
 
-    const allowed = new Set(dept.allowedAppointmentTypes);
+      if (!cancelled) {
+        setDepartmentTypes(rows);
+      }
+    })();
 
-    return appointmentTypes.filter((t) => allowed.has(t.code));
-  }, [appointmentTypes, departments, departmentId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [departmentId]);
 
   // When the user changes (or clears) the department, drop any
   // previously-picked type if it's no longer in the new department's
@@ -203,8 +214,9 @@ export default function BookingWizard({
   // offer it; submitting that pair would 400 with
   // `DEPARTMENT_TYPE_NOT_ALLOWED`. Clearing the picked type when the
   // dept changes is the matching write-side cascade for the
-  // `allowedTypes` narrowing above. Also clears on dept=undefined
-  // (user cleared the department) so the state stays consistent.
+  // per-department type-catalog narrowing above. Also clears on
+  // dept=undefined (user cleared the department) so the state stays
+  // consistent.
   useEffect(() => {
     if (!appointmentType) {
       return;
@@ -356,8 +368,8 @@ export default function BookingWizard({
   ]);
 
   const selectedAppointmentType = useMemo(() => {
-    return appointmentTypes.find((t) => t.code === appointmentType) ?? null;
-  }, [appointmentTypes, appointmentType]);
+    return departmentTypes.find((t) => t.code === appointmentType) ?? null;
+  }, [departmentTypes, appointmentType]);
 
   return (
     <Stack spacing={3}>
@@ -478,7 +490,7 @@ export default function BookingWizard({
                 <AppointmentTypeSelect
                   value={appointmentType}
                   onChange={setAppointmentType}
-                  types={allowedTypes}
+                  types={departmentTypes}
                   label={tSlot(K.BookingWizard.Slot.typeLabel)}
                   required
                   disabled={!departmentId}

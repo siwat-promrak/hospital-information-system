@@ -3,8 +3,12 @@ import { AppointmentType } from '@prisma/client';
 
 /**
  * Wire DTO for one row of `GET /appointment-types`. The endpoint returns
- * an array of these — the per-`AppointmentType` catalog with the matching
- * duration the slot finder + booking flow use to step / size windows.
+ * an array of these — the per-`AppointmentType` LABEL catalog.
+ *
+ * Post-F13 this catalog no longer carries `durationMinutes`. The booking
+ * wizard reads per-pair duration + booking window from
+ * `GET /departments/:id/appointment-types`
+ * (`DepartmentAppointmentTypeResponseDto`).
  *
  * Labels are English-only on the wire; the FE may i18n-overlay them via
  * `Common.AppointmentType.*` in F12.
@@ -26,12 +30,4 @@ export class AppointmentTypeResponseDto {
       '(`Common.AppointmentType.<code>`).',
   })
   label!: string;
-
-  @ApiProperty({
-    example: 20,
-    description:
-      'Slot duration in minutes. Drives the slot-grid step in F07 and the ' +
-      '`endAt = startAt + duration` math in F08.',
-  })
-  durationMinutes!: number;
 }

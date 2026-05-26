@@ -121,6 +121,7 @@ interface Fixtures {
   scheduleHomeBreak: DoctorSchedule;
   scheduleHomeNoBook: DoctorSchedule;
   scheduleHomeProcedure: DoctorSchedule;
+  scheduleHomeF13: DoctorSchedule;
   superAdminId: string;
 }
 
@@ -192,27 +193,61 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     },
   });
 
-  // Allow CONSULTATION + PROCEDURE in home; only CONSULTATION in
-  // foreign so the (dept, type) mismatch test has a real foreign type
+  // Allow CONSULTATION + PROCEDURE + FOLLOW_UP in home; only CONSULTATION
+  // in foreign so the (dept, type) mismatch test has a real foreign type
   // to send against home.
-  for (const t of [
-    AppointmentType.CONSULTATION,
-    AppointmentType.PROCEDURE,
-    AppointmentType.FOLLOW_UP,
-  ]) {
-    await prisma.departmentAppointmentType.create({
-      data: {
-        departmentId: deptHome.id,
-        appointmentType: t,
-        createdBy: superAdmin.id,
-      },
-    });
-  }
+  //
+  // F13 — durations mirror the pre-F13 defaults EXCEPT `(deptHome,
+  // PROCEDURE)` which is the per-pair override (90 min) so the
+  // duration-drives-endAt assertion is meaningful. The booking-window
+  // tests below add a separate (deptHome, FOLLOW_UP) window.
+  //
+  // The 09:00–12:00 local window matches a wall-clock minute-of-day
+  // range of 540–720 in Asia/Bangkok. Test schedules sit at
+  // `scratchDate(d, hour)` which is UTC; with the default
+  // `CLINIC_TIMEZONE=Asia/Bangkok` the local minute-of-day = `(hour + 7) *
+  // 60` (mod 1440). Day-1 schedule starts at 09:00 UTC = 16:00 local
+  // (= 960 min). The F13 fixture below uses a separate scratch day with
+  // a more permissive layout so the existing tests stay green.
+  await prisma.departmentAppointmentType.create({
+    data: {
+      departmentId: deptHome.id,
+      appointmentType: AppointmentType.CONSULTATION,
+      durationMinutes: 20,
+      createdBy: superAdmin.id,
+    },
+  });
+
+  await prisma.departmentAppointmentType.create({
+    data: {
+      departmentId: deptHome.id,
+      appointmentType: AppointmentType.PROCEDURE,
+      // F13 override — confirms per-pair `durationMinutes` drives `endAt`.
+      durationMinutes: 90,
+      createdBy: superAdmin.id,
+    },
+  });
+
+  await prisma.departmentAppointmentType.create({
+    data: {
+      departmentId: deptHome.id,
+      appointmentType: AppointmentType.FOLLOW_UP,
+      durationMinutes: 15,
+      // F13 booking window — only allow FOLLOW_UP in the local 17:00–18:00
+      // hour. With `CLINIC_TIMEZONE=Asia/Bangkok` (+7) that's 10:00–11:00
+      // UTC. The day-1 schedule (09:00–12:00 UTC) overlaps part of that
+      // local window; out-of-window scratch days exist below.
+      bookingWindowStartMinute: 17 * 60,
+      bookingWindowEndMinute: 18 * 60,
+      createdBy: superAdmin.id,
+    },
+  });
 
   await prisma.departmentAppointmentType.create({
     data: {
       departmentId: deptForeign.id,
       appointmentType: AppointmentType.CONSULTATION,
+      durationMinutes: 20,
       createdBy: superAdmin.id,
     },
   });
@@ -405,6 +440,18 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     },
   });
 
+  // F13 — day-6 schedule wide enough to host the 90-min PROCEDURE
+  // duration-drives-endAt assertion without colliding with day-5.
+  const scheduleHomeF13 = await prisma.doctorSchedule.create({
+    data: {
+      doctorId: doctor.id,
+      departmentId: deptHome.id,
+      startAt: scratchDate(6, 9),
+      endAt: scratchDate(6, 12),
+      createdBy: superAdmin.id,
+    },
+  });
+
   return {
     nurseHome,
     nurseForeign,
@@ -422,6 +469,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     scheduleHomeBreak,
     scheduleHomeNoBook,
     scheduleHomeProcedure,
+    scheduleHomeF13,
     superAdminId: superAdmin.id,
   };
 }
@@ -737,7 +785,82 @@ describe('F09 — appointments e2e', () => {
 
       expect(res.status).toBe(201);
       expect(res.body.reason).toBe('Routine pacemaker check-up');
-      expect(res.body.endAt).toBe(scratchIso(5, 10));
+      // F13 — `(deptHome, PROCEDURE)` carries a 90-min duration override
+      // (vs the pre-F13 60-min default); endAt = startAt + 90 min.
+      expect(res.body.endAt).toBe(scratchIso(5, 10, 30));
+    });
+
+    maybe('F13 — per-pair duration drives endAt (PROCEDURE = 90 min)', async () => {
+      // `(deptHome, PROCEDURE)` carries a per-pair durationMinutes = 90.
+      // The day-6 schedule (09:00–12:00 UTC) hosts this booking so it
+      // does not collide with the day-5 PROCEDURE-with-reason fixture.
+      // Booking at 09:30 UTC therefore returns endAt = 11:00 UTC — the
+      // duration came from the per-pair row, not the retired global
+      // const map.
+      const jwt = await jwtFor(fixtures!.nurseHome);
+
+      const res = await request(server)
+        .post('/api/v1/appointments')
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({
+          patientId: fixtures!.patientForeign.id,
+          doctorId: fixtures!.doctor.id,
+          departmentId: fixtures!.deptHome.id,
+          scheduleId: fixtures!.scheduleHomeF13.id,
+          appointmentType: AppointmentType.PROCEDURE,
+          startAt: scratchIso(6, 9, 30),
+          reason: 'F13 90-min duration check',
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.startAt).toBe(scratchIso(6, 9, 30));
+      // 09:30 + 90 min = 11:00.
+      expect(res.body.endAt).toBe(scratchIso(6, 11));
+    });
+
+    maybe('F13 — in-window booking succeeds for FOLLOW_UP (10:30 UTC = 17:30 local)', async () => {
+      // FOLLOW_UP carries a 17:00–18:00 LOCAL booking window. Day-1
+      // schedule (09:00–12:00 UTC). 10:30 UTC = 17:30 Asia/Bangkok →
+      // localMin = 1050 ∈ [1020, 1080) → in-window.
+      const jwt = await jwtFor(fixtures!.nurseHome);
+
+      const res = await request(server)
+        .post('/api/v1/appointments')
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({
+          patientId: fixtures!.patient.id,
+          doctorId: fixtures!.doctor.id,
+          departmentId: fixtures!.deptHome.id,
+          scheduleId: fixtures!.scheduleHome.id,
+          appointmentType: AppointmentType.FOLLOW_UP,
+          startAt: scratchIso(1, 10, 30),
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.startAt).toBe(scratchIso(1, 10, 30));
+      // FOLLOW_UP duration = 15 min → endAt = 10:45 UTC.
+      expect(res.body.endAt).toBe(scratchIso(1, 10, 45));
+    });
+
+    maybe('F13 — out-of-window booking → 400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW', async () => {
+      // FOLLOW_UP window is 17:00–18:00 LOCAL. 09:00 UTC = 16:00
+      // Asia/Bangkok → localMin = 960 < 1020 → out-of-window.
+      const jwt = await jwtFor(fixtures!.nurseHome);
+
+      const res = await request(server)
+        .post('/api/v1/appointments')
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({
+          patientId: fixtures!.patient.id,
+          doctorId: fixtures!.doctor.id,
+          departmentId: fixtures!.deptHome.id,
+          scheduleId: fixtures!.scheduleHome.id,
+          appointmentType: AppointmentType.FOLLOW_UP,
+          startAt: scratchIso(1, 9),
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe(ErrorCode.APPOINTMENT_OUTSIDE_BOOKING_WINDOW);
     });
 
     maybe('Slot outside schedule → 400 SLOT_OUTSIDE_SCHEDULE', async () => {

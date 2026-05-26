@@ -64,10 +64,12 @@ enum AppointmentStatus {
 }
 
 // `AppointmentType` is the schema-level enum for appointment categories. The
-// per-type duration map (NEW_PATIENT_VISIT=30, FOLLOW_UP=15, CONSULTATION=20,
-// PROCEDURE=60) still lives in application code — only the category is
-// persisted here. Each `Department` enumerates which types it offers via the
-// `DepartmentAppointmentType` join table.
+// per-type slot duration AND optional booking window now live as columns on
+// `DepartmentAppointmentType` (F13) — each `(department, type)` pair carries
+// its own `durationMinutes` and nullable `bookingWindowStartMinute` /
+// `bookingWindowEndMinute` (wall-clock minute-of-day in `CLINIC_TIMEZONE`).
+// The previous global `APPOINTMENT_TYPE_DURATION_MINUTES` const map has
+// been retired.
 enum AppointmentType {
   NEW_PATIENT_VISIT
   FOLLOW_UP
@@ -362,13 +364,44 @@ model Department {
 }
 
 /// Join row declaring which `AppointmentType` values a given `Department`
-/// offers. Acts as the per-department booking rule: appointment creation
-/// must verify the requested `(departmentId, appointmentType)` pair exists
-/// here. Unique pair so each combination is at most one row.
+/// offers AND the per-pair booking rules (F13). Acts as:
+///  - the gate for appointment creation: the requested
+///    `(departmentId, appointmentType)` pair must exist here.
+///  - the per-pair slot duration (`durationMinutes`) — replaces the global
+///    `APPOINTMENT_TYPE_DURATION_MINUTES` map so each department can size
+///    a category to its own clinical reality (Orthopedics PROCEDURE = 90,
+///    others 60, …).
+///  - the per-pair booking window (`bookingWindowStartMinute` /
+///    `bookingWindowEndMinute`) — nullable wall-clock minutes-of-day in
+///    the clinic's local timezone (`CLINIC_TIMEZONE`), per CLAUDE.md §9a.
+///    NULL on either side = open-ended on that side; both NULL = the type
+///    is bookable any time the doctor is working.
+///
+/// CHECK constraints live in raw SQL (Prisma 5 cannot express them):
+///  - `_duration_positive` — 0 < duration_minutes <= 480.
+///  - `_window_bounds`     — each minute-of-day lies in its half-open
+///                           daily range (`start` in `[0, 1440)`, `end`
+///                           in `(0, 1440]`).
+///  - `_window_order`      — when both are set, `start < end`.
+///
+/// Unique pair so each combination is at most one row.
 model DepartmentAppointmentType {
   id              String          @id @default(uuid()) @db.Uuid
   departmentId    String          @map("department_id") @db.Uuid
   appointmentType AppointmentType @map("appointment_type")
+
+  /// Per-pair slot duration. Drives the F07 slot-grid step AND the F09
+  /// `Appointment.endAt = startAt + durationMinutes` math. Replaces the
+  /// global per-`AppointmentType` const map dropped in F13.
+  durationMinutes Int @map("duration_minutes")
+
+  /// Inclusive lower bound (wall-clock minute-of-day in `CLINIC_TIMEZONE`)
+  /// for slots of this `(department, type)`. NULL = no lower bound.
+  bookingWindowStartMinute Int? @map("booking_window_start_minute")
+
+  /// Exclusive upper bound (wall-clock minute-of-day in `CLINIC_TIMEZONE`)
+  /// for slots of this `(department, type)`. NULL = no upper bound.
+  bookingWindowEndMinute Int? @map("booking_window_end_minute")
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
@@ -488,8 +521,8 @@ model DoctorSchedule {
 // ─── Appointment ─────────────────────────────────────────────────────────────
 // `startAt` / `endAt` (UTC) are the source of truth for slot math. The
 // `appointmentType` column is the `AppointmentType` schema enum; the
-// per-type duration map (NEW_PATIENT_VISIT=30, FOLLOW_UP=15, CONSULTATION=20,
-// PROCEDURE=60) still lives in application code — no separate table in P0.
+// per-pair duration is read from `DepartmentAppointmentType.durationMinutes`
+// at booking time (F13 — replaces the previous global const map).
 //
 // `scheduleId` is the F08 provenance link to the `DoctorSchedule` that
 // produced this booking — every appointment goes through the F07 slot
