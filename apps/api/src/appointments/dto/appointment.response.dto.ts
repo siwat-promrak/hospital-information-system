@@ -102,6 +102,42 @@ export class AppointmentResponseDto {
   @ApiProperty({ example: '2026-05-24T08:30:00.000Z' })
   updatedAt!: string;
 
+  @ApiPropertyOptional({
+    example: '8a3e2a10-1234-5678-9abc-deadbeef1111',
+    description: 'F14 — owning appointment group id (NULL on standalone rows).',
+    nullable: true,
+  })
+  appointmentGroupId!: string | null;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'F14 — 1-indexed visit number within the owning group (NULL on standalone rows).',
+    nullable: true,
+  })
+  visitNumber!: number | null;
+
+  @ApiPropertyOptional({
+    example: 'bb3d2f17-3c0b-4b4f-a3e8-31f2bbb55ccc',
+    description: 'F14 — destination department of the referral originated from this row.',
+    nullable: true,
+  })
+  referredToDepartmentId!: string | null;
+
+  @ApiPropertyOptional({
+    example: '2026-06-15T10:00:00.000Z',
+    description: 'F14 — when the referral was initiated.',
+    nullable: true,
+  })
+  referredAt!: string | null;
+
+  @ApiPropertyOptional({
+    example: '7c8e2a10-1234-5678-9abc-deadbeefbbbb',
+    description:
+      'F14 — receiver appointment id once a destination NURSE books the pickup. NULL while pending.',
+    nullable: true,
+  })
+  referralFulfilledByAppointmentId!: string | null;
+
   @ApiProperty({ type: AppointmentPatientRefDto })
   patient!: AppointmentPatientRefDto;
 

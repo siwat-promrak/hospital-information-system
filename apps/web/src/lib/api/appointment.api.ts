@@ -7,6 +7,7 @@ import type {
   CancelAppointmentBody,
   CreateAppointmentBody,
 } from "@/types/appointment.types";
+import type { ReferAppointmentBody } from "@/types/appointment-group.types";
 import type { Paginated, PaginationParams } from "@/types/pagination.types";
 
 import {
@@ -40,6 +41,14 @@ interface ListAppointmentsParams extends PaginationParams {
   to?: string;
   status?: AppointmentStatus;
   order?: AppointmentListOrder;
+  /**
+   * F14 — request the pending-referral pickup queue. When `true`, narrows
+   * to `status=COMPLETED` + `referredToDepartmentId IS NOT NULL` +
+   * `referralFulfilledByAppointmentId IS NULL`. Destination-dept narrowing
+   * is driven by the caller's permission scope (`.own-department` → caller
+   * dept; `.all` → every dept).
+   */
+  pendingReferralOnly?: boolean;
 }
 
 export function listAppointments(
@@ -53,6 +62,8 @@ export function listAppointments(
     [APPOINTMENT_QUERY_PARAM.TO]: params?.to,
     [APPOINTMENT_QUERY_PARAM.STATUS]: params?.status,
     [APPOINTMENT_QUERY_PARAM.ORDER]: params?.order,
+    [APPOINTMENT_QUERY_PARAM.PENDING_REFERRAL_ONLY]:
+      params?.pendingReferralOnly === true ? "true" : undefined,
   });
 
   return userFetch<Paginated<AppointmentResponse>>(
@@ -81,6 +92,42 @@ export function cancelAppointment(
 ): Promise<AppointmentResponse> {
   return userFetch<AppointmentResponse>(
     APPOINTMENT_API_PATH_BUILDER.cancel(id),
+    {
+      method: "POST",
+      body,
+    },
+  );
+}
+
+/**
+ * F14 — mark an appointment as `COMPLETED`. Doctor-only on the BE side:
+ * non-doctor callers get a 403, an already-completed/cancelled row gets
+ * `APPOINTMENT_ALREADY_COMPLETED` / `APPOINTMENT_ALREADY_CANCELLED`.
+ */
+export function completeAppointment(
+  id: string,
+): Promise<AppointmentResponse> {
+  return userFetch<AppointmentResponse>(
+    APPOINTMENT_API_PATH_BUILDER.complete(id),
+    { method: "POST" },
+  );
+}
+
+/**
+ * F14 — stamp a referral on an appointment. The BE writes
+ * `referredToDepartmentId` + `referredAt`, opens (or extends) the
+ * appointment-group lineage, and surfaces the row on the destination
+ * department's pickup queue via `GET /appointments?pendingReferralToDepartmentId=`.
+ *
+ * Non-doctor callers get a 403; an already-referred row 409s with
+ * `APPOINTMENT_ALREADY_REFERRED`.
+ */
+export function referAppointment(
+  id: string,
+  body: ReferAppointmentBody,
+): Promise<AppointmentResponse> {
+  return userFetch<AppointmentResponse>(
+    APPOINTMENT_API_PATH_BUILDER.refer(id),
     {
       method: "POST",
       body,

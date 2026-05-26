@@ -17,6 +17,11 @@ export const APPOINTMENT_API_PATH = BE_PATH.APPOINTMENTS;
 export const APPOINTMENT_API_PATH_BUILDER = {
   detail: (id: string) => BE_PATH_BUILDER.appointmentDetail(id),
   cancel: (id: string) => BE_PATH_BUILDER.appointmentCancel(id),
+  // F14 — doctor-only "this visit is done" toggle. No body.
+  complete: (id: string) => BE_PATH_BUILDER.appointmentComplete(id),
+  // F14 — doctor-only "send to another department" action. Body
+  // `{ toDepartmentId }`.
+  refer: (id: string) => BE_PATH_BUILDER.appointmentRefer(id),
 } as const;
 
 export const APPOINTMENT_QUERY_PARAM = {
@@ -34,6 +39,24 @@ export const APPOINTMENT_QUERY_PARAM = {
   STATUS: "status",
   /** BE-bound — sort direction for `startAt`. `asc` (default) or `desc`. */
   ORDER: "order",
+  /**
+   * F14 — request the pending-referral pickup queue. When `true`, narrows
+   * to `status=COMPLETED` + `referredToDepartmentId IS NOT NULL` +
+   * `referralFulfilledByAppointmentId IS NULL`. The destination-dept
+   * narrowing comes from the caller's permission scope: `.own-department`
+   * sees referrals to their own dept; `.all` (MRO) sees referrals to every
+   * dept. No client-supplied department arg — the previous
+   * `pendingReferralToDepartmentId` filter was unsafe for `.all` callers
+   * (an undefined value collapsed the entire filter and leaked unreferred
+   * rows into the queue).
+   */
+  PENDING_REFERRAL_ONLY: "pendingReferralOnly",
+  /**
+   * F14 — booking-wizard continuation step pre-fill. Surfaced as a URL
+   * param so the referrals queue's "Book follow-up" link can deep-link
+   * straight into the wizard with the prior visit pre-supplied.
+   */
+  PREVIOUS_APPOINTMENT_ID: "previousAppointmentId",
 } as const;
 
 export type AppointmentQueryParam =
@@ -95,7 +118,62 @@ export const APPOINTMENT_ERROR_CODE = {
    * this through normal flow.
    */
   APPOINTMENT_OUTSIDE_BOOKING_WINDOW: "APPOINTMENT_OUTSIDE_BOOKING_WINDOW",
+  /**
+   * F14 (corrective tightening) — `POST /appointments` was given a
+   * `previousAppointmentId` that points to a row whose status is NOT
+   * `COMPLETED` (typically still `BOOKED`, occasionally `CANCELLED`).
+   * The booking wizard's continuation picker hides ineligible rows, so a
+   * caller hitting this either bypassed the wizard or deep-linked into
+   * the wizard with a stale `previousAppointmentId` query param.
+   */
+  PREVIOUS_APPOINTMENT_NOT_COMPLETED: "PREVIOUS_APPOINTMENT_NOT_COMPLETED",
+  /**
+   * F14 (corrective tightening) — `POST /appointments` was given a
+   * `previousAppointmentId` paired with an `appointmentType` that is
+   * NOT in `CONTINUATION_APPOINTMENT_TYPES` (i.e. not `FOLLOW_UP` or
+   * `PROCEDURE`). The wizard hides the disallowed type chips, so this
+   * surfaces only when a caller bypasses the wizard.
+   */
+  CONTINUATION_APPOINTMENT_TYPE_INVALID: "CONTINUATION_APPOINTMENT_TYPE_INVALID",
 } as const;
 
 export type AppointmentErrorCode =
   (typeof APPOINTMENT_ERROR_CODE)[keyof typeof APPOINTMENT_ERROR_CODE];
+
+/**
+ * F14 (corrective tightening) — the appointment types that are valid
+ * for a CONTINUATION booking (one that carries a `previousAppointmentId`).
+ *
+ * The booking wizard's continuation step uses this set to narrow the
+ * per-department type catalog when a prior visit is picked; the BE
+ * enforces the same set on `POST /appointments` via
+ * `CONTINUATION_APPOINTMENT_TYPE_INVALID`. Drift between the FE filter
+ * and the BE check would surface as a generic 422 instead of the user
+ * being unable to pick a forbidden type — so this catalog lives in one
+ * place and the BE mirrors it.
+ *
+ * Rationale: a `NEW_PATIENT_VISIT` is by definition a first visit
+ * (continuations don't apply), and a `CONSULTATION` opens a new case
+ * thread rather than continuing one. Only `FOLLOW_UP` (the usual
+ * "come back next week") and `PROCEDURE` (the planned next-step
+ * intervention against the prior diagnosis) make semantic sense as a
+ * continuation of a prior visit.
+ */
+export const CONTINUATION_APPOINTMENT_TYPES = [
+  "FOLLOW_UP",
+  "PROCEDURE",
+] as const;
+
+export type ContinuationAppointmentType =
+  (typeof CONTINUATION_APPOINTMENT_TYPES)[number];
+
+/**
+ * Membership test for the continuation-allowed catalog. Lives next to
+ * the const so consumers don't have to re-import `Array.includes` typing
+ * gymnastics — a single named predicate keeps the call sites flat.
+ */
+export function isContinuationAppointmentType(
+  code: string,
+): code is ContinuationAppointmentType {
+  return (CONTINUATION_APPOINTMENT_TYPES as readonly string[]).includes(code);
+}

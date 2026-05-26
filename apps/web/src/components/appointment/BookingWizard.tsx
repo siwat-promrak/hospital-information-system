@@ -6,6 +6,9 @@ import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import CircularProgress from "@mui/material/CircularProgress";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Radio from "@mui/material/Radio";
+import RadioGroup from "@mui/material/RadioGroup";
 import Stack from "@mui/material/Stack";
 import Step from "@mui/material/Step";
 import StepLabel from "@mui/material/StepLabel";
@@ -22,6 +25,7 @@ import {
 } from "react";
 
 import { FE_PATH, FE_PATH_BUILDER } from "@/auth/routes";
+import ContinuationPicker from "@/components/appointment/ContinuationPicker";
 import PatientPicker from "@/components/appointment/PatientPicker";
 import SlotPicker from "@/components/appointment/SlotPicker";
 import AppointmentTypeSelect from "@/components/shared/select/AppointmentTypeSelect";
@@ -35,11 +39,13 @@ import { K, NS } from "@/i18n/keys.generated";
 import { useRouter } from "@/i18n/navigation";
 import { dayjs } from "@/lib/dayjs";
 import { createAppointmentAction } from "@/lib/api/appointment.actions";
+import { isContinuationAppointmentType } from "@/lib/api/appointment.const";
 import { getDepartmentAppointmentTypesAction } from "@/lib/api/department.actions";
 import { SNACKBAR_SUCCESS_KEY } from "@/lib/notifications/messages.const";
 import { useNotify } from "@/lib/notifications/use-notify";
 import type { PaginatedListInitial } from "@/lib/hooks/use-paginated-list";
 import { todayLocalISODate } from "@/lib/utils/date";
+import type { AppointmentResponse } from "@/types/appointment.types";
 import type { AppointmentType } from "@/types/appointment-type.types";
 import type {
   DepartmentAppointmentTypeRow,
@@ -88,17 +94,52 @@ interface BookingWizardProps {
    * `hasPermission(session, PATIENT_CREATE)`.
    */
   canRegisterPatient: boolean;
+  /**
+   * F14 — when the wizard is opened from the referrals pickup queue
+   * (`/referrals/...` → `/appointments/new?previousAppointmentId=…`),
+   * the page resolves the referenced appointment server-side and threads
+   * it in here. The wizard then:
+   *   1. Pre-fills the patient picker (step 1 stays editable but seeded).
+   *   2. Skips the continuation step entirely — `previousAppointmentId`
+   *      is set from this row, and the BE will infer + extend the case.
+   *   3. Shows a notice on step 1 explaining the pre-fill.
+   */
+  referralSourceAppointment?: AppointmentResponse;
 }
 
+/**
+ * The wizard has four steps post-F14:
+ *   0. PATIENT     — pick or seed the patient.
+ *   1. CONTINUATION — "Is this a continuation of a prior visit?" — Yes
+ *                     surfaces the prior-visits picker. Skipped entirely
+ *                     when the wizard was deep-linked from the referrals
+ *                     queue (the referral IS the prior visit).
+ *   2. SLOT        — department + doctor + type + date + slot.
+ *   3. CONFIRM     — review + submit.
+ */
 const BOOKING_STEP = {
   PATIENT: 0,
-  SLOT: 1,
-  CONFIRM: 2,
+  CONTINUATION: 1,
+  SLOT: 2,
+  CONFIRM: 3,
 } as const;
 
 type BookingStep = (typeof BOOKING_STEP)[keyof typeof BOOKING_STEP];
 
 const PROCEDURE_TYPE: AppointmentType = "PROCEDURE";
+
+/**
+ * Two-state answer to "Is this a continuation?" on step 2. Persisted in
+ * the wizard's state so a back-step + forward re-step doesn't reset the
+ * user's pick.
+ */
+const CONTINUATION_CHOICE = {
+  NO: "no",
+  YES: "yes",
+} as const;
+
+type ContinuationChoice =
+  (typeof CONTINUATION_CHOICE)[keyof typeof CONTINUATION_CHOICE];
 
 /**
  * Three-step booking wizard:
@@ -121,8 +162,10 @@ export default function BookingWizard({
   forcedDepartmentId,
   lockedDoctor,
   canRegisterPatient,
+  referralSourceAppointment,
 }: BookingWizardProps) {
   const tPatient = useTranslations(NS.BookingWizardPatient);
+  const tContinuation = useTranslations(NS.BookingWizardContinuation);
   const tSlot = useTranslations(NS.BookingWizardSlot);
   const tConfirm = useTranslations(NS.BookingWizardConfirm);
   const tStepLabels = useTranslations(NS.BookingWizardStepLabels);
@@ -133,10 +176,52 @@ export default function BookingWizard({
   const notify = useNotify();
   const [isSubmitting, startSubmit] = useTransition();
 
+  // When the wizard is deep-linked from the referrals queue, the
+  // continuation step is short-circuited: `previousAppointmentId` is
+  // already known, the patient is already known, and asking the user to
+  // pick a prior visit again would be redundant friction.
+  const skipsContinuationStep = Boolean(referralSourceAppointment);
+
   const [step, setStep] = useState<BookingStep>(BOOKING_STEP.PATIENT);
 
-  // Step 1 state
-  const [patient, setPatient] = useState<PatientResponse | null>(null);
+  // Step 1 state — pre-filled from the referral source when present so
+  // the front desk lands on step 2 with the patient already selected.
+  const [patient, setPatient] = useState<PatientResponse | null>(() => {
+    if (!referralSourceAppointment) {
+      return null;
+    }
+
+    // We don't have a full `PatientResponse` in the referral payload —
+    // only the `AppointmentPatientRef` (id + hn + names). The picker's
+    // `value` prop accepts the same nominal shape because it's only used
+    // to render the chip + thread the id through; the BE doesn't need
+    // the wider patient fields at submit time. Cast through `unknown` to
+    // bridge the structural gap while keeping the wizard surface typed.
+    const ref = referralSourceAppointment.patient;
+
+    return {
+      id: ref.id,
+      hn: ref.hn,
+      firstNameEn: ref.firstNameEn,
+      lastNameEn: ref.lastNameEn,
+      firstNameTh: ref.firstNameTh,
+      lastNameTh: ref.lastNameTh,
+    } as unknown as PatientResponse;
+  });
+
+  // F14 continuation step state. `previousVisit` is the picked prior
+  // appointment (null when "No" is selected or before the user picks).
+  // When the wizard is deep-linked from the referrals queue, the source
+  // appointment IS the prior visit — pre-fill it here so the create
+  // payload carries `previousAppointmentId` even though the user never
+  // sees the continuation step.
+  const [continuationChoice, setContinuationChoice] =
+    useState<ContinuationChoice>(
+      referralSourceAppointment ? CONTINUATION_CHOICE.YES : CONTINUATION_CHOICE.NO,
+    );
+  const [previousVisit, setPreviousVisit] = useState<AppointmentResponse | null>(
+    referralSourceAppointment ?? null,
+  );
 
   // Step 2 state
   const [departmentId, setDepartmentId] = useState<string>(
@@ -253,6 +338,58 @@ export default function BookingWizard({
     }
   }, [departmentId, appointmentType, departments]);
 
+  // F14 (corrective tightening) — when a `previousAppointmentId` is set
+  // (either via the continuation picker OR via the referrals deep-link),
+  // the appointment-type chip catalog narrows to the
+  // `CONTINUATION_APPOINTMENT_TYPES` set (`FOLLOW_UP` and `PROCEDURE`).
+  // `NEW_PATIENT_VISIT` and `CONSULTATION` are not valid continuations —
+  // the BE rejects them with `CONTINUATION_APPOINTMENT_TYPE_INVALID` —
+  // so the wizard hides them from the chip selector. When the user
+  // clears the prior visit (back to "No"), the full per-department
+  // catalog is restored automatically because we derive the narrowed
+  // list from `departmentTypes` on each render.
+  //
+  // We DON'T filter `DepartmentSelect.allowedAppointmentTypes` directly
+  // — `departmentTypes` is the per-department-scoped catalog from
+  // `GET /departments/:id/appointment-types` and is the authoritative
+  // input to `<AppointmentTypeSelect>`.
+  const isContinuationBooking = previousVisit != null;
+  const visibleDepartmentTypes = useMemo(() => {
+    if (!isContinuationBooking) {
+      return departmentTypes;
+    }
+
+    return departmentTypes.filter((type) =>
+      isContinuationAppointmentType(type.code),
+    );
+  }, [departmentTypes, isContinuationBooking]);
+
+  // Write-side cascade matching the read-side narrowing above. If the
+  // user picks "Yes, continues" AFTER having already picked
+  // `NEW_PATIENT_VISIT` or `CONSULTATION`, drop the now-forbidden choice
+  // so the user re-picks from the narrowed catalog (instead of
+  // submitting an invalid pair).
+  useEffect(() => {
+    if (!isContinuationBooking || !appointmentType) {
+      return;
+    }
+
+    if (!isContinuationAppointmentType(appointmentType)) {
+      setAppointmentType("");
+    }
+  }, [isContinuationBooking, appointmentType]);
+
+  // True when the wizard is on a continuation flow AND the picked
+  // department offers neither `FOLLOW_UP` nor `PROCEDURE`. The
+  // type-select catalog will be empty and the user can't move forward —
+  // surface the dead-end with a clear instruction instead of leaving
+  // the dropdown silently unselectable.
+  const showContinuationTypeUnavailable =
+    isContinuationBooking &&
+    departmentId !== "" &&
+    departmentTypes.length > 0 &&
+    visibleDepartmentTypes.length === 0;
+
   const handlePickPatient = useCallback((next: PatientResponse | null) => {
     setPatient(next);
   }, []);
@@ -286,8 +423,43 @@ export default function BookingWizard({
       return;
     }
 
+    // Referrals-deep-link bypasses the continuation step (the prior
+    // visit is already set). Every other entry forces the user through
+    // the explicit "Yes / No" question — even when they pick "No" — so
+    // the wizard's case-grouping behaviour is never silent.
+    setStep(
+      skipsContinuationStep ? BOOKING_STEP.SLOT : BOOKING_STEP.CONTINUATION,
+    );
+  }, [patient, notify, tErrors, skipsContinuationStep]);
+
+  const handleNextFromContinuation = useCallback(() => {
+    if (
+      continuationChoice === CONTINUATION_CHOICE.YES &&
+      !previousVisit
+    ) {
+      notify.error(
+        undefined,
+        tErrors(K.BookingWizard.Errors.missingContinuation),
+      );
+
+      return;
+    }
+
     setStep(BOOKING_STEP.SLOT);
-  }, [patient, notify, tErrors]);
+  }, [continuationChoice, previousVisit, notify, tErrors]);
+
+  const handleContinuationChoiceChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const next = event.target.value as ContinuationChoice;
+
+      setContinuationChoice(next);
+
+      if (next === CONTINUATION_CHOICE.NO) {
+        setPreviousVisit(null);
+      }
+    },
+    [],
+  );
 
   const handleNextFromSlot = useCallback(() => {
     if (!departmentId) {
@@ -353,6 +525,14 @@ export default function BookingWizard({
         appointmentType,
         startAt: slot.startAt,
         reason: reason.trim().length === 0 ? null : reason.trim(),
+        // F14 continuation linkage. Three cases land here:
+        //   - Referrals deep-link → `previousVisit` is the source
+        //     appointment, set on mount.
+        //   - "Yes, continues" + user picked a row → `previousVisit`
+        //     is set.
+        //   - "No, this is a new visit" → `previousVisit` is `null` and
+        //     we omit the field.
+        previousAppointmentId: previousVisit?.id ?? null,
       });
 
       if (!result.ok) {
@@ -374,6 +554,7 @@ export default function BookingWizard({
     doctor,
     appointmentType,
     reason,
+    previousVisit,
     notify,
     router,
     tErrors,
@@ -385,12 +566,34 @@ export default function BookingWizard({
 
   return (
     <Stack spacing={3}>
-      <Stepper activeStep={step} alternativeLabel>
+      <Stepper
+        // When the continuation step is hidden, the numeric step values
+        // still reflect the underlying state machine — collapse the
+        // "Slot" / "Confirm" steps' display index by one so the Stepper
+        // ticks the right circle.
+        activeStep={skipsContinuationStep && step > BOOKING_STEP.CONTINUATION ? step - 1 : step}
+        alternativeLabel
+      >
         <Step>
           <StepLabel>
             {tStepLabels(K.BookingWizard.stepLabels.patient)}
           </StepLabel>
         </Step>
+        {/*
+          F14 — the continuation step is hidden in the Stepper when the
+          wizard was deep-linked from the referrals queue, because the
+          step is also skipped in the flow. Keeping the indicator in
+          sync with the actual step set keeps the activeStep coloring
+          honest (otherwise "Slot" would render as step 2 when it's
+          really step 1 of the visible flow).
+        */}
+        {skipsContinuationStep ? null : (
+          <Step>
+            <StepLabel>
+              {tStepLabels(K.BookingWizard.stepLabels.continuation)}
+            </StepLabel>
+          </Step>
+        )}
         <Step>
           <StepLabel>
             {tStepLabels(K.BookingWizard.stepLabels.slot)}
@@ -407,6 +610,13 @@ export default function BookingWizard({
         <Card variant="outlined">
           <CardContent>
             <Stack spacing={3}>
+              {skipsContinuationStep ? (
+                <Alert severity="info">
+                  {tContinuation(
+                    K.BookingWizard.Continuation.prefilledNotice,
+                  )}
+                </Alert>
+              ) : null}
               <PatientPicker
                 value={patient}
                 onChange={handlePickPatient}
@@ -442,10 +652,85 @@ export default function BookingWizard({
         </Card>
       ) : null}
 
+      {step === BOOKING_STEP.CONTINUATION && patient ? (
+        <Card variant="outlined">
+          <CardContent>
+            <Stack spacing={3}>
+              <Stack spacing={0.5}>
+                <Typography variant="h6" component="h2">
+                  {tContinuation(K.BookingWizard.Continuation.title)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {tContinuation(K.BookingWizard.Continuation.subtitle)}
+                </Typography>
+              </Stack>
+              <RadioGroup
+                value={continuationChoice}
+                onChange={handleContinuationChoiceChange}
+              >
+                <FormControlLabel
+                  value={CONTINUATION_CHOICE.NO}
+                  control={<Radio />}
+                  label={tContinuation(
+                    K.BookingWizard.Continuation.optionNo,
+                  )}
+                />
+                <FormControlLabel
+                  value={CONTINUATION_CHOICE.YES}
+                  control={<Radio />}
+                  label={tContinuation(
+                    K.BookingWizard.Continuation.optionYes,
+                  )}
+                />
+              </RadioGroup>
+
+              {continuationChoice === CONTINUATION_CHOICE.YES ? (
+                <ContinuationPicker
+                  patientId={patient.id}
+                  value={previousVisit}
+                  onChange={setPreviousVisit}
+                />
+              ) : null}
+
+              <Stack
+                direction={{ xs: "column-reverse", sm: "row" }}
+                spacing={1.5}
+                justifyContent="space-between"
+              >
+                <Button
+                  type="button"
+                  variant="text"
+                  onClick={() => setStep(BOOKING_STEP.PATIENT)}
+                >
+                  {tContinuation(K.BookingWizard.Continuation.back)}
+                </Button>
+                <Button
+                  type="button"
+                  variant="contained"
+                  color="primary"
+                  onClick={handleNextFromContinuation}
+                  disabled={
+                    continuationChoice === CONTINUATION_CHOICE.YES &&
+                    !previousVisit
+                  }
+                >
+                  {tContinuation(K.BookingWizard.Continuation.next)}
+                </Button>
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {step === BOOKING_STEP.SLOT ? (
         <Card variant="outlined">
           <CardContent>
             <Stack spacing={3}>
+              {showContinuationTypeUnavailable ? (
+                <Alert severity="warning">
+                  {tSlot(K.BookingWizard.Slot.continuationTypeUnavailable)}
+                </Alert>
+              ) : null}
               {/*
                 Step-2 form grid. 2 columns on `md+`, single column on
                 `xs`. Both rows share the same column tracks so each
@@ -504,14 +789,28 @@ export default function BookingWizard({
                     is picked so the user can't choose before a
                     department; cleared automatically when the picked
                     type isn't offered by the newly-picked department
-                    (see the cascade effect above). */}
+                    (see the cascade effect above).
+
+                    F14 — when this is a continuation booking
+                    (`previousVisit != null`), the catalog is further
+                    narrowed to `FOLLOW_UP` / `PROCEDURE` via
+                    `visibleDepartmentTypes`. The BE rejects the other
+                    two types with `CONTINUATION_APPOINTMENT_TYPE_INVALID`. */}
                 <AppointmentTypeSelect
                   value={appointmentType}
                   onChange={setAppointmentType}
-                  types={departmentTypes}
+                  types={visibleDepartmentTypes}
                   label={tSlot(K.BookingWizard.Slot.typeLabel)}
                   required
-                  disabled={!departmentId}
+                  disabled={!departmentId || showContinuationTypeUnavailable}
+                  error={showContinuationTypeUnavailable}
+                  helperText={
+                    showContinuationTypeUnavailable
+                      ? tSlot(
+                          K.BookingWizard.Slot.continuationTypeUnavailable,
+                        )
+                      : undefined
+                  }
                 />
                 <TextField
                   type="date"
@@ -542,7 +841,13 @@ export default function BookingWizard({
                 <Button
                   type="button"
                   variant="text"
-                  onClick={() => setStep(BOOKING_STEP.PATIENT)}
+                  onClick={() =>
+                    setStep(
+                      skipsContinuationStep
+                        ? BOOKING_STEP.PATIENT
+                        : BOOKING_STEP.CONTINUATION,
+                    )
+                  }
                 >
                   {tSlot(K.BookingWizard.Slot.back)}
                 </Button>

@@ -125,6 +125,83 @@ const APPOINTMENT_ALREADY_COMPLETED_EXAMPLE = {
   message: 'Appointment is already completed and cannot be cancelled.',
 };
 
+// F14 — continuation + referral error examples.
+const PREVIOUS_APPOINTMENT_NOT_FOUND_EXAMPLE = {
+  statusCode: 404,
+  code: ErrorCode.PREVIOUS_APPOINTMENT_NOT_FOUND,
+  message: 'Previous appointment not found.',
+};
+
+const PREVIOUS_APPOINTMENT_CANCELLED_EXAMPLE = {
+  statusCode: 400,
+  code: ErrorCode.PREVIOUS_APPOINTMENT_CANCELLED,
+  message: 'Cannot continue from a cancelled appointment.',
+};
+
+const PREVIOUS_APPOINTMENT_NOT_COMPLETED_EXAMPLE = {
+  statusCode: 400,
+  code: ErrorCode.PREVIOUS_APPOINTMENT_NOT_COMPLETED,
+  message:
+    'Previous appointment must be COMPLETED before a continuation can be booked.',
+  details: {
+    previousAppointmentId: '7c8e2a10-1234-5678-9abc-deadbeefcafe',
+    previousStatus: AppointmentStatus.BOOKED,
+  },
+};
+
+const CONTINUATION_APPOINTMENT_TYPE_INVALID_EXAMPLE = {
+  statusCode: 400,
+  code: ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
+  message: 'Continuation visits must be FOLLOW_UP or PROCEDURE.',
+  details: {
+    previousAppointmentId: '7c8e2a10-1234-5678-9abc-deadbeefcafe',
+    appointmentType: AppointmentType.CONSULTATION,
+    allowedAppointmentTypes: [
+      AppointmentType.FOLLOW_UP,
+      AppointmentType.PROCEDURE,
+    ],
+  },
+};
+
+const APPOINTMENT_GROUP_CLOSED_EXAMPLE = {
+  statusCode: 400,
+  code: ErrorCode.APPOINTMENT_GROUP_CLOSED,
+  message: 'Appointment group is closed — cannot attach further visits.',
+};
+
+const APPOINTMENT_GROUP_PATIENT_MISMATCH_EXAMPLE = {
+  statusCode: 400,
+  code: ErrorCode.APPOINTMENT_GROUP_PATIENT_MISMATCH,
+  message:
+    "Continuation booking patient must match the previous appointment's patient.",
+};
+
+const REFERRAL_DEPARTMENT_MISMATCH_EXAMPLE = {
+  statusCode: 400,
+  code: ErrorCode.REFERRAL_DEPARTMENT_MISMATCH,
+  message:
+    "Continuation department must match the previous appointment's referral destination.",
+};
+
+const REFERRAL_ALREADY_FULFILLED_EXAMPLE = {
+  statusCode: 409,
+  code: ErrorCode.REFERRAL_ALREADY_FULFILLED,
+  message: 'This referral has already been picked up by another appointment.',
+};
+
+const APPOINTMENT_ALREADY_REFERRED_EXAMPLE = {
+  statusCode: 409,
+  code: ErrorCode.APPOINTMENT_ALREADY_REFERRED,
+  message: 'Appointment has already been referred.',
+};
+
+const APPOINTMENT_NOT_BOOKED_EXAMPLE = {
+  statusCode: 409,
+  code: ErrorCode.APPOINTMENT_NOT_BOOKED,
+  message:
+    'Appointment is not in a bookable state and cannot be completed.',
+};
+
 const PaginatedAppointmentDto = PaginatedDto(AppointmentResponseDto);
 
 export function ApiCreateAppointment(): MethodDecorator & ClassDecorator {
@@ -149,7 +226,13 @@ export function ApiCreateAppointment(): MethodDecorator & ClassDecorator {
         '`VALIDATION_FAILED`, `APPOINTMENT_START_IN_PAST`, ' +
         '`DEPARTMENT_TYPE_NOT_ALLOWED`, `DOCTOR_DEPARTMENT_MISMATCH`, ' +
         '`SCHEDULE_NOT_FOUND_FOR_BOOKING`, `SCHEDULE_NOT_BOOKABLE`, ' +
-        '`SLOT_OUTSIDE_SCHEDULE`, or `SLOT_OVERLAPS_BREAK`.',
+        '`SLOT_OUTSIDE_SCHEDULE`, `SLOT_OVERLAPS_BREAK`, ' +
+        '`PREVIOUS_APPOINTMENT_CANCELLED`, ' +
+        '`PREVIOUS_APPOINTMENT_NOT_COMPLETED`, ' +
+        '`CONTINUATION_APPOINTMENT_TYPE_INVALID`, ' +
+        '`APPOINTMENT_GROUP_CLOSED`, ' +
+        '`APPOINTMENT_GROUP_PATIENT_MISMATCH`, or ' +
+        '`REFERRAL_DEPARTMENT_MISMATCH`.',
       schema: {
         oneOf: [
           { example: VALIDATION_EXAMPLE },
@@ -160,6 +243,12 @@ export function ApiCreateAppointment(): MethodDecorator & ClassDecorator {
           { example: SCHEDULE_NOT_BOOKABLE_EXAMPLE },
           { example: SLOT_OUTSIDE_SCHEDULE_EXAMPLE },
           { example: SLOT_OVERLAPS_BREAK_EXAMPLE },
+          { example: PREVIOUS_APPOINTMENT_CANCELLED_EXAMPLE },
+          { example: PREVIOUS_APPOINTMENT_NOT_COMPLETED_EXAMPLE },
+          { example: CONTINUATION_APPOINTMENT_TYPE_INVALID_EXAMPLE },
+          { example: APPOINTMENT_GROUP_CLOSED_EXAMPLE },
+          { example: APPOINTMENT_GROUP_PATIENT_MISMATCH_EXAMPLE },
+          { example: REFERRAL_DEPARTMENT_MISMATCH_EXAMPLE },
         ],
       },
     }),
@@ -175,12 +264,97 @@ export function ApiCreateAppointment(): MethodDecorator & ClassDecorator {
       },
     }),
     ApiNotFoundResponse({
-      description: 'Doctor or patient id is unknown / soft-deleted.',
-      schema: { example: NOT_FOUND_DOCTOR_EXAMPLE },
+      description: 'Doctor, patient, or previous appointment id is unknown / soft-deleted.',
+      schema: {
+        oneOf: [
+          { example: NOT_FOUND_DOCTOR_EXAMPLE },
+          { example: PREVIOUS_APPOINTMENT_NOT_FOUND_EXAMPLE },
+        ],
+      },
     }),
     ApiConflictResponse({
-      description: 'Slot has just been claimed by another booking.',
-      schema: { example: SLOT_TAKEN_EXAMPLE },
+      description:
+        '`SLOT_TAKEN` (slot just claimed) OR `REFERRAL_ALREADY_FULFILLED` ' +
+        '(the chosen previous appointment was already picked up by another booking).',
+      schema: {
+        oneOf: [
+          { example: SLOT_TAKEN_EXAMPLE },
+          { example: REFERRAL_ALREADY_FULFILLED_EXAMPLE },
+        ],
+      },
+    }),
+  );
+}
+
+export function ApiCompleteAppointment(): MethodDecorator & ClassDecorator {
+  return applyDecorators(
+    ApiOperation({
+      summary: 'Complete an appointment (DOCTOR-only)',
+      description:
+        'Transitions `BOOKED → COMPLETED`. Idempotent on `COMPLETED`. ' +
+        'Rejects from `CANCELLED` with `409 APPOINTMENT_NOT_BOOKED`. ' +
+        'No group / referral side-effect — this is the "completion-only" ' +
+        'ending, symmetric with `cancel`.',
+    }),
+    ApiParam({ name: 'id', description: 'Appointment id (uuid).' }),
+    ApiOkResponse({
+      description: 'Appointment completed (or already completed)',
+      type: AppointmentResponseDto,
+    }),
+    ApiForbiddenResponse({
+      description: 'Caller is not the doctor of the appointment.',
+      schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
+    }),
+    ApiNotFoundResponse({
+      description: 'Appointment id is unknown.',
+      schema: { example: NOT_FOUND_EXAMPLE },
+    }),
+    ApiConflictResponse({
+      description: 'Appointment status is CANCELLED.',
+      schema: { example: APPOINTMENT_NOT_BOOKED_EXAMPLE },
+    }),
+  );
+}
+
+export function ApiReferAppointment(): MethodDecorator & ClassDecorator {
+  return applyDecorators(
+    ApiOperation({
+      summary: 'Refer an appointment to another department (DOCTOR-only)',
+      description:
+        'Atomic: sets `status = COMPLETED`, `referredToDepartmentId = ' +
+        'body.toDepartmentId`, and `referredAt = now()`. The group stays ' +
+        'open — closing is a separate action ' +
+        '(`POST /appointment-groups/:id/close`). A second refer attempt ' +
+        'on the same row returns `409 APPOINTMENT_ALREADY_REFERRED`. Free ' +
+        'department choice — any valid `departmentId` is accepted.',
+    }),
+    ApiParam({ name: 'id', description: 'Appointment id (uuid).' }),
+    ApiOkResponse({
+      description: 'Appointment referred',
+      type: AppointmentResponseDto,
+    }),
+    ApiBadRequestResponse({
+      description:
+        '`VALIDATION_FAILED` OR `NOT_FOUND` (`toDepartmentId` is unknown).',
+      schema: { example: VALIDATION_EXAMPLE },
+    }),
+    ApiForbiddenResponse({
+      description: 'Caller is not the doctor of the appointment.',
+      schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
+    }),
+    ApiNotFoundResponse({
+      description: 'Appointment id is unknown.',
+      schema: { example: NOT_FOUND_EXAMPLE },
+    }),
+    ApiConflictResponse({
+      description:
+        'Appointment has already been referred OR is CANCELLED.',
+      schema: {
+        oneOf: [
+          { example: APPOINTMENT_ALREADY_REFERRED_EXAMPLE },
+          { example: APPOINTMENT_NOT_BOOKED_EXAMPLE },
+        ],
+      },
     }),
   );
 }
@@ -207,6 +381,16 @@ export function ApiListAppointments(): MethodDecorator & ClassDecorator {
       name: 'order',
       required: false,
       enum: Object.values(APPOINTMENT_LIST_ORDER),
+    }),
+    ApiQuery({
+      name: 'pendingReferralOnly',
+      required: false,
+      type: Boolean,
+      description:
+        'F14 — when `true`, narrows to the pending-referral pickup queue: ' +
+        '`status = COMPLETED` AND `referredToDepartmentId IS NOT NULL` AND ' +
+        '`referralFulfilledByAppointmentId IS NULL`. The destination-dept ' +
+        'narrowing comes from the caller\'s permission scope.',
     }),
     ApiOkResponse({
       description: 'Appointments page',

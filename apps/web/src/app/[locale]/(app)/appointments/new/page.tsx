@@ -7,16 +7,31 @@ import { PERMISSION_CODE } from "@/auth/permissions";
 import BookingWizard from "@/components/appointment/BookingWizard";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
+import { getAppointment } from "@/lib/api/appointment.api";
+import { APPOINTMENT_ERROR_CODE } from "@/lib/api/appointment.const";
 import { getMe } from "@/lib/api/auth.api";
 import { listDepartments } from "@/lib/api/department.api";
 import { fetchDoctorPickerSeed } from "@/lib/api/doctor.actions";
 import { getDoctor } from "@/lib/api/doctor.api";
+import { isApiError } from "@/lib/api/errors";
 import { DEFAULT_PAGE, MAX_PAGE_SIZE } from "@/lib/api/pagination.const";
 import { hasPermission, requireSession } from "@/lib/server/session";
+import type { AppointmentResponse } from "@/types/appointment.types";
 import type { DoctorListRow } from "@/types/doctor.types";
 
 interface BookingWizardPageProps {
   params: Promise<{ locale: AppLocale }>;
+  searchParams: Promise<{
+    /**
+     * F14 — referrals queue deep-link. Resolved into the
+     * `referralSourceAppointment` prop on the wizard so the patient is
+     * pre-filled and the continuation step is skipped. Unrecoverable
+     * lookups (cancelled appointment, foreign-tenant id) degrade
+     * gracefully: the wizard mounts without the seed instead of
+     * 4xx-ing the entire page.
+     */
+    previousAppointmentId?: string;
+  }>;
 }
 
 /**
@@ -35,8 +50,10 @@ interface BookingWizardPageProps {
  */
 export default async function BookingWizardPage({
   params,
+  searchParams,
 }: BookingWizardPageProps) {
   const { locale } = await params;
+  const { previousAppointmentId } = await searchParams;
 
   setRequestLocale(locale);
 
@@ -117,6 +134,36 @@ export default async function BookingWizardPage({
   // `GET /departments/:id/appointment-types` client-side once a
   // department is picked, so the SSR shape no longer needs the global
   // label catalog.
+  // F14 — when the referrals queue deep-links to the wizard, resolve
+  // the source appointment server-side so the wizard's prefill state is
+  // populated without a client round-trip. A 404 / 403 here means the
+  // referenced appointment is no longer readable (cancelled, moved
+  // tenants, never existed) — degrade by dropping the seed and letting
+  // the wizard run as a fresh booking. The user can still pick the
+  // continuation themselves on step 2.
+  let referralSourceAppointment: AppointmentResponse | undefined;
+
+  if (previousAppointmentId) {
+    try {
+      referralSourceAppointment = await getAppointment(previousAppointmentId);
+
+      if (referralSourceAppointment.status === "CANCELLED") {
+        referralSourceAppointment = undefined;
+      }
+    } catch (err) {
+      if (
+        isApiError(err) &&
+        (err.status === 404 ||
+          err.status === 403 ||
+          err.code === APPOINTMENT_ERROR_CODE.APPOINTMENT_NOT_FOUND)
+      ) {
+        referralSourceAppointment = undefined;
+      } else {
+        throw err;
+      }
+    }
+  }
+
   const [departments, doctorSeed] = await Promise.all([
     listDepartments({ page: DEFAULT_PAGE, pageSize: MAX_PAGE_SIZE }),
     fetchDoctorPickerSeed({ departmentId: callerDepartmentId }),
@@ -139,6 +186,7 @@ export default async function BookingWizardPage({
         forcedDepartmentId={callerDepartmentId}
         lockedDoctor={lockedDoctor}
         canRegisterPatient={canRegisterPatient}
+        referralSourceAppointment={referralSourceAppointment}
       />
     </Stack>
   );

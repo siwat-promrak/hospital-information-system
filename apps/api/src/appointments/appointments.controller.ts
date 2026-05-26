@@ -20,13 +20,16 @@ import type { AuthenticatedUser } from '../users/users.types';
 import { AppointmentsService } from './appointments.service';
 import {
   ApiCancelAppointment,
+  ApiCompleteAppointment,
   ApiCreateAppointment,
   ApiGetAppointment,
   ApiListAppointments,
+  ApiReferAppointment,
 } from './appointments.swagger';
 import { CancelAppointmentDto } from './dto/cancel-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { ListAppointmentsQueryDto } from './dto/list-appointments.query.dto';
+import { ReferAppointmentDto } from './dto/refer-appointment.dto';
 import { AppointmentResponseDto } from './dto/appointment.response.dto';
 
 /**
@@ -64,6 +67,7 @@ export class AppointmentsController {
       to: query.to,
       status: query.status,
       order: query.order,
+      pendingReferralOnly: query.pendingReferralOnly,
     });
   }
 
@@ -107,5 +111,34 @@ export class AppointmentsController {
     @Body() dto: CancelAppointmentDto,
   ): Promise<AppointmentResponseDto> {
     return this.appointments.cancel(user, id, dto);
+  }
+
+  @Post(':id/complete')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(
+    PERMISSION.APPOINTMENT_UPDATE_OWN,
+    PERMISSION.APPOINTMENT_UPDATE_OWN_DEPARTMENT,
+  )
+  @ApiCompleteAppointment()
+  complete(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<AppointmentResponseDto> {
+    return this.appointments.complete(user, id);
+  }
+
+  @Post(':id/refer')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(
+    PERMISSION.APPOINTMENT_UPDATE_OWN,
+    PERMISSION.APPOINTMENT_UPDATE_OWN_DEPARTMENT,
+  )
+  @ApiReferAppointment()
+  refer(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ReferAppointmentDto,
+  ): Promise<AppointmentResponseDto> {
+    return this.appointments.refer(user, id, dto);
   }
 }

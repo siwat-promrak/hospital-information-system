@@ -6,7 +6,7 @@
 import '../dayjs';
 
 import { Injectable } from '@nestjs/common';
-import { AppointmentStatus, Prisma } from '@prisma/client';
+import { AppointmentStatus, AppointmentType, Prisma } from '@prisma/client';
 import dayjs from 'dayjs';
 
 import { PERMISSION } from '../auth/permissions';
@@ -14,6 +14,7 @@ import {
   resolveAppointmentCreateScope,
   resolveAppointmentDeleteScope,
   resolveAppointmentReadScope,
+  resolveAppointmentUpdateScope,
   SCOPE,
 } from '../auth/scope';
 import { AppException } from '../common/app-exception';
@@ -35,10 +36,13 @@ import {
   APPOINTMENT_DB_ORDER_DESC,
   APPOINTMENT_LIST_ORDER,
   BLOCKING_APPOINTMENT_STATUSES,
+  CONTINUATION_APPOINTMENT_TYPES,
+  type ContinuationAppointmentType,
 } from './appointments.const';
 import type { ListAppointmentsArgs } from './appointments.types';
 import type { CancelAppointmentDto } from './dto/cancel-appointment.dto';
 import type { CreateAppointmentDto } from './dto/create-appointment.dto';
+import type { ReferAppointmentDto } from './dto/refer-appointment.dto';
 import { AppointmentResponseDto } from './dto/appointment.response.dto';
 
 /**
@@ -117,10 +121,18 @@ export class AppointmentsService {
     try {
       return await this.createInTransaction(caller, dto);
     } catch (err) {
+      // Prisma's P2034 surfaces a Postgres "could not serialize access"
+      // (40001) — expected under Serializable isolation when two
+      // booking transactions land on overlapping data. F14 widens the
+      // transaction footprint (group materialisation + back-link
+      // updates), so concurrent suites can hit the retry more than
+      // once. Cap at 5 attempts (matches the Postgres community
+      // convention for serialization-failure retry budgets) so a
+      // genuine deadlock still surfaces eventually.
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2034' &&
-        attempt === 0
+        attempt < 4
       ) {
         return this.createWithRetry(caller, dto, attempt + 1);
       }
@@ -145,6 +157,29 @@ export class AppointmentsService {
 
     const row = await this.prisma.$transaction(
       async (tx) => {
+        // 0. F14 — lazy group + referral fulfilment.
+        //
+        // When `previousAppointmentId` is set:
+        //   a. Load + validate prev (same patient, COMPLETED, not in a
+        //      closed group).
+        //   b. Reject continuations whose appointmentType is not in
+        //      `CONTINUATION_APPOINTMENT_TYPES` (FOLLOW_UP / PROCEDURE).
+        //   c. If prev has a group → take group_id + compute
+        //      visit_number = max(visitNumber) + 1.
+        //   d. If prev has no group → create a fresh group, back-link
+        //      prev (visit_number = 1), set new's visit_number = 2.
+        //   e. If prev carries a referral whose destination matches the
+        //      new row's department, set
+        //      `prev.referralFulfilledByAppointmentId = new.id` in the
+        //      same transaction. Mismatch → 400; already-fulfilled →
+        //      409.
+        //
+        // Runs BEFORE the (department, type) allowed-types check so a
+        // continuation booking surfaces the more specific
+        // `CONTINUATION_APPOINTMENT_TYPE_INVALID` rather than the
+        // generic `DEPARTMENT_TYPE_NOT_ALLOWED`.
+        const grouping = await this.resolveGrouping(tx, caller, dto);
+
         // 1. (department, type) is allowed — same lookup yields the
         // per-pair duration + booking-window bounds (F13).
         const allowed = await tx.departmentAppointmentType.findFirst({
@@ -345,7 +380,7 @@ export class AppointmentsService {
         //    permission error).
         this.assertCreateScope(caller, dto);
 
-        return tx.appointment.create({
+        const created = await tx.appointment.create({
           data: {
             patientId: dto.patientId,
             doctorId: dto.doctorId,
@@ -357,14 +392,232 @@ export class AppointmentsService {
             endAt: endAt.toDate(),
             reason: dto.reason ?? null,
             createdBy: caller.id,
+            appointmentGroupId: grouping.groupId,
+            visitNumber: grouping.visitNumber,
           },
           include: appointmentInclude,
         });
+
+        // Post-insert fulfilment back-link (only set when grouping
+        // determined the new row picks up a pending referral).
+        if (grouping.previousAppointmentToFulfillId !== null) {
+          await tx.appointment.update({
+            where: { id: grouping.previousAppointmentToFulfillId },
+            data: {
+              referralFulfilledByAppointmentId: created.id,
+              updatedBy: caller.id,
+            },
+          });
+        }
+
+        return created;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
     return this.toResponse(row);
+  }
+
+  /**
+   * Resolve the F14 grouping for a `POST /appointments` payload.
+   *
+   * Returns the `(groupId, visitNumber)` pair that should be written
+   * onto the new row PLUS the optional id of the previous-appointment
+   * row whose `referralFulfilledByAppointmentId` should be set to the
+   * new row's id after insert.
+   *
+   * Standalone bookings (no `previousAppointmentId`) return all-null.
+   *
+   * Runs inside the create-appointment serializable transaction.
+   */
+  private async resolveGrouping(
+    tx: Prisma.TransactionClient,
+    caller: AuthenticatedUser,
+    dto: CreateAppointmentDto,
+  ): Promise<{
+    groupId: string | null;
+    visitNumber: number | null;
+    previousAppointmentToFulfillId: string | null;
+  }> {
+    if (!dto.previousAppointmentId) {
+      return {
+        groupId: null,
+        visitNumber: null,
+        previousAppointmentToFulfillId: null,
+      };
+    }
+
+    const prev = await tx.appointment.findFirst({
+      where: { id: dto.previousAppointmentId },
+      select: {
+        id: true,
+        patientId: true,
+        departmentId: true,
+        status: true,
+        appointmentGroupId: true,
+        visitNumber: true,
+        referredToDepartmentId: true,
+        referralFulfilledByAppointmentId: true,
+      },
+    });
+
+    if (!prev) {
+      throw AppException.notFound(
+        ErrorCode.PREVIOUS_APPOINTMENT_NOT_FOUND,
+        'Previous appointment not found.',
+      );
+    }
+
+    if (prev.patientId !== dto.patientId) {
+      throw AppException.badRequest(
+        ErrorCode.APPOINTMENT_GROUP_PATIENT_MISMATCH,
+        "Continuation booking patient must match the previous appointment's patient.",
+        {
+          previousAppointmentId: prev.id,
+          previousPatientId: prev.patientId,
+          requestedPatientId: dto.patientId,
+        },
+      );
+    }
+
+    if (prev.status === AppointmentStatus.CANCELLED) {
+      throw AppException.badRequest(
+        ErrorCode.PREVIOUS_APPOINTMENT_CANCELLED,
+        'Cannot continue from a cancelled appointment.',
+        { previousAppointmentId: prev.id },
+      );
+    }
+
+    if (prev.status === AppointmentStatus.BOOKED) {
+      throw AppException.badRequest(
+        ErrorCode.PREVIOUS_APPOINTMENT_NOT_COMPLETED,
+        'Previous appointment must be COMPLETED before a continuation can be booked.',
+        { previousAppointmentId: prev.id, previousStatus: prev.status },
+      );
+    }
+
+    // Group-closed must fire before the continuation-type check so the
+    // FE gets the more specific "group is closed" diagnostic when both
+    // would otherwise apply.
+    if (prev.appointmentGroupId !== null) {
+      const closedGuard = await tx.appointmentGroup.findFirst({
+        where: { id: prev.appointmentGroupId },
+        select: { id: true, closedAt: true },
+      });
+
+      if (!closedGuard) {
+        throw AppException.notFound(
+          ErrorCode.APPOINTMENT_GROUP_NOT_FOUND,
+          'Appointment group not found.',
+        );
+      }
+
+      if (closedGuard.closedAt !== null) {
+        throw AppException.badRequest(
+          ErrorCode.APPOINTMENT_GROUP_CLOSED,
+          'Appointment group is closed — cannot attach further visits.',
+          {
+            groupId: closedGuard.id,
+            closedAt: closedGuard.closedAt.toISOString(),
+          },
+        );
+      }
+    }
+
+    // Continuation visits must be FOLLOW_UP or PROCEDURE — a new
+    // patient visit is by definition not a continuation, and a
+    // consultation is a fresh advisory. Surfaces as
+    // `400 CONTINUATION_APPOINTMENT_TYPE_INVALID`.
+    if (
+      !(CONTINUATION_APPOINTMENT_TYPES as readonly AppointmentType[]).includes(
+        dto.appointmentType,
+      )
+    ) {
+      throw AppException.badRequest(
+        ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
+        'Continuation visits must be FOLLOW_UP or PROCEDURE.',
+        {
+          previousAppointmentId: prev.id,
+          appointmentType: dto.appointmentType,
+          allowedAppointmentTypes:
+            CONTINUATION_APPOINTMENT_TYPES as readonly ContinuationAppointmentType[],
+        },
+      );
+    }
+
+    // Referral consistency — when prev carries a referral, the new
+    // department MUST match the destination AND the referral must not
+    // already be fulfilled.
+    let previousAppointmentToFulfillId: string | null = null;
+
+    if (prev.referredToDepartmentId !== null) {
+      if (prev.referralFulfilledByAppointmentId !== null) {
+        throw AppException.conflict(
+          ErrorCode.REFERRAL_ALREADY_FULFILLED,
+          'This referral has already been picked up by another appointment.',
+          {
+            previousAppointmentId: prev.id,
+            existingFulfillmentId: prev.referralFulfilledByAppointmentId,
+          },
+        );
+      }
+
+      if (prev.referredToDepartmentId !== dto.departmentId) {
+        throw AppException.badRequest(
+          ErrorCode.REFERRAL_DEPARTMENT_MISMATCH,
+          "Continuation department must match the previous appointment's referral destination.",
+          {
+            previousAppointmentId: prev.id,
+            referredToDepartmentId: prev.referredToDepartmentId,
+            requestedDepartmentId: dto.departmentId,
+          },
+        );
+      }
+
+      previousAppointmentToFulfillId = prev.id;
+    }
+
+    // Existing group → attach as the next visit number. The group's
+    // open / closed status was already validated above (we only reach
+    // here when the group exists and `closedAt IS NULL`).
+    if (prev.appointmentGroupId !== null) {
+      const max = await tx.appointment.aggregate({
+        where: { appointmentGroupId: prev.appointmentGroupId },
+        _max: { visitNumber: true },
+      });
+
+      const nextVisit = (max._max.visitNumber ?? 0) + 1;
+
+      return {
+        groupId: prev.appointmentGroupId,
+        visitNumber: nextVisit,
+        previousAppointmentToFulfillId,
+      };
+    }
+
+    // No group yet on prev → materialise one, back-link prev as visit 1.
+    // CreatedBy attribution mirrors the booking caller (the originator
+    // of the continuation that triggered the lazy creation).
+    const newGroup = await tx.appointmentGroup.create({
+      data: {
+        patientId: prev.patientId,
+        createdBy: caller.id,
+      },
+    });
+
+    await tx.appointment.update({
+      where: { id: prev.id },
+      data: {
+        appointmentGroupId: newGroup.id,
+        visitNumber: 1,
+      },
+    });
+
+    return {
+      groupId: newGroup.id,
+      visitNumber: 2,
+      previousAppointmentToFulfillId,
+    };
   }
 
   private assertCreateScope(
@@ -446,6 +699,15 @@ export class AppointmentsService {
 
     const where: Prisma.AppointmentWhereInput = {};
 
+    // F14 — the pending-referral pickup queue uses a different scope
+    // axis than the standard listing. For NURSE in dept B viewing the
+    // queue, the source rows live in OTHER departments (whoever made
+    // the referral), so narrowing by `departmentId = ownDept` would
+    // hide them. Instead, the scope must allow rows where
+    // `referredToDepartmentId = ownDept`. MRO (`.all`) sees referrals
+    // to every destination department.
+    const pickupQueueRequested = args.pendingReferralOnly === true;
+
     if (scope === SCOPE.OWN) {
       if (!caller.doctor) {
         throw AppException.forbidden(
@@ -480,7 +742,15 @@ export class AppointmentsService {
         );
       }
 
-      where.departmentId = caller.departmentId;
+      if (pickupQueueRequested) {
+        // Pickup queue mode: the destination axis replaces the standard
+        // `departmentId = ownDept` narrowing. BE auto-narrows by the
+        // caller's own department — the user cannot peek into another
+        // dept's queue.
+        where.referredToDepartmentId = caller.departmentId;
+      } else {
+        where.departmentId = caller.departmentId;
+      }
 
       if (args.doctorId !== undefined) {
         where.doctorId = args.doctorId;
@@ -506,6 +776,22 @@ export class AppointmentsService {
 
     if (args.status !== undefined) {
       where.status = args.status;
+    }
+
+    if (pickupQueueRequested) {
+      // Strict pickup-queue filter: only COMPLETED visits that carry a
+      // pending referral (referred to a department + not yet fulfilled).
+      // For `.own-department` the scope branch above already pinned
+      // `referredToDepartmentId = caller.departmentId`; for `.all` MRO,
+      // we narrow to "any non-null destination" so unreferred rows
+      // don't leak into the queue.
+      where.status = AppointmentStatus.COMPLETED;
+
+      if (where.referredToDepartmentId === undefined) {
+        where.referredToDepartmentId = { not: null };
+      }
+
+      where.referralFulfilledByAppointmentId = null;
     }
 
     if (args.from !== undefined || args.to !== undefined) {
@@ -721,6 +1007,227 @@ export class AppointmentsService {
     );
   }
 
+  /**
+   * F14 — `POST /appointments/:id/complete`. Transitions `BOOKED →
+   * COMPLETED`. Idempotent on `COMPLETED`; rejects from `CANCELLED`
+   * with `409 APPOINTMENT_NOT_BOOKED`. Caller MUST be the doctor on
+   * the appointment (`appointment.update.own`).
+   *
+   * No group / referral side-effect — this is the "completion-only"
+   * ending, symmetric with `cancel`.
+   */
+  async complete(
+    caller: AuthenticatedUser,
+    id: string,
+  ): Promise<AppointmentResponseDto> {
+    const existing = await this.prisma.appointment.findFirst({
+      where: { id },
+      select: {
+        id: true,
+        doctorId: true,
+        departmentId: true,
+        status: true,
+      },
+    });
+
+    if (!existing) {
+      throw AppException.notFound(
+        ErrorCode.APPOINTMENT_NOT_FOUND,
+        'Appointment not found.',
+      );
+    }
+
+    this.assertUpdateScope(caller, existing.doctorId, existing.departmentId);
+
+    if (existing.status === AppointmentStatus.COMPLETED) {
+      // Idempotent — re-fetch with the wire include and return.
+      const row = await this.prisma.appointment.findFirstOrThrow({
+        where: { id },
+        include: appointmentInclude,
+      });
+
+      return this.toResponse(row);
+    }
+
+    if (existing.status === AppointmentStatus.CANCELLED) {
+      throw AppException.conflict(
+        ErrorCode.APPOINTMENT_NOT_BOOKED,
+        'Appointment is not in a bookable state and cannot be completed.',
+        { appointmentId: existing.id, status: existing.status },
+      );
+    }
+
+    const row = await this.prisma.appointment.update({
+      where: { id },
+      data: {
+        status: AppointmentStatus.COMPLETED,
+        completedAt: dayjs.utc().toDate(),
+        updatedBy: caller.id,
+      },
+      include: appointmentInclude,
+    });
+
+    return this.toResponse(row);
+  }
+
+  /**
+   * F14 — `POST /appointments/:id/refer`. Atomic transition: status →
+   * `COMPLETED`, `referredToDepartmentId = body.toDepartmentId`,
+   * `referredAt = now()`. The group stays open — closing is the
+   * separate `POST /appointment-groups/:id/close` action.
+   *
+   * Auth: caller MUST be the doctor on the appointment
+   * (`appointment.update.own`).
+   *
+   * A second refer attempt on the same row returns
+   * `409 APPOINTMENT_ALREADY_REFERRED` — the referral pair is set
+   * exactly once.
+   */
+  async refer(
+    caller: AuthenticatedUser,
+    id: string,
+    dto: ReferAppointmentDto,
+  ): Promise<AppointmentResponseDto> {
+    const row = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.appointment.findFirst({
+        where: { id },
+        select: {
+          id: true,
+          doctorId: true,
+          departmentId: true,
+          status: true,
+          referredToDepartmentId: true,
+        },
+      });
+
+      if (!existing) {
+        throw AppException.notFound(
+          ErrorCode.APPOINTMENT_NOT_FOUND,
+          'Appointment not found.',
+        );
+      }
+
+      this.assertUpdateScope(caller, existing.doctorId, existing.departmentId);
+
+      if (existing.referredToDepartmentId !== null) {
+        throw AppException.conflict(
+          ErrorCode.APPOINTMENT_ALREADY_REFERRED,
+          'Appointment has already been referred.',
+          {
+            appointmentId: existing.id,
+            referredToDepartmentId: existing.referredToDepartmentId,
+          },
+        );
+      }
+
+      if (existing.status === AppointmentStatus.CANCELLED) {
+        throw AppException.conflict(
+          ErrorCode.APPOINTMENT_NOT_BOOKED,
+          'Cancelled appointment cannot be referred.',
+          { appointmentId: existing.id, status: existing.status },
+        );
+      }
+
+      // FK existence — surface a clean 400 rather than letting the DB
+      // FK violation propagate as an opaque 500.
+      const destination = await tx.department.findFirst({
+        where: { id: dto.toDepartmentId, deletedAt: null },
+        select: { id: true },
+      });
+
+      if (!destination) {
+        throw AppException.badRequest(
+          ErrorCode.NOT_FOUND,
+          'Destination department not found.',
+          { toDepartmentId: dto.toDepartmentId },
+        );
+      }
+
+      const now = dayjs.utc().toDate();
+      const isAlreadyCompleted = existing.status === AppointmentStatus.COMPLETED;
+
+      return tx.appointment.update({
+        where: { id },
+        data: {
+          status: AppointmentStatus.COMPLETED,
+          completedAt: isAlreadyCompleted ? undefined : now,
+          referredToDepartmentId: dto.toDepartmentId,
+          referredAt: now,
+          updatedBy: caller.id,
+        },
+        include: appointmentInclude,
+      });
+    });
+
+    return this.toResponse(row);
+  }
+
+  /**
+   * Shared assertion helper for the F14 doctor-only actions (`complete`
+   * / `refer`). Mirrors the cancel-side scope dispatch but reads from
+   * the `appointment.update.*` family.
+   */
+  private assertUpdateScope(
+    caller: AuthenticatedUser,
+    targetDoctorId: string,
+    targetDepartmentId: string,
+  ): void {
+    const scope = resolveAppointmentUpdateScope(caller);
+
+    if (scope === SCOPE.OWN_DEPARTMENT) {
+      if (caller.departmentId === null) {
+        throw AppException.forbidden(
+          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+          'Caller has no department assigned and cannot use own-department scope.',
+        );
+      }
+
+      if (caller.departmentId !== targetDepartmentId) {
+        throw AppException.forbidden(
+          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+          'Caller may only update appointments in their own department.',
+          {
+            required: [PERMISSION.APPOINTMENT_UPDATE_OWN_DEPARTMENT],
+            scope: SCOPE.OWN_DEPARTMENT,
+            callerDepartmentId: caller.departmentId,
+            requestedDepartmentId: targetDepartmentId,
+          },
+        );
+      }
+
+      return;
+    }
+
+    if (scope === SCOPE.OWN) {
+      if (!caller.doctor) {
+        throw AppException.forbidden(
+          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+          'DOCTOR user is missing a linked Doctor record.',
+        );
+      }
+
+      if (caller.doctor.id !== targetDoctorId) {
+        throw AppException.forbidden(
+          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+          'DOCTOR users may only update their own appointments.',
+          {
+            required: [PERMISSION.APPOINTMENT_UPDATE_OWN],
+            scope: SCOPE.OWN,
+            requestedDoctorId: targetDoctorId,
+            ownDoctorId: caller.doctor.id,
+          },
+        );
+      }
+
+      return;
+    }
+
+    throw AppException.forbidden(
+      ErrorCode.INSUFFICIENT_PERMISSION,
+      'Caller is missing the required permission(s).',
+    );
+  }
+
   private toResponse(row: AppointmentRow): AppointmentResponseDto {
     return {
       id: row.id,
@@ -739,6 +1246,11 @@ export class AppointmentsService {
       createdBy: row.createdBy,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      appointmentGroupId: row.appointmentGroupId,
+      visitNumber: row.visitNumber,
+      referredToDepartmentId: row.referredToDepartmentId,
+      referredAt: row.referredAt ? row.referredAt.toISOString() : null,
+      referralFulfilledByAppointmentId: row.referralFulfilledByAppointmentId,
       patient: {
         id: row.patient.id,
         hn: row.patient.hn,

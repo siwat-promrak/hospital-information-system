@@ -18,6 +18,9 @@ export const NAV_ICON = {
   APPOINTMENTS: "appointments",
   APPOINTMENTS_NEW: "appointments_new",
   PATIENTS_NEW: "patients_new",
+  // F14 — case timeline + referrals queue.
+  APPOINTMENT_GROUPS: "appointment_groups",
+  REFERRALS: "referrals",
 } as const;
 
 /**
@@ -111,5 +114,20 @@ export const NAV_ITEMS: readonly NavItem[] = [
     i18nKey: K.Nav.items.patientsNew,
     // NURSE + MRO hold `patient.create` in the seeded baseline.
     permission: [PERMISSION_CODE.PATIENT_CREATE],
+  },
+  {
+    id: "referrals",
+    href: FE_PATH.REFERRALS,
+    iconName: NAV_ICON.REFERRALS,
+    i18nKey: K.Nav.items.referrals,
+    // F14 referrals pickup queue. Department-scoped read is the entry
+    // ticket — DOCTOR / NURSE (`.own-department`) and MRO (`.all`, once
+    // F11 ships) see it. The page itself short-circuits to the
+    // forbidden card when the caller lacks read access to incoming
+    // referrals.
+    permission: [
+      PERMISSION_CODE.APPOINTMENT_READ_OWN_DEPARTMENT,
+      PERMISSION_CODE.APPOINTMENT_READ_ALL,
+    ],
   },
 ];

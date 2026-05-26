@@ -28,6 +28,10 @@ export const FE_PATH = {
   APPOINTMENTS_NEW: "/appointments/new",
   PATIENTS: "/patients",
   PATIENTS_NEW: "/patients/new",
+  // F14 — list of multi-visit cases (open + closed).
+  APPOINTMENT_GROUPS: "/appointment-groups",
+  // F14 — pickup queue for incoming referrals to the caller's department.
+  REFERRALS: "/referrals",
 } as const;
 
 export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];
@@ -39,6 +43,9 @@ export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];
 export const FE_PATH_BUILDER = {
   doctorDetail: (id: string) => `${FE_PATH.DOCTORS}/${id}`,
   appointmentDetail: (id: string) => `${FE_PATH.APPOINTMENTS}/${id}`,
+  // F14 — single-group case-lineage page.
+  appointmentGroupDetail: (id: string) =>
+    `${FE_PATH.APPOINTMENT_GROUPS}/${id}`,
 } as const;
 
 export const BE_PATH = {
@@ -53,6 +60,11 @@ export const BE_PATH = {
   MEDICAL_RECORDS: "/medical-records",
   APPOINTMENTS: "/appointments",
   PATIENTS: "/patients",
+  // F14 — paginated multi-visit cases list + detail under
+  // `/appointment-groups/:id`. Lives next to `APPOINTMENTS` because
+  // groups ARE chains of appointments; the BE module owns its own
+  // controller, so the FE keeps a sibling path entry.
+  APPOINTMENT_GROUPS: "/appointment-groups",
 } as const;
 
 export type BePath = (typeof BE_PATH)[keyof typeof BE_PATH];
@@ -76,6 +88,14 @@ export const BE_PATH_BUILDER = {
   appointmentDetail: (id: string) => `${BE_PATH.APPOINTMENTS}/${id}`,
   appointmentCancel: (id: string) =>
     `${BE_PATH.APPOINTMENTS}/${id}/cancel`,
+  // F14 — doctor-only "this visit is done" toggle. No body; flips the
+  // appointment to `COMPLETED`.
+  appointmentComplete: (id: string) =>
+    `${BE_PATH.APPOINTMENTS}/${id}/complete`,
+  // F14 — doctor-only "send to another department" action. Body
+  // `{ toDepartmentId }`; stamps `referredToDepartmentId` + `referredAt`.
+  appointmentRefer: (id: string) =>
+    `${BE_PATH.APPOINTMENTS}/${id}/refer`,
   /**
    * F13 per-(department, type) booking-rule catalog. Returns the
    * appointment types the department offers along with each pair's
@@ -84,4 +104,11 @@ export const BE_PATH_BUILDER = {
    */
   departmentAppointmentTypes: (departmentId: string) =>
     `${BE_PATH.DEPARTMENTS}/${departmentId}/appointment-types`,
+  // F14 — single-group detail with chronological `appointments` array.
+  appointmentGroupDetail: (id: string) =>
+    `${BE_PATH.APPOINTMENT_GROUPS}/${id}`,
+  // F14 — doctor-only "close this case" toggle. 403s for callers who
+  // aren't the latest visit's doctor. No body.
+  appointmentGroupClose: (id: string) =>
+    `${BE_PATH.APPOINTMENT_GROUPS}/${id}/close`,
 } as const;

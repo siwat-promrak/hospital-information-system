@@ -19,4 +19,13 @@ export interface ListAppointmentsArgs extends PaginationParams {
   to?: string;
   status?: AppointmentStatus;
   order?: AppointmentListOrder;
+  /**
+   * F14 pending-referral pickup queue. When `true`, the service narrows
+   * to rows with `status = COMPLETED` AND `referredToDepartmentId IS NOT NULL`
+   * AND `referralFulfilledByAppointmentId IS NULL`. Destination-dept
+   * narrowing is driven by the caller's scope: `.own-department` callers
+   * see referrals routed to their own department; `.all` callers (MRO)
+   * see referrals to every department.
+   */
+  pendingReferralOnly?: boolean;
 }

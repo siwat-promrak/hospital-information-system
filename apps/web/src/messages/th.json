@@ -130,7 +130,9 @@
       "medicalRecords": "เวชระเบียน",
       "appointments": "นัดหมาย",
       "appointmentsNew": "จองนัดหมาย",
-      "patientsNew": "ลงทะเบียนผู้ป่วย"
+      "patientsNew": "ลงทะเบียนผู้ป่วย",
+      "appointmentGroups": "เคส",
+      "referrals": "การส่งต่อ"
     }
   },
   "Breadcrumb": {
@@ -146,7 +148,9 @@
     "appointments": "นัดหมาย",
     "appointmentsNew": "จองใหม่",
     "patients": "ผู้ป่วย",
-    "patientsNew": "ลงทะเบียน"
+    "patientsNew": "ลงทะเบียน",
+    "appointmentGroups": "เคส",
+    "referrals": "การส่งต่อ"
   },
   "UserMenu": {
     "openMenu": "เปิดเมนูผู้ใช้",
@@ -174,7 +178,10 @@
       "signedOut": "ออกจากระบบเรียบร้อยแล้ว",
       "patientCreated": "ลงทะเบียนผู้ป่วยสำเร็จ (HN {hn})",
       "appointmentCreated": "จองนัดหมายสำเร็จ",
-      "appointmentCancelled": "ยกเลิกนัดหมายแล้ว"
+      "appointmentCancelled": "ยกเลิกนัดหมายแล้ว",
+      "appointmentCompleted": "บันทึกนัดหมายว่าเสร็จสิ้นแล้ว",
+      "appointmentReferred": "ส่งต่อนัดหมายไปยังแผนกอื่นแล้ว",
+      "appointmentGroupClosed": "ปิดเคสแล้ว"
     },
     "Errors": {
       "generic": "เกิดข้อผิดพลาด กรุณาลองอีกครั้ง",
@@ -196,7 +203,17 @@
       "appointmentAlreadyCompleted": "นัดหมายนี้เสร็จสิ้นแล้ว ไม่สามารถยกเลิกได้",
       "departmentTypeNotAllowed": "แผนกนี้ไม่ให้บริการประเภทนัดหมายนี้",
       "doctorDepartmentMismatch": "แพทย์ที่เลือกไม่ได้อยู่ในแผนกนี้",
-      "outsideBookingWindow": "ช่วงเวลานี้อยู่นอกช่วงเวลาที่เปิดจองสำหรับประเภทนัดหมายนี้"
+      "outsideBookingWindow": "ช่วงเวลานี้อยู่นอกช่วงเวลาที่เปิดจองสำหรับประเภทนัดหมายนี้",
+      "previousAppointmentCancelled": "นัดหมายก่อนหน้าถูกยกเลิก กรุณาเลือกนัดอื่นหรือข้ามขั้นตอนการต่อเนื่อง",
+      "appointmentGroupClosed": "เคสนี้ถูกปิดแล้วและไม่สามารถเพิ่มนัดหมายใหม่ได้",
+      "appointmentGroupPatientMismatch": "นัดหมายก่อนหน้าเป็นของผู้ป่วยคนอื่น",
+      "referralDepartmentMismatch": "แผนกที่เลือกไม่ตรงกับปลายทางของการส่งต่อ",
+      "referralAlreadyFulfilled": "การส่งต่อนี้ถูกดำเนินการโดยนัดหมายอื่นแล้ว",
+      "appointmentAlreadyReferred": "นัดหมายนี้ถูกส่งต่อไปยังแผนกอื่นแล้ว",
+      "appointmentGroupCloseForbidden": "เฉพาะแพทย์ของนัดหมายล่าสุดเท่านั้นที่สามารถปิดเคสนี้ได้",
+      "appointmentNotBooked": "การกระทำนี้ใช้ได้กับนัดหมายที่อยู่ในสถานะจองเท่านั้น",
+      "previousAppointmentNotCompleted": "การนัดต่อเนื่องต้องเชื่อมกับการเข้ารักษาครั้งก่อนที่เสร็จสิ้นแล้วเท่านั้น กรุณาเลือกครั้งที่เสร็จสิ้น หรือเริ่มเคสใหม่",
+      "continuationAppointmentTypeInvalid": "การนัดต่อเนื่องจองได้เฉพาะประเภทนัดติดตามหรือหัตถการเท่านั้น กรุณาเปลี่ยนประเภทนัดหมายหรือข้ามขั้นตอนการนัดต่อเนื่อง"
     }
   },
   "Directory": {
@@ -398,7 +415,26 @@
       "cancelDismiss": "เก็บนัดหมายไว้",
       "alreadyCancelled": "ถูกยกเลิกไปแล้ว — ไม่ต้องดำเนินการเพิ่ม",
       "alreadyCompleted": "เสร็จสิ้นแล้ว — ไม่สามารถยกเลิกได้",
-      "notFound": "ไม่พบนัดหมาย"
+      "notFound": "ไม่พบนัดหมาย",
+      "completeAction": "ทำเครื่องหมายว่าเสร็จสิ้น",
+      "completeDialogTitle": "บันทึกนัดหมายนี้ว่าเสร็จสิ้น?",
+      "completeDialogBody": "นัดหมายจะถูกล็อกในสถานะเสร็จสิ้น หากต้องการส่งต่อให้ใช้ปุ่มส่งต่อ หรือใช้ปิดเคสเมื่อไม่มีการนัดต่อ",
+      "completeConfirm": "ทำเครื่องหมายว่าเสร็จสิ้น",
+      "completeDismiss": "ยกเลิก",
+      "referAction": "ส่งต่อไปแผนกอื่น",
+      "referDialogTitle": "ส่งต่อนัดหมายนี้",
+      "referDialogBody": "เลือกแผนกปลายทาง แผนกปลายทางจะเห็นผู้ป่วยรายนี้ในคิวรับการส่งต่อ",
+      "referTargetLabel": "แผนกปลายทาง",
+      "referConfirm": "ส่งต่อ",
+      "referDismiss": "ยกเลิก",
+      "closeCaseAction": "ปิดเคส",
+      "closeCaseDialogTitle": "ปิดเคสนี้?",
+      "closeCaseDialogBody": "เคสจะถูกบันทึกว่าปิดแล้ว นัดต่อเนื่องสำหรับเคสนี้จะไม่สามารถจองได้",
+      "closeCaseConfirm": "ปิดเคส",
+      "closeCaseDismiss": "ยกเลิก",
+      "groupBadge": "การเข้ารับการรักษาครั้งที่ {visitNumber} ของเคส",
+      "referredBadge": "ส่งต่อไปยัง {departmentName}",
+      "viewCaseLink": "ดูไทม์ไลน์ของเคส"
     },
     "Errors": {
       "forbidden": "คุณไม่มีสิทธิ์ดูนัดหมาย",
@@ -474,8 +510,31 @@
     "subtitle": "เลือกผู้ป่วย แพทย์ ประเภทนัดหมาย และช่วงเวลาที่ว่าง",
     "stepLabels": {
       "patient": "ผู้ป่วย",
+      "continuation": "การต่อเนื่อง",
       "slot": "แพทย์ + ช่วงเวลา",
       "confirm": "ยืนยัน"
+    },
+    "Continuation": {
+      "title": "เป็นการนัดต่อเนื่องจากครั้งก่อนหรือไม่?",
+      "subtitle": "การโยงนัดต่อเนื่องเข้ากับครั้งก่อนจะรวมไว้ใต้เคสเดียวกัน ทำให้ดูประวัติทั้งเคสได้ครบ",
+      "optionNo": "ไม่ใช่ เป็นการเข้ารักษาครั้งใหม่",
+      "optionYes": "ใช่ ต่อเนื่องจากครั้งก่อน",
+      "pickerTitle": "เลือกการเข้ารักษาครั้งก่อน",
+      "pickerEmpty": "ยังไม่มีประวัติการเข้ารักษาก่อนหน้าของผู้ป่วยรายนี้",
+      "pickerLoading": "กำลังโหลดประวัติ…",
+      "rowDateLabel": "วันที่",
+      "rowDepartmentLabel": "แผนก",
+      "rowDoctorLabel": "แพทย์",
+      "rowVisitLabel": "ครั้งที่ {visitNumber}",
+      "rowUngrouped": "ครั้งเดียว",
+      "selectedSummary": "เชื่อมโยงกับการเข้ารักษาเมื่อ {date} · {department} · {doctor}",
+      "back": "ย้อนกลับ",
+      "next": "ถัดไป",
+      "loadMore": "แสดงเพิ่มเติม",
+      "showingCount": "แสดง {loaded} จาก {total} รายการ",
+      "errorRequired": "กรุณาเลือกการเข้ารักษาครั้งก่อนหรือเปลี่ยนเป็น \"ไม่ใช่ เป็นการเข้ารักษาครั้งใหม่\"",
+      "prefilledNotice": "เลือกอัตโนมัติจากคิวรับการส่งต่อ",
+      "clearSelection": "ล้างการเลือก"
     },
     "Patient": {
       "searchLabel": "ค้นหาผู้ป่วย",
@@ -512,7 +571,8 @@
       "reasonLabel": "เหตุผล",
       "reasonHelper": "ไม่บังคับ — จำเป็นเฉพาะเมื่อจองประเภทหัตถการ",
       "reasonPlaceholder": "เช่น ตรวจเช็คเครื่องกระตุ้นหัวใจประจำ",
-      "reasonRequiredHelper": "จำเป็นต้องระบุเหตุผลสำหรับการจองหัตถการ"
+      "reasonRequiredHelper": "จำเป็นต้องระบุเหตุผลสำหรับการจองหัตถการ",
+      "continuationTypeUnavailable": "แผนกนี้ไม่ให้บริการประเภทนัดติดตามหรือหัตถการ กรุณาเลือกแผนกอื่น หรือเปลี่ยนคำตอบในขั้นตอนการนัดต่อเนื่อง"
     },
     "Confirm": {
       "title": "ยืนยันการจอง",
@@ -536,7 +596,64 @@
       "missingType": "กรุณาเลือกประเภทนัดหมาย",
       "missingDate": "กรุณาเลือกวันที่",
       "missingReason": "การจองประเภทหัตถการต้องระบุเหตุผล",
+      "missingContinuation": "กรุณาเลือกการเข้ารักษาครั้งก่อนหรือเปลี่ยนเป็น \"ไม่ใช่ เป็นการเข้ารักษาครั้งใหม่\"",
       "generic": "จองนัดหมายไม่สำเร็จ กรุณาลองอีกครั้ง"
+    }
+  },
+  "AppointmentGroups": {
+    "title": "เคส",
+    "subtitle": "แผนการรักษาที่ครอบคลุมหลายการเข้ารับการรักษา รวมประวัติการเข้ารักษา การส่งต่อระหว่างแผนก และการปิดเคส",
+    "empty": "ไม่พบเคสที่ตรงกับเงื่อนไข",
+    "filters": {
+      "status": "สถานะ",
+      "statusOpen": "เปิด",
+      "statusClosed": "ปิด",
+      "statusAll": "ทั้งหมด",
+      "patient": "ผู้ป่วย"
+    },
+    "List": {
+      "visits": "{count, plural, =0 {ไม่มีครั้ง} other {# ครั้ง}}",
+      "openedAt": "เปิดเมื่อ",
+      "closedAt": "ปิดเมื่อ",
+      "latestVisit": "การเข้ารักษาล่าสุด",
+      "viewDetail": "ดูเคส"
+    },
+    "Detail": {
+      "back": "กลับไปยังเคส",
+      "title": "ไทม์ไลน์ของเคส",
+      "openedAt": "เปิดเมื่อ",
+      "closedAt": "ปิดเมื่อ",
+      "statusOpen": "เปิด",
+      "statusClosed": "ปิด",
+      "memberCount": "{count, plural, =0 {ไม่มีครั้ง} other {# ครั้ง}}",
+      "visitNumber": "ครั้งที่ {visitNumber}",
+      "departmentLabel": "แผนก",
+      "doctorLabel": "แพทย์",
+      "scheduledFor": "นัดเมื่อ",
+      "referredToBadge": "ส่งต่อไปยัง {departmentName}",
+      "fulfilledBadge": "ปิดโดยครั้งที่ {visitNumber}",
+      "viewAppointment": "เปิดนัดหมาย",
+      "notFound": "ไม่พบเคสนี้"
+    },
+    "Errors": {
+      "forbidden": "คุณไม่มีสิทธิ์ดูเคส"
+    }
+  },
+  "Referrals": {
+    "title": "คิวรับการส่งต่อ",
+    "subtitle": "ผู้ป่วยที่ถูกส่งต่อมายังแผนกของคุณจากทีมอื่น เลือกหนึ่งรายเพื่อจองนัดต่อเนื่อง",
+    "empty": "ไม่มีการส่งต่อค้างอยู่",
+    "List": {
+      "referredAt": "ส่งต่อเมื่อ",
+      "patientLabel": "ผู้ป่วย",
+      "sourceDepartment": "จากแผนก",
+      "sourceDoctor": "โดย",
+      "hnLabel": "HN",
+      "viewAppointment": "เปิดนัดต้นทาง",
+      "bookFollowUp": "จองนัดต่อเนื่อง"
+    },
+    "Errors": {
+      "forbidden": "คุณไม่มีสิทธิ์ดูคิวรับการส่งต่อ"
     }
   }
 }

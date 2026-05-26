@@ -1351,7 +1351,7 @@ so that the slot length matches each department's policy.
 
 ---
 
-## E14 — Appointment groups + transfers (P1, F14 `feat/appointment-groups`)
+## E14 — Appointment groups + referrals (P1, F14 `feat/referrals`)
 
 Today every appointment is a standalone row. Real clinics need to link
 visits within a clinical thread: a follow-up to a prior `NEW_PATIENT_VISIT`
@@ -1361,9 +1361,9 @@ visits for Mrs. Smith's diabetes thread" is unrecoverable from the
 patient's mixed timeline of unrelated complaints.
 
 This feature adds an `appointment_groups` table and lazily materialises
-a group whenever a continuation is booked. Transfer state lives as three
-columns on `Appointment` (no separate transfer table) — the originating
-row IS the transfer record. Permissions reuse the existing
+a group whenever a continuation is booked. Referral state lives as three
+columns on `Appointment` (no separate referral table) — the originating
+row IS the referral record. Permissions reuse the existing
 `appointment.*` family — no new permission codes.
 
 **Schema additions:**
@@ -1374,16 +1374,16 @@ row IS the transfer record. Permissions reuse the existing
 - `Appointment.appointmentGroupId String?` — NULL for standalone visits.
 - `Appointment.visitNumber Int?` — 1-indexed within group; NULL when
   standalone. Partial unique on `(group_id, visit_number)`.
-- `Appointment.transferredToDepartmentId String?` — destination, free
+- `Appointment.referredToDepartmentId String?` — destination, free
   choice.
-- `Appointment.transferredAt DateTime?` — when the transfer was
+- `Appointment.referredAt DateTime?` — when the referral was
   initiated.
-- `Appointment.transferFulfilledByAppointmentId String?` — `@unique`,
-  links to the receiving appointment once B picks up the transfer.
+- `Appointment.referralFulfilledByAppointmentId String?` — `@unique`,
+  links to the receiving appointment once B picks up the referral.
 
 ### US-14.1 — Front-desk continues an existing case
 
-**US-14.1** — As a NURSE booking a follow-up or transfer pickup, I want
+**US-14.1** — As a NURSE booking a follow-up or referral pickup, I want
 to pick "Continue case" from a list of the patient's prior visits, so
 that the new appointment is linked into the same clinical thread.
 
@@ -1419,16 +1419,16 @@ is supplied, so that the front-desk never has to call a separate
   3. If prev has no group → create a fresh `AppointmentGroup` →
      back-link prev (`group_id`, `visit_number = 1`) → insert new
      (`group_id`, `visit_number = 2`).
-  4. If prev's `transferredToDepartmentId` is set AND new's
+  4. If prev's `referredToDepartmentId` is set AND new's
      `departmentId` matches → also set
-     `prev.transferFulfilledByAppointmentId = new.id`. Mismatch →
-     `400 TRANSFER_DEPARTMENT_MISMATCH`. Already fulfilled →
-     `409 TRANSFER_ALREADY_FULFILLED`.
+     `prev.referralFulfilledByAppointmentId = new.id`. Mismatch →
+     `400 REFERRAL_DEPARTMENT_MISMATCH`. Already fulfilled →
+     `409 REFERRAL_ALREADY_FULFILLED`.
 - Existing appointments (pre-F14) remain ungrouped — no backfill.
 
 ### US-14.3 — Doctor completes a visit
 
-**US-14.3** — As a DOCTOR finishing a visit that does not transfer and
+**US-14.3** — As a DOCTOR finishing a visit that does not refer and
 does not end the case, I want a "Complete visit" action that marks the
 appointment `COMPLETED` without committing to a next step, so that the
 front-desk can book the follow-up later.
@@ -1440,45 +1440,45 @@ front-desk can book the follow-up later.
   with `409 APPOINTMENT_NOT_BOOKED`.
 - Auth: caller must be the doctor on the appointment
   (`appointment.update.own`).
-- No group / transfer side-effect — this is the "completion-only"
+- No group / referral side-effect — this is the "completion-only"
   ending, symmetric with `cancel`.
 
-### US-14.4 — Doctor transfers a visit to another department
+### US-14.4 — Doctor refers a visit to another department
 
 **US-14.4** — As a DOCTOR finishing a visit and deciding to refer the
-patient to another specialist, I want a single "Transfer to department"
-action that completes my visit AND records the transfer, so that the
+patient to another specialist, I want a single "Refer to department"
+action that completes my visit AND records the referral, so that the
 destination department's queue picks it up.
 
 **Acceptance criteria:**
 
-- `POST /appointments/:id/transfer` body
+- `POST /appointments/:id/refer` body
   `{ toDepartmentId: <any departmentId> }`. Atomic:
   - `status` → `COMPLETED`.
-  - `transferredToDepartmentId` ← body.
-  - `transferredAt` ← `now()`.
+  - `referredToDepartmentId` ← body.
+  - `referredAt` ← `now()`.
 - The group stays open — closing is a separate action (US-14.6).
 - Auth: caller must be the doctor on the appointment
   (`appointment.update.own`).
 - Free department choice — the patient may have never visited the
   destination department before.
-- A second transfer attempt on the same row returns
-  `409 APPOINTMENT_ALREADY_TRANSFERRED` (the transfer pair is set
+- A second referral attempt on the same row returns
+  `409 APPOINTMENT_ALREADY_REFERRED` (the referral pair is set
   exactly once per row).
 
-### US-14.5 — Destination NURSE picks up a pending transfer
+### US-14.5 — Destination NURSE picks up a pending referral
 
 **US-14.5** — As a NURSE in the destination department, I want to see
-patients pending transfer to my department and book their next
-appointment, so that the transfer flow completes end-to-end.
+patients referred to my department and book their next appointment, so
+that the referral flow completes end-to-end.
 
 **Acceptance criteria:**
 
-- `GET /appointments?pendingTransferToDepartmentId=<myDept>` returns
-  rows where `transferred_to_department_id = myDept` AND
-  `transfer_fulfilled_by_appointment_id IS NULL`. Existing
+- `GET /appointments?pendingReferralToDepartmentId=<myDept>` returns
+  rows where `referred_to_department_id = myDept` AND
+  `referral_fulfilled_by_appointment_id IS NULL`. Existing
   `appointment.read.own-department` scope applies — a NURSE only sees
-  pending transfers TO their own dept.
+  pending referrals TO their own dept.
 - Booking from the queue routes to the standard `POST /appointments`
   wizard with `previousAppointmentId` pre-filled to the source row.
   US-14.2 step (4) sets the fulfilment FK in the same transaction.
@@ -1521,8 +1521,8 @@ timeline.
   must hold a scope covering at least one member appointment.
 - `GET /appointment-groups/:id` returns the full chronological member
   list with each appointment's `visit_number`, `department`, `doctor`,
-  `status`, `transferredToDepartmentId?`,
-  `transferFulfilledByAppointmentId?`. Same auth.
+  `status`, `referredToDepartmentId?`,
+  `referralFulfilledByAppointmentId?`. Same auth.
 - Ungrouped (standalone) appointments are NOT listed by these endpoints
   — they remain visible via the existing `GET /appointments?patientId=`.
 

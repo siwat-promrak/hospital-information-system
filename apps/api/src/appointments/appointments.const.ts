@@ -5,7 +5,7 @@
  * booking-board view reads chronologically (next appointment first).
  * The list endpoint overrides this when the caller passes `?order=desc`.
  */
-import { AppointmentStatus, type Prisma } from '@prisma/client';
+import { AppointmentStatus, AppointmentType, type Prisma } from '@prisma/client';
 
 export const APPOINTMENT_DB_ORDER_ASC: Prisma.AppointmentOrderByWithRelationInput =
   { startAt: 'asc' };
@@ -36,3 +36,22 @@ export const APPOINTMENT_LIST_ORDER = {
 
 export type AppointmentListOrder =
   (typeof APPOINTMENT_LIST_ORDER)[keyof typeof APPOINTMENT_LIST_ORDER];
+
+/**
+ * F14 — continuation visits (booking with `previousAppointmentId`) MUST
+ * carry one of these appointment types. `NEW_PATIENT_VISIT` is by
+ * definition not a continuation; `CONSULTATION` is a fresh advisory.
+ * Only follow-ups and procedures continue a clinical thread.
+ *
+ * The check fires inside `AppointmentsService.create` after the
+ * prev-visit precondition cluster and before the per-(department, type)
+ * allowed-types lookup, surfacing as
+ * `400 CONTINUATION_APPOINTMENT_TYPE_INVALID`.
+ */
+export const CONTINUATION_APPOINTMENT_TYPES = [
+  AppointmentType.FOLLOW_UP,
+  AppointmentType.PROCEDURE,
+] as const;
+
+export type ContinuationAppointmentType =
+  (typeof CONTINUATION_APPOINTMENT_TYPES)[number];
