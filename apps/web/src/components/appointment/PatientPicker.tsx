@@ -102,22 +102,42 @@ export default function PatientPicker({
   // Closure captures `debouncedQuery` so each refetch sends the latest
   // user query. When `debouncedQuery` changes, the `resetKey` below also
   // changes and the hook drops the cursor + refetches page 1.
+  //
+  // Short-circuit when the query is below the search threshold so a
+  // backspace down to empty (e.g. user clears the typeahead after
+  // searching) doesn't fire a wide BE fetch for "all patients". The
+  // hook still resets `loaded` to `[]` via the synchronous clear in its
+  // reset effect, so the UI flips to the empty state immediately — this
+  // closure just returns the matching empty envelope without a network
+  // round-trip.
   const loadPage = useCallback(
-    (args: { page: number; pageSize: number }) =>
-      searchPatientsAction({
+    (args: { page: number; pageSize: number }) => {
+      if (trimmed.length < MIN_SEARCH_CHARS) {
+        return Promise.resolve({
+          data: [],
+          total: 0,
+          page: args.page,
+          pageSize: args.pageSize,
+          totalPages: 1,
+        });
+      }
+
+      return searchPatientsAction({
         q: trimmed,
         page: args.page,
         pageSize: args.pageSize,
-      }),
+      });
+    },
     [trimmed],
   );
 
-  // Empty seed when the query is below the search threshold — the hook
-  // accepts an empty seed (just `data: []`) and never fetches because
-  // the consumer's caller guards both the input AND the loadMore button
-  // behind `isSearchable`. We still register the seed so the
-  // `resetKey === initialResetKeyRef.current` invariant on first render
-  // is satisfied (the very first render is sub-threshold).
+  // Empty seed satisfies the hook's first-render seed-adoption invariant
+  // — the very first render is sub-threshold (`debouncedQuery === ""`), so
+  // we hand it `{ data: [] }` and the hook adopts it without firing a
+  // request. The `loadPage` short-circuit above handles every subsequent
+  // sub-threshold render: when the user backspaces back below threshold
+  // the hook drops the loaded list and calls `loadPage`, which returns
+  // an immediate empty envelope (no network).
   const initial = useMemo(
     () => ({ data: [] as readonly PatientResponse[], page: 1, total: 0 }),
     [],

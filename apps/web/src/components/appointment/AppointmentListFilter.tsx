@@ -31,6 +31,7 @@ import {
   PAGINATION_QUERY_PARAM,
 } from "@/lib/api/pagination.const";
 import type { PaginatedListInitial } from "@/lib/hooks/use-paginated-list";
+import { todayLocalISODate } from "@/lib/utils/date";
 import type { DepartmentRow } from "@/types/department.types";
 import type { DoctorListRow } from "@/types/doctor.types";
 
@@ -112,7 +113,13 @@ export default function AppointmentListFilter({
     activeStatus ?? "",
   );
   const [order, setOrder] = useState<AppointmentListOrderValue>(activeOrder);
-  const [from, setFrom] = useState<string>(activeFrom);
+  // Prefill the `from` date input with today's date when the URL has no
+  // active `from` filter. The prefill is FORM-ONLY — the BE call doesn't
+  // narrow by today until the user clicks Apply. This gives the user a
+  // sensible starting point for the most common "show me today onwards"
+  // query without surprising callers who land on `/appointments`
+  // expecting the full history.
+  const [from, setFrom] = useState<string>(activeFrom || todayLocalISODate());
   const [to, setTo] = useState<string>(activeTo);
 
   // The doctor picker narrows by the user-picked `departmentId` when it

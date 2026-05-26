@@ -105,11 +105,14 @@ export interface UsePaginatedListResult<T> {
  *    when they want to refresh on demand (e.g. after a mutation).
  *
  * SSR seed lifetime: while `resetKey === initialResetKey` (the value
- * captured on first render) the hook serves the seed verbatim. Once the
- * caller bumps `resetKey`, the seed is discarded and never reused, even
- * if the caller later sets `resetKey` back to its original value — that
- * lookup would re-fetch fresh page 1 data, which is the correct outcome
- * (the data behind the original filter may have changed).
+ * captured on first render) AND the consumer has never diverged from
+ * that initial value, the hook serves the seed verbatim. As soon as the
+ * caller bumps `resetKey`, an internal "has diverged" flag flips and the
+ * seed is discarded permanently — even if the caller later sets
+ * `resetKey` back to its original value, the hook refetches fresh page-1
+ * data via `loadPage` instead of replaying the stale seed. This is what
+ * keeps a filter cascade (e.g. doctor picker scoped by department) honest
+ * across pick → clear → re-pick sequences.
  */
 export function usePaginatedList<T>({
   loadPage,
@@ -120,11 +123,20 @@ export function usePaginatedList<T>({
   autoFetchFirstPage = false,
 }: UsePaginatedListArgs<T>): UsePaginatedListResult<T> {
   // Snapshot the resetKey on first render — while the live resetKey
-  // matches this, the SSR seed is the source of truth and we don't
-  // refetch page 1. The ref outlives renders so React's StrictMode
-  // double-mount doesn't re-snapshot it.
+  // matches this AND the consumer hasn't diverged yet, the SSR seed (or
+  // "wait for input" empty state) is the source of truth and we don't
+  // refetch page 1. Refs outlive renders so React's StrictMode
+  // double-mount doesn't re-snapshot them.
   const initialResetKeyRef = useRef<string>(resetKey);
   const seedConsumedRef = useRef<boolean>(false);
+  // `hasDivergedRef` flips `true` the first time `resetKey` strays from
+  // the captured initial value. Once it's `true`, the hook treats EVERY
+  // subsequent resetKey change as a real refetch trigger — even when the
+  // user returns to the initial resetKey. Without this, e.g. picking
+  // DEPT_A in an MRO filter card (initial resetKey = "") then clearing
+  // the field (resetKey back to "") would land in the "skip fetch"
+  // branch and leave the listbox stuck on DEPT_A's doctors.
+  const hasDivergedRef = useRef<boolean>(false);
 
   const [loaded, setLoaded] = useState<readonly T[]>(initial?.data ?? []);
   const [total, setTotal] = useState<number>(initial?.total ?? 0);
@@ -137,7 +149,10 @@ export function usePaginatedList<T>({
 
   // The reset effect fires on:
   //   - A genuine `resetKey` change (filter / query state diverged) —
-  //     drop everything and refetch page 1.
+  //     drop everything and refetch page 1. Once the resetKey has EVER
+  //     diverged from the initial value (`hasDivergedRef.current === true`),
+  //     subsequent matches against the initial value also refetch —
+  //     because the seed is stale by then.
   //   - First render when no SSR seed was provided AND `autoFetchFirstPage`
   //     is `true` — fetch page 1 so the consumer doesn't render empty.
   //     When `autoFetchFirstPage` is `false` (default), stay at the empty
@@ -150,7 +165,17 @@ export function usePaginatedList<T>({
     const resetKeyMatchesInitial =
       resetKey === initialResetKeyRef.current;
 
-    if (seedAvailable && resetKeyMatchesInitial) {
+    // Track whether the consumer has ever diverged from the initial
+    // resetKey — once they have, any future "match" is a re-visit, not a
+    // first-render seed adoption. This is what lets the doctor-picker
+    // refetch when the user clears a previously-picked department.
+    if (!resetKeyMatchesInitial) {
+      hasDivergedRef.current = true;
+    }
+
+    const hasDiverged = hasDivergedRef.current;
+
+    if (seedAvailable && resetKeyMatchesInitial && !hasDiverged) {
       // First render with a usable seed — adopt the seed values and mark
       // it consumed so subsequent resetKey changes refetch from scratch.
       seedConsumedRef.current = true;
@@ -163,12 +188,18 @@ export function usePaginatedList<T>({
       return;
     }
 
-    // No seed AND we're on the initial render: skip the fetch unless the
-    // caller has explicitly opted into auto-fetch. This lets typeahead
-    // pickers (PatientPicker) sit empty until the user types — they pass
-    // an empty seed today, but a future caller that omits `initial`
-    // entirely shouldn't accidentally fire a wide BE fetch.
-    if (!seedAvailable && resetKeyMatchesInitial && !autoFetchFirstPage) {
+    // No seed AND we're on the initial render (and haven't diverged):
+    // skip the fetch unless the caller has explicitly opted into
+    // auto-fetch. This lets typeahead pickers (PatientPicker) sit empty
+    // until the user types — they pass an empty seed today, but a future
+    // caller that omits `initial` entirely shouldn't accidentally fire a
+    // wide BE fetch.
+    if (
+      !seedAvailable &&
+      resetKeyMatchesInitial &&
+      !hasDiverged &&
+      !autoFetchFirstPage
+    ) {
       seedConsumedRef.current = true;
 
       return;

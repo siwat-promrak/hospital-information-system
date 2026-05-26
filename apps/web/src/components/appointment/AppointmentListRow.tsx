@@ -63,6 +63,16 @@ export default function AppointmentListRow({
       sx={{ alignItems: "flex-start", py: 2 }}
     >
       <ListItemText
+        // MUI defaults both `primary` and `secondary` slots to a
+        // `<Typography component="p">`. We nest a `<Stack>` (renders `<div>`)
+        // in `primary` and a `<Chip>` (also `<div>`) in `secondary`, which
+        // would violate the HTML "no block inside <p>" rule and trip React
+        // 19's strict hydration checker. Override both slots to render as
+        // `<div>` — same pattern PatientPicker already uses.
+        slotProps={{
+          primary: { component: "div" },
+          secondary: { component: "div" },
+        }}
         primary={
           <Stack
             direction={{ xs: "column", sm: "row" }}
@@ -88,8 +98,14 @@ export default function AppointmentListRow({
           </Stack>
         }
         secondary={
+          // The secondary slot is rendered as `<div>` (see `slotProps`
+          // above) so the inner `<Box>`es default to `<div>` too — the
+          // Chip rows (also `<div>`) nest cleanly inside without
+          // tripping the "block inside inline" rule. The previous
+          // `component="span"` wrappers were a workaround for the
+          // default `<Typography component="p">` slot and are now
+          // unnecessary.
           <Box
-            component="span"
             sx={{
               display: "flex",
               flexDirection: "column",
@@ -97,23 +113,14 @@ export default function AppointmentListRow({
               mt: 0.5,
             }}
           >
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              component="span"
-            >
+            <Typography variant="body2" color="text.secondary">
               {start.format("ddd, D MMM YYYY HH:mm")} – {end.format("HH:mm")}
             </Typography>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              component="span"
-            >
+            <Typography variant="body2" color="text.secondary">
               {formatDoctorFullName(appointment.doctor)} ·{" "}
               {appointment.department.name}
             </Typography>
             <Box
-              component="span"
               sx={{
                 display: "flex",
                 gap: 0.75,
