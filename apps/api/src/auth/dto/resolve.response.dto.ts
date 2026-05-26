@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 import { PERMISSION } from '../permissions';
 import { ROLE, SIGN_IN_ELIGIBLE_ROLES } from '../roles';
@@ -31,4 +31,16 @@ export class ResolveResponseDto {
 
   @ApiProperty({ example: NURSE_PERMISSION_EXAMPLE, type: [String] })
   permissionCodes!: string[];
+
+  @ApiPropertyOptional({
+    example: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9',
+    nullable: true,
+    description:
+      'User.departmentId — DOCTOR / NURSE carry a non-null value; ' +
+      'ADMIN / MEDICAL_RECORDS_OFFICER / PHARMACY return null. The FE ' +
+      'persists this on the session JWT so server components can scope ' +
+      'list filters (e.g. the /schedules doctor picker) to the caller\'s ' +
+      'home department without a second /me round-trip.',
+  })
+  departmentId!: string | null;
 }

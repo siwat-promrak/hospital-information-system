@@ -81,6 +81,7 @@ describe('AuthService', () => {
     expect(result.userId).toBe('user-1');
     expect(result.roleCode).toBe(ROLE.NURSE);
     expect(result.permissionCodes).toHaveLength(DEFAULT_ROLE_PERMISSIONS[ROLE.NURSE].length);
+    expect(result.departmentId).toBe('dept-uuid');
     expect(users.linkGoogleSub).toHaveBeenCalledWith('user-1', 'g-abc');
     expect(authLog.logSignInSuccess).toHaveBeenCalledWith(
       'user-1',
@@ -95,6 +96,7 @@ describe('AuthService', () => {
       buildUser({
         roleCode: ROLE.ADMIN,
         permissionCodes: [...DEFAULT_ROLE_PERMISSIONS[ROLE.ADMIN]],
+        departmentId: null,
       }),
     );
 
@@ -106,6 +108,10 @@ describe('AuthService', () => {
     expect(result.permissionCodes).not.toContain(
       PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
     );
+    // Org-wide roles (ADMIN / MRO / PHARMACY) carry no home department —
+    // `null` MUST round-trip so the FE doesn't accidentally narrow filters
+    // that should span every department.
+    expect(result.departmentId).toBeNull();
   });
 
   it('resolves a DOCTOR user with the schedule.create.own permission among others', async () => {
