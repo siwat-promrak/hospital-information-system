@@ -250,6 +250,8 @@ describe('F02 — Auth core e2e', () => {
     expect(new Set(res.body.permissionCodes)).toEqual(
       new Set(DEFAULT_ROLE_PERMISSIONS[ROLE.ADMIN]),
     );
+    // Org-wide role — no home department.
+    expect(res.body.departmentId).toBeNull();
   });
 
   maybe('resolves a NURSE user with the 11-permission set', async () => {
@@ -276,6 +278,11 @@ describe('F02 — Auth core e2e', () => {
         PERMISSION.DOCTOR_READ,
       ]),
     );
+    // Department-scoped role — `departmentId` MUST round-trip so the FE
+    // can scope list filters (e.g. /schedules doctor picker) to the
+    // caller's home dept without a /me round-trip.
+    expect(typeof res.body.departmentId).toBe('string');
+    expect(res.body.departmentId.length).toBeGreaterThan(0);
   });
 
   maybe('resolves a DOCTOR user with the full DOCTOR permission set', async () => {
@@ -300,6 +307,9 @@ describe('F02 — Auth core e2e', () => {
         PERMISSION.PATIENT_READ,
       ]),
     );
+    // Same dept-scoped contract as NURSE.
+    expect(typeof res.body.departmentId).toBe('string');
+    expect(res.body.departmentId.length).toBeGreaterThan(0);
   });
 
   maybe('rejects unverified Google emails with EMAIL_UNVERIFIED', async () => {

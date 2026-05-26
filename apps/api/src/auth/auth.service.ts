@@ -96,6 +96,7 @@ export class AuthService {
       userId: user.id,
       roleCode: user.roleCode,
       permissionCodes: user.permissionCodes as PermissionCode[],
+      departmentId: user.departmentId,
     };
   }
 }
