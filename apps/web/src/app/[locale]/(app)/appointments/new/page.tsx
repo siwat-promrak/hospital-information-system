@@ -7,10 +7,13 @@ import { PERMISSION_CODE } from "@/auth/permissions";
 import BookingWizard from "@/components/appointment/BookingWizard";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
+import { getMe } from "@/lib/api/auth.api";
 import { listDepartments } from "@/lib/api/department.api";
 import { fetchDoctorPickerSeed } from "@/lib/api/doctor.actions";
+import { getDoctor } from "@/lib/api/doctor.api";
 import { DEFAULT_PAGE, MAX_PAGE_SIZE } from "@/lib/api/pagination.const";
 import { hasPermission, requireSession } from "@/lib/server/session";
+import type { DoctorListRow } from "@/types/doctor.types";
 
 interface BookingWizardPageProps {
   params: Promise<{ locale: AppLocale }>;
@@ -73,6 +76,37 @@ export default async function BookingWizardPage({
   // so cross-coverage doctors don't appear.
   const callerDepartmentId = session.user.departmentId ?? undefined;
 
+  // Effective create scope. When the caller holds `.own` ONLY (no
+  // `.own-department`, no `.all`) the BE forces the doctor to the
+  // caller's own row anyway — pre-fill + lock the picker so the user
+  // doesn't pick a value the BE will overwrite. This matches the seeded
+  // DOCTOR role; NURSE (`.own-department`) and any future `.all` caller
+  // keep an open picker. Mirrors the schedule page's `lockedDoctorId`
+  // pattern (see `/schedules/page.tsx` around the `lockedDoctorId`
+  // computation).
+  const isCreateOwnOnly =
+    hasPermission(session, PERMISSION_CODE.APPOINTMENT_CREATE_OWN) &&
+    !hasPermission(
+      session,
+      PERMISSION_CODE.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+    );
+
+  // Resolve the caller's own doctor row before kicking off the parallel
+  // SSR fetch — the wizard needs the full `DoctorListRow` shape (not
+  // just the id) so the picker can render the locked selection inline
+  // without a follow-up fetch. `getMe()` returns the thin doctor ref
+  // (`{ id, departmentId }`) and `getDoctor(id)` returns the full row.
+  // Any 403/404 bubbles up to `(app)/error.tsx`.
+  let lockedDoctor: DoctorListRow | undefined;
+
+  if (isCreateOwnOnly) {
+    const me = await getMe();
+
+    if (me.doctor) {
+      lockedDoctor = await getDoctor(me.doctor.id);
+    }
+  }
+
   // Any 403/404 from the two BE fetches below bubbles up to
   // `(app)/error.tsx`, which renders the right friendly card based on
   // the `ApiError.digest` prefix — no per-page try/catch needed.
@@ -103,6 +137,7 @@ export default async function BookingWizardPage({
         doctorSeed={doctorSeed}
         doctorScopeDepartmentId={callerDepartmentId}
         forcedDepartmentId={callerDepartmentId}
+        lockedDoctor={lockedDoctor}
         canRegisterPatient={canRegisterPatient}
       />
     </Stack>

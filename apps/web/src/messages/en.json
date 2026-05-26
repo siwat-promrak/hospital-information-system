@@ -508,6 +508,7 @@
       "doctorNoMatches": "No matching doctors",
       "selectDoctorFirst": "Pick a doctor + date + type to see open slots.",
       "departmentLockedHelper": "Auto-narrowed to your department.",
+      "doctorLockedHelper": "Bookings are limited to your own appointments.",
       "reasonLabel": "Reason",
       "reasonHelper": "Optional — required only for PROCEDURE bookings.",
       "reasonPlaceholder": "e.g. Routine pacemaker check-up",
