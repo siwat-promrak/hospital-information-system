@@ -53,6 +53,16 @@ export default function DoctorListRow({
         </Avatar>
       </ListItemAvatar>
       <ListItemText
+        // Both slots wrap block-level content (`<Stack>` renders `<div>`,
+        // `<Chip>` renders `<div>` / `<a>`). MUI defaults each slot to
+        // `<Typography component="p">`, which would yield invalid
+        // `<p><div>` nesting and trip React 19's strict hydration check.
+        // Override to `<div>` for both — same pattern AppointmentListRow
+        // and PatientPicker already use.
+        slotProps={{
+          primary: { component: "div" },
+          secondary: { component: "div" },
+        }}
         primary={
           <Stack
             direction="row"
@@ -78,8 +88,12 @@ export default function DoctorListRow({
           </Stack>
         }
         secondary={
+          // The secondary slot is rendered as `<div>` (see `slotProps`
+          // above) so the inner `<Box>` defaults to `<div>` too — the
+          // `<DepartmentChipLink>` (renders `<a>` via `<Chip
+          // component={Link}>`) nests cleanly without the
+          // previous `component="span"` workaround.
           <Box
-            component="span"
             sx={{
               display: "flex",
               flexWrap: "wrap",

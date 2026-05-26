@@ -17,6 +17,9 @@ export const BREADCRUMB_SEGMENT_LABEL = {
   schedules: K.Breadcrumb.schedules,
   departments: K.Breadcrumb.departments,
   doctors: K.Breadcrumb.doctors,
+  appointments: K.Breadcrumb.appointments,
+  patients: K.Breadcrumb.patients,
+  new: K.Breadcrumb.appointmentsNew,
 } as const;
 
 export type BreadcrumbSegment = keyof typeof BREADCRUMB_SEGMENT_LABEL;

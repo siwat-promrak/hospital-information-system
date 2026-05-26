@@ -10,6 +10,20 @@
     "description": "หน้าที่คุณกำลังมองหาไม่มีอยู่",
     "goHome": "ไปยังหน้าแรก"
   },
+  "AppError": {
+    "title": "เกิดข้อผิดพลาด",
+    "description": "เกิดข้อผิดพลาดที่ไม่คาดคิด กรุณาลองรีเฟรชหน้านี้",
+    "tryAgain": "ลองอีกครั้ง",
+    "goHome": "ไปยังหน้าแรก",
+    "Forbidden": {
+      "title": "คุณไม่มีสิทธิ์เข้าถึง",
+      "description": "บัญชีของคุณไม่มีสิทธิ์เข้าถึงหน้านี้ หากเข้าใจว่าเป็นความผิดพลาด กรุณาติดต่อผู้ดูแลระบบ"
+    },
+    "NotFound": {
+      "title": "ไม่พบข้อมูล",
+      "description": "ทรัพยากรที่คุณกำลังค้นหาไม่มีอยู่หรือถูกลบไปแล้ว"
+    }
+  },
   "SignIn": {
     "title": "เข้าสู่ระบบ",
     "subtitle": "เข้าสู่ระบบสารสนเทศโรงพยาบาล",
@@ -31,6 +45,43 @@
       "nurse": "พยาบาล",
       "medicalRecordsOfficer": "เจ้าหน้าที่เวชระเบียน",
       "pharmacy": "เภสัชกร"
+    },
+    "AppointmentType": {
+      "NEW_PATIENT_VISIT": "ผู้ป่วยใหม่",
+      "FOLLOW_UP": "ติดตามอาการ",
+      "CONSULTATION": "ปรึกษา",
+      "PROCEDURE": "หัตถการ"
+    },
+    "AppointmentStatus": {
+      "BOOKED": "นัดแล้ว",
+      "CANCELLED": "ยกเลิก",
+      "COMPLETED": "เสร็จสิ้น"
+    },
+    "Gender": {
+      "MALE": "ชาย",
+      "FEMALE": "หญิง"
+    },
+    "BloodGroup": {
+      "A_POSITIVE": "A+",
+      "A_NEGATIVE": "A-",
+      "B_POSITIVE": "B+",
+      "B_NEGATIVE": "B-",
+      "AB_POSITIVE": "AB+",
+      "AB_NEGATIVE": "AB-",
+      "O_POSITIVE": "O+",
+      "O_NEGATIVE": "O-",
+      "UNKNOWN": "ไม่ทราบ"
+    },
+    "DoctorPicker": {
+      "label": "แพทย์",
+      "placeholder": "เลือกแพทย์",
+      "noMatches": "ไม่พบแพทย์ที่ตรงกัน",
+      "loadingMore": "กำลังโหลดรายชื่อแพทย์เพิ่มเติม…",
+      "showingCount": "แสดง {loaded} จาก {total} ราย — เลื่อนเพื่อโหลดเพิ่ม",
+      "searchScopedHint": "การค้นหาจะตรงเฉพาะรายชื่อที่โหลดแล้ว เลื่อนเพื่อโหลดเพิ่ม"
+    },
+    "Select": {
+      "clearAriaLabel": "ล้าง"
     }
   },
   "Dashboard": {
@@ -38,11 +89,26 @@
     "roleLabel": "บทบาท",
     "permissionsLabel": "สิทธิ์",
     "comingSoonAdmin": "แดชบอร์ดผู้ดูแลระบบ — การจัดการผู้ใช้, บทบาท, และนโยบายจะมาใน F11",
-    "comingSoonNurse": "แดชบอร์ดพยาบาล — การจองนัดหมายเฉพาะแผนกและการค้นหาคนไข้จะมาใน F08",
-    "comingSoonMedicalRecordsOfficer": "แดชบอร์ดเจ้าหน้าที่เวชระเบียน — การดูนัดหมายและคนไข้ทั่วทั้งองค์กรจะมาใน F08",
+    "comingSoonNurse": "ใช้เมนูด้านข้างเพื่อลงทะเบียนผู้ป่วยใหม่ จองนัดหมาย และดูตารางเวรของแผนกคุณ",
+    "comingSoonMedicalRecordsOfficer": "ใช้เมนูด้านข้างเพื่อค้นหานัดหมาย ข้อมูลผู้ป่วย และเวชระเบียนทั่วทั้งองค์กร",
     "comingSoonPharmacy": "แดชบอร์ดเภสัชกร — การค้นหานัดหมายและคนไข้สำหรับการจ่ายยาจะมาใน F08 ขึ้นไป",
     "comingSoonDoctor": "แดชบอร์ดแพทย์ — ตัวจัดการตารางของตนเองจะมาใน F06",
-    "noPermissions": "ยังไม่ได้รับสิทธิ์ใด ๆ"
+    "noPermissions": "ยังไม่ได้รับสิทธิ์ใด ๆ",
+    "appointmentsCard": {
+      "title": "นัดหมาย",
+      "description": "ค้นหา จอง และยกเลิกนัดหมายผู้ป่วย",
+      "action": "เปิด"
+    },
+    "bookCard": {
+      "title": "จองนัดหมาย",
+      "description": "เริ่มจองนัดใหม่ด้วยผู้ป่วยและช่วงเวลาว่าง",
+      "action": "จองใหม่"
+    },
+    "patientsCard": {
+      "title": "ลงทะเบียนผู้ป่วย",
+      "description": "ลงทะเบียนผู้ป่วย walk-in พร้อมข้อมูลพื้นฐานและการติดต่อ",
+      "action": "ลงทะเบียน"
+    }
   },
   "Nav": {
     "brand": "HIS",
@@ -56,7 +122,10 @@
       "departments": "แผนก",
       "doctors": "แพทย์",
       "schedules": "ตารางเวร",
-      "medicalRecords": "เวชระเบียน"
+      "medicalRecords": "เวชระเบียน",
+      "appointments": "นัดหมาย",
+      "appointmentsNew": "จองนัดหมาย",
+      "patientsNew": "ลงทะเบียนผู้ป่วย"
     }
   },
   "Breadcrumb": {
@@ -68,7 +137,11 @@
     "schedules": "ตารางเวร",
     "departments": "แผนก",
     "doctors": "แพทย์",
-    "medicalRecords": "เวชระเบียน"
+    "medicalRecords": "เวชระเบียน",
+    "appointments": "นัดหมาย",
+    "appointmentsNew": "จองใหม่",
+    "patients": "ผู้ป่วย",
+    "patientsNew": "ลงทะเบียน"
   },
   "UserMenu": {
     "openMenu": "เปิดเมนูผู้ใช้",
@@ -93,7 +166,10 @@
       "scheduleCreated": "สร้างตารางเวรสำเร็จ",
       "scheduleUpdated": "บันทึกตารางเวรสำเร็จ",
       "scheduleDeleted": "ลบตารางเวรสำเร็จ",
-      "signedOut": "ออกจากระบบเรียบร้อยแล้ว"
+      "signedOut": "ออกจากระบบเรียบร้อยแล้ว",
+      "patientCreated": "ลงทะเบียนผู้ป่วยสำเร็จ (HN {hn})",
+      "appointmentCreated": "จองนัดหมายสำเร็จ",
+      "appointmentCancelled": "ยกเลิกนัดหมายแล้ว"
     },
     "Errors": {
       "generic": "เกิดข้อผิดพลาด กรุณาลองอีกครั้ง",
@@ -102,7 +178,19 @@
       "scopeViolation": "คุณสามารถจัดการได้เฉพาะตารางของตัวเองเท่านั้น",
       "forbidden": "คุณไม่มีสิทธิ์ดำเนินการนี้",
       "startInPast": "ไม่สามารถสร้างหรือแก้ไขตารางที่มีเวลาเริ่มในอดีตได้",
-      "network": "การเชื่อมต่อขัดข้อง กรุณาตรวจสอบเครือข่ายและลองอีกครั้ง"
+      "network": "การเชื่อมต่อขัดข้อง กรุณาตรวจสอบเครือข่ายและลองอีกครั้ง",
+      "patientEmailExists": "อีเมลนี้ถูกใช้โดยผู้ป่วยรายอื่นแล้ว",
+      "slotTaken": "มีผู้จองช่วงเวลานี้ไปก่อนแล้ว กรุณาเลือกช่วงเวลาอื่น",
+      "slotOutsideSchedule": "ช่วงเวลาที่เลือกอยู่นอกตารางของแพทย์แล้ว",
+      "slotOverlapsBreak": "ช่วงเวลาที่เลือกอยู่ในเวลาพักของแพทย์",
+      "scheduleNotFoundForBooking": "ตารางนี้ไม่สามารถใช้จองได้แล้ว",
+      "scheduleNotBookable": "ตารางนี้ปิดรับการจองใหม่",
+      "appointmentStartInPast": "ไม่สามารถจองนัดหมายที่มีเวลาเริ่มในอดีตได้",
+      "appointmentNotFound": "ไม่พบนัดหมาย",
+      "appointmentAlreadyCancelled": "นัดหมายนี้ถูกยกเลิกไปแล้ว",
+      "appointmentAlreadyCompleted": "นัดหมายนี้เสร็จสิ้นแล้ว ไม่สามารถยกเลิกได้",
+      "departmentTypeNotAllowed": "แผนกนี้ไม่ให้บริการประเภทนัดหมายนี้",
+      "doctorDepartmentMismatch": "แพทย์ที่เลือกไม่ได้อยู่ในแผนกนี้"
     }
   },
   "Directory": {
@@ -243,6 +331,205 @@
       "missingDate": "กรุณาเลือกวัน",
       "invalidDateTime": "วันที่หรือเวลาไม่ถูกต้อง",
       "generic": "บันทึกตารางไม่สำเร็จ กรุณาลองอีกครั้ง"
+    }
+  },
+  "Appointments": {
+    "title": "นัดหมาย",
+    "subtitle": "ค้นหา จอง และยกเลิกนัดหมายผู้ป่วย",
+    "newAppointment": "จองใหม่",
+    "empty": "ไม่พบนัดหมายตามเงื่อนไขที่เลือก",
+    "filters": {
+      "title": "ตัวกรอง",
+      "from": "ตั้งแต่",
+      "to": "ถึง",
+      "department": "แผนก",
+      "doctor": "แพทย์",
+      "patient": "ผู้ป่วย",
+      "status": "สถานะ",
+      "order": "เรียงตาม",
+      "orderAsc": "เร็วที่สุดก่อน",
+      "orderDesc": "ล่าสุดก่อน",
+      "apply": "ใช้ตัวกรอง",
+      "reset": "ล้าง",
+      "clearField": "ล้างตัวกรองนี้",
+      "doctorLoadingMore": "กำลังโหลดรายชื่อแพทย์เพิ่ม…",
+      "doctorShowingCount": "แสดง {loaded} จาก {total} ราย — เลื่อนเพื่อโหลดเพิ่ม",
+      "doctorSearchScopedHint": "การค้นหาจะตรงเฉพาะรายชื่อที่โหลดแล้ว เลื่อนเพื่อโหลดเพิ่ม",
+      "doctorNoMatches": "ไม่พบแพทย์ที่ตรงกัน",
+      "doctorPlaceholder": "เลือกแพทย์"
+    },
+    "List": {
+      "hnLabel": "HN",
+      "scheduledFor": "เวลานัด",
+      "doctor": "แพทย์",
+      "department": "แผนก",
+      "patient": "ผู้ป่วย",
+      "type": "ประเภท",
+      "status": "สถานะ",
+      "viewDetail": "ดู"
+    },
+    "Detail": {
+      "back": "ย้อนกลับไปยังรายการนัดหมาย",
+      "patientLabel": "ผู้ป่วย",
+      "hnLabel": "HN",
+      "doctorLabel": "แพทย์",
+      "departmentLabel": "แผนก",
+      "appointmentType": "ประเภท",
+      "status": "สถานะ",
+      "startsAt": "เริ่ม",
+      "endsAt": "สิ้นสุด",
+      "reasonLabel": "เหตุผล",
+      "noReason": "—",
+      "cancelledAt": "ยกเลิกเมื่อ",
+      "cancellationReason": "เหตุผลการยกเลิก",
+      "createdAt": "จองเมื่อ",
+      "cancelAction": "ยกเลิกนัดหมาย",
+      "cancelDialogTitle": "ยกเลิกนัดหมายนี้?",
+      "cancelDialogBody": "ช่วงเวลานี้จะถูกปล่อยให้จองใหม่ได้ทันที ระบบจะบันทึกผู้ยกเลิกและเวลาในประวัติ",
+      "cancelReasonLabel": "เหตุผลการยกเลิก (ไม่บังคับ)",
+      "cancelReasonPlaceholder": "เช่น ผู้ป่วยไม่มาตามนัด",
+      "cancelConfirm": "ยกเลิกนัดหมาย",
+      "cancelDismiss": "เก็บนัดหมายไว้",
+      "alreadyCancelled": "ถูกยกเลิกไปแล้ว — ไม่ต้องดำเนินการเพิ่ม",
+      "alreadyCompleted": "เสร็จสิ้นแล้ว — ไม่สามารถยกเลิกได้",
+      "notFound": "ไม่พบนัดหมาย"
+    },
+    "Errors": {
+      "forbidden": "คุณไม่มีสิทธิ์ดูนัดหมาย",
+      "loadFailed": "โหลดข้อมูลนัดหมายไม่สำเร็จ"
+    }
+  },
+  "Patients": {
+    "Register": {
+      "title": "ลงทะเบียนผู้ป่วย",
+      "subtitle": "บันทึกข้อมูลพื้นฐานและการติดต่อของผู้ป่วยใหม่ ระบบจะสร้าง HN ให้อัตโนมัติเมื่อบันทึก",
+      "sections": {
+        "identity": "ข้อมูลบุคคล",
+        "contact": "การติดต่อ",
+        "emergency": "ผู้ติดต่อกรณีฉุกเฉิน",
+        "address": "ที่อยู่"
+      },
+      "fields": {
+        "firstNameEn": "ชื่อ (ภาษาอังกฤษ)",
+        "lastNameEn": "นามสกุล (ภาษาอังกฤษ)",
+        "firstNameTh": "ชื่อ (ภาษาไทย)",
+        "lastNameTh": "นามสกุล (ภาษาไทย)",
+        "dateOfBirth": "วันเกิด",
+        "gender": "เพศ",
+        "bloodGroup": "กรุ๊ปเลือด",
+        "identificationNo": "เลขประจำตัว",
+        "phone": "โทรศัพท์",
+        "email": "อีเมล",
+        "emergencyPersonName": "ชื่อผู้ติดต่อ",
+        "emergencyPersonRelation": "ความสัมพันธ์",
+        "emergencyPersonPhone": "โทรศัพท์ผู้ติดต่อ",
+        "address": "ที่อยู่"
+      },
+      "placeholders": {
+        "firstNameEn": "เช่น Praewa",
+        "lastNameEn": "เช่น Boonmee",
+        "firstNameTh": "เช่น แพรวา",
+        "lastNameTh": "เช่น บุญมี",
+        "identificationNo": "เลขบัตรประชาชนไทยหรือพาสปอร์ต",
+        "phone": "เช่น +66-2-555-1234",
+        "email": "ไม่บังคับ",
+        "emergencyPersonName": "เช่น อานัน บุญมี",
+        "emergencyPersonRelation": "เช่น คู่สมรส",
+        "emergencyPersonPhone": "เช่น +66-2-555-9999",
+        "address": "บ้านเลขที่ ถนน เขต รหัสไปรษณีย์"
+      },
+      "submit": "ลงทะเบียน",
+      "cancel": "ยกเลิก",
+      "selectGenderPlaceholder": "เลือกเพศ",
+      "selectBloodGroupPlaceholder": "เลือกกรุ๊ปเลือด",
+      "bloodGroupUnknownHint": "หากไม่ระบุ ระบบจะตั้งเป็น 'ไม่ทราบ'",
+      "fieldErrors": {
+        "firstNameEnRequired": "กรุณากรอกชื่อภาษาอังกฤษ",
+        "lastNameEnRequired": "กรุณากรอกนามสกุลภาษาอังกฤษ",
+        "dateOfBirthRequired": "กรุณาเลือกวันเกิดที่ถูกต้อง",
+        "dateOfBirthFuture": "วันเกิดต้องไม่อยู่ในอนาคต",
+        "genderRequired": "กรุณาเลือกเพศ",
+        "identificationNoRequired": "กรุณากรอกเลขประจำตัว",
+        "phoneRequired": "กรุณากรอกหมายเลขโทรศัพท์",
+        "emergencyNameRequired": "กรุณากรอกชื่อผู้ติดต่อฉุกเฉิน",
+        "emergencyRelationRequired": "กรุณากรอกความสัมพันธ์",
+        "emergencyPhoneRequired": "กรุณากรอกโทรศัพท์ผู้ติดต่อฉุกเฉิน",
+        "addressRequired": "กรุณากรอกที่อยู่",
+        "emailInvalid": "กรุณากรอกอีเมลที่ถูกต้อง"
+      },
+      "Errors": {
+        "forbidden": "คุณไม่มีสิทธิ์ลงทะเบียนผู้ป่วย",
+        "generic": "ลงทะเบียนผู้ป่วยไม่สำเร็จ กรุณาลองอีกครั้ง"
+      }
+    }
+  },
+  "BookingWizard": {
+    "title": "จองนัดหมาย",
+    "subtitle": "เลือกผู้ป่วย แพทย์ ประเภทนัดหมาย และช่วงเวลาที่ว่าง",
+    "stepLabels": {
+      "patient": "ผู้ป่วย",
+      "slot": "แพทย์ + ช่วงเวลา",
+      "confirm": "ยืนยัน"
+    },
+    "Patient": {
+      "searchLabel": "ค้นหาผู้ป่วย",
+      "searchPlaceholder": "ชื่อ โทรศัพท์ HN หรือเลขบัตร",
+      "searchHelper": "พิมพ์อย่างน้อย 2 ตัวอักษรเพื่อค้นหา",
+      "noResults": "ไม่พบผู้ป่วยที่ตรงกับ \"{query}\" ลองคำอื่นหรือลงทะเบียนผู้ป่วยใหม่",
+      "noResultsEmpty": "เริ่มพิมพ์เพื่อค้นหาผู้ป่วย",
+      "selected": "ผู้ป่วยที่เลือก",
+      "registerCta": "ลงทะเบียนผู้ป่วยใหม่",
+      "next": "ถัดไป",
+      "showingCount": "แสดง {loaded} จาก {total} คน",
+      "loadMore": "แสดงเพิ่มเติม"
+    },
+    "Slot": {
+      "departmentLabel": "แผนก",
+      "doctorLabel": "แพทย์",
+      "typeLabel": "ประเภทนัดหมาย",
+      "dateLabel": "วันที่",
+      "dateHelper": "แสดงเฉพาะช่วงเวลาในอนาคต — เลือกวันนี้หรือหลังจากนั้น",
+      "loadingSlots": "กำลังโหลดช่วงเวลา…",
+      "emptySlots": "ไม่มีช่วงเวลาว่างสำหรับเงื่อนไขนี้ ลองวันที่อื่นหรือเปลี่ยนประเภทนัดหมาย",
+      "slotListTitle": "ช่วงเวลาที่ว่าง",
+      "selectedSlot": "ช่วงเวลาที่เลือก",
+      "back": "ย้อนกลับ",
+      "next": "ถัดไป",
+      "doctorPlaceholder": "เลือกแพทย์",
+      "doctorLoadingMore": "กำลังโหลดรายชื่อแพทย์เพิ่ม…",
+      "doctorShowingCount": "แสดง {loaded} จาก {total} ราย — เลื่อนเพื่อโหลดเพิ่ม",
+      "doctorSearchScopedHint": "การค้นหาจะตรงเฉพาะรายชื่อที่โหลดแล้ว เลื่อนเพื่อโหลดเพิ่ม",
+      "doctorNoMatches": "ไม่พบแพทย์ที่ตรงกัน",
+      "selectDoctorFirst": "เลือกแพทย์ วันที่ และประเภทเพื่อดูช่วงเวลาที่ว่าง",
+      "departmentLockedHelper": "ระบบจำกัดอยู่ในแผนกของคุณ",
+      "reasonLabel": "เหตุผล",
+      "reasonHelper": "ไม่บังคับ — จำเป็นเฉพาะเมื่อจองประเภทหัตถการ",
+      "reasonPlaceholder": "เช่น ตรวจเช็คเครื่องกระตุ้นหัวใจประจำ",
+      "reasonRequiredHelper": "จำเป็นต้องระบุเหตุผลสำหรับการจองหัตถการ"
+    },
+    "Confirm": {
+      "title": "ยืนยันการจอง",
+      "patientLabel": "ผู้ป่วย",
+      "doctorLabel": "แพทย์",
+      "departmentLabel": "แผนก",
+      "appointmentType": "ประเภท",
+      "startsAt": "เริ่ม",
+      "endsAt": "สิ้นสุด",
+      "reasonLabel": "เหตุผล",
+      "noReason": "—",
+      "back": "ย้อนกลับ",
+      "submit": "ยืนยันการจอง"
+    },
+    "Errors": {
+      "forbidden": "คุณไม่มีสิทธิ์จองนัดหมาย",
+      "missingPatient": "กรุณาเลือกผู้ป่วยก่อนดำเนินการต่อ",
+      "missingSlot": "กรุณาเลือกช่วงเวลาก่อนดำเนินการต่อ",
+      "missingDoctor": "กรุณาเลือกแพทย์",
+      "missingDepartment": "กรุณาเลือกแผนก",
+      "missingType": "กรุณาเลือกประเภทนัดหมาย",
+      "missingDate": "กรุณาเลือกวันที่",
+      "missingReason": "การจองประเภทหัตถการต้องระบุเหตุผล",
+      "generic": "จองนัดหมายไม่สำเร็จ กรุณาลองอีกครั้ง"
     }
   }
 }

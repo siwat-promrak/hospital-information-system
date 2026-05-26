@@ -810,7 +810,7 @@ the resulting `Appointment.departmentId` on booking.
 
 ---
 
-## E7 — Front-desk booking on behalf
+## E7 — Front-desk booking on behalf ✅ shipped (F09, `feat/booking`)
 
 **NURSE owns the department-scoped front-desk surface by default**
 (`appointment.create.own-department` + full `patient.*` CRUD). **DOCTOR
@@ -820,6 +820,21 @@ can act on appointments where they are the assigned doctor**
 grant themselves via `role.update` (US-11.5). There is **no per-caller
 ownership filter** on patients — patient records are visible to anyone
 holding `patient.read`.
+
+**Shipped UX guarantees (beyond the original brief):**
+- The wizard's "Register patient" CTA only renders when the caller
+  holds `patient.create` — DOCTOR (who holds only `patient.read`) does
+  not see it. Click-through to `/patients/new` is therefore always
+  authorised.
+- The department field in the booking wizard is locked to the caller's
+  home dept for non-`.all` scopes (NURSE, DOCTOR); the doctor picker is
+  scoped to the same dept. Picking a doctor first auto-fills the dept
+  for `.all`-scope callers (no seeded role today) and the cascade
+  clears the doctor when the dept changes.
+- The appointment-type Select narrows to the picked department's
+  offered types via the new `Department.allowedAppointmentTypes` wire
+  field; mismatches still hit the BE `DEPARTMENT_TYPE_NOT_ALLOWED`
+  guard as the authoritative gate.
 
 ### US-7.1 — Searches for a patient
 
@@ -910,7 +925,7 @@ so that I can book them without leaving the booking flow.
 
 ---
 
-## E8 — Appointment lifecycle
+## E8 — Appointment lifecycle ✅ shipped (F09, `feat/booking`)
 
 Per-verb scope-aware permissions:
 - **NURSE** holds `appointment.{read,update,delete}.own-department`.
@@ -918,6 +933,26 @@ Per-verb scope-aware permissions:
   `appointment.read.own-department` for cross-coverage context.
 - **MRO** holds `appointment.read.all` — global read, no writes.
 - ADMIN / PHARMACY hold nothing by default.
+
+**Shipped UX guarantees (beyond the original brief):**
+- The `/appointments` filter card auto-pins department + doctor based
+  on the caller's effective `appointment.read.*` scope (see
+  `apps/web/src/appointment/scope.ts`): `.own` alone → both locked,
+  `.own ∪ .own-department` → dept locked, doctor editable,
+  `.own-department` alone → dept locked, doctor editable + scoped,
+  `.all` → both editable. Cross-scope filter values return
+  `403 INSUFFICIENT_PERMISSION_SCOPE` from the BE; the global error
+  boundary surfaces the friendly card.
+- Doctor-first selection in the filter narrows the department dropdown
+  to that doctor's home department only — prevents picking a
+  department that doesn't host the picked doctor.
+- Sidebar's longest-prefix highlight resolution: visiting
+  `/appointments/new` activates only "Book appointment", not also
+  "Appointments". Future sibling routes (e.g. `/patients` + future
+  `/patients/new`) inherit the same fix automatically.
+- The slot finder's blocker query covers the union of fetched schedule
+  windows (not just the requested UTC day), so a schedule that crosses
+  midnight UTC never re-emits an already-booked slot.
 
 ### US-8.1 — Lists appointments
 

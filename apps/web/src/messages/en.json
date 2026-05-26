@@ -10,6 +10,20 @@
     "description": "The page you're looking for doesn't exist.",
     "goHome": "Go to home"
   },
+  "AppError": {
+    "title": "Something went wrong",
+    "description": "An unexpected error occurred. Try refreshing the page.",
+    "tryAgain": "Try again",
+    "goHome": "Go to home",
+    "Forbidden": {
+      "title": "You don't have permission",
+      "description": "Your account doesn't have access to this page. Contact an administrator if you believe this is in error."
+    },
+    "NotFound": {
+      "title": "Not found",
+      "description": "The resource you're looking for doesn't exist or has been removed."
+    }
+  },
   "SignIn": {
     "title": "Sign in",
     "subtitle": "Continue to Hospital Information System",
@@ -31,6 +45,43 @@
       "nurse": "Nurse",
       "medicalRecordsOfficer": "Medical Records Officer",
       "pharmacy": "Pharmacy"
+    },
+    "AppointmentType": {
+      "NEW_PATIENT_VISIT": "New patient visit",
+      "FOLLOW_UP": "Follow-up",
+      "CONSULTATION": "Consultation",
+      "PROCEDURE": "Procedure"
+    },
+    "AppointmentStatus": {
+      "BOOKED": "Booked",
+      "CANCELLED": "Cancelled",
+      "COMPLETED": "Completed"
+    },
+    "Gender": {
+      "MALE": "Male",
+      "FEMALE": "Female"
+    },
+    "BloodGroup": {
+      "A_POSITIVE": "A+",
+      "A_NEGATIVE": "A-",
+      "B_POSITIVE": "B+",
+      "B_NEGATIVE": "B-",
+      "AB_POSITIVE": "AB+",
+      "AB_NEGATIVE": "AB-",
+      "O_POSITIVE": "O+",
+      "O_NEGATIVE": "O-",
+      "UNKNOWN": "Unknown"
+    },
+    "DoctorPicker": {
+      "label": "Doctor",
+      "placeholder": "Select doctor",
+      "noMatches": "No matching doctors",
+      "loadingMore": "Loading more doctors…",
+      "showingCount": "Showing {loaded} of {total} doctors — scroll to load more",
+      "searchScopedHint": "Search only matches doctors already loaded. Scroll to load more."
+    },
+    "Select": {
+      "clearAriaLabel": "Clear"
     }
   },
   "Dashboard": {
@@ -38,11 +89,26 @@
     "roleLabel": "Role",
     "permissionsLabel": "Permissions",
     "comingSoonAdmin": "Admin dashboard — user, role, and policy management ships in F11.",
-    "comingSoonNurse": "Nurse dashboard — own-department appointment booking and patient lookup ship in F08.",
-    "comingSoonMedicalRecordsOfficer": "Medical records dashboard — org-wide appointment and patient browsing ship in F08.",
+    "comingSoonNurse": "Use the sidebar to register walk-in patients, book appointments, and review your department's schedule.",
+    "comingSoonMedicalRecordsOfficer": "Use the sidebar to browse appointments, patients, and medical records across the organization.",
     "comingSoonPharmacy": "Pharmacy dashboard — org-wide appointment and patient lookups for medication dispensing ship in F08+.",
     "comingSoonDoctor": "Doctor dashboard — own-schedule editor ships in F06.",
-    "noPermissions": "No permissions granted yet."
+    "noPermissions": "No permissions granted yet.",
+    "appointmentsCard": {
+      "title": "Appointments",
+      "description": "Browse, book, and cancel patient appointments.",
+      "action": "Open"
+    },
+    "bookCard": {
+      "title": "Book appointment",
+      "description": "Start a new booking with a patient and an open slot.",
+      "action": "New booking"
+    },
+    "patientsCard": {
+      "title": "Register patient",
+      "description": "Register a walk-in patient with their demographics and contact details.",
+      "action": "New patient"
+    }
   },
   "Nav": {
     "brand": "HIS",
@@ -56,7 +122,10 @@
       "departments": "Departments",
       "doctors": "Doctors",
       "schedules": "Schedules",
-      "medicalRecords": "Medical records"
+      "medicalRecords": "Medical records",
+      "appointments": "Appointments",
+      "appointmentsNew": "Book appointment",
+      "patientsNew": "Register patient"
     }
   },
   "Breadcrumb": {
@@ -68,7 +137,11 @@
     "schedules": "Schedules",
     "departments": "Departments",
     "doctors": "Doctors",
-    "medicalRecords": "Medical records"
+    "medicalRecords": "Medical records",
+    "appointments": "Appointments",
+    "appointmentsNew": "New booking",
+    "patients": "Patients",
+    "patientsNew": "Register"
   },
   "UserMenu": {
     "openMenu": "Open user menu",
@@ -93,7 +166,10 @@
       "scheduleCreated": "Schedule created.",
       "scheduleUpdated": "Schedule updated.",
       "scheduleDeleted": "Schedule deleted.",
-      "signedOut": "You have been signed out."
+      "signedOut": "You have been signed out.",
+      "patientCreated": "Patient registered (HN {hn}).",
+      "appointmentCreated": "Appointment booked.",
+      "appointmentCancelled": "Appointment cancelled."
     },
     "Errors": {
       "generic": "Something went wrong. Please try again.",
@@ -102,7 +178,19 @@
       "scopeViolation": "You can only manage your own schedules.",
       "forbidden": "You don't have permission for that action.",
       "startInPast": "Cannot create or edit a schedule with a past start time.",
-      "network": "Network error. Please check your connection and try again."
+      "network": "Network error. Please check your connection and try again.",
+      "patientEmailExists": "Another patient already uses that email address.",
+      "slotTaken": "Another booker just claimed this slot. Please pick another.",
+      "slotOutsideSchedule": "The picked time is no longer inside the doctor's schedule.",
+      "slotOverlapsBreak": "The picked time overlaps the doctor's break.",
+      "scheduleNotFoundForBooking": "That schedule is no longer available.",
+      "scheduleNotBookable": "That schedule is closed to new bookings.",
+      "appointmentStartInPast": "Cannot book an appointment with a past start time.",
+      "appointmentNotFound": "Appointment not found.",
+      "appointmentAlreadyCancelled": "This appointment has already been cancelled.",
+      "appointmentAlreadyCompleted": "This appointment has already been completed and can no longer be cancelled.",
+      "departmentTypeNotAllowed": "This appointment type is not offered by the selected department.",
+      "doctorDepartmentMismatch": "The selected doctor is not in this department."
     }
   },
   "Directory": {
@@ -243,6 +331,205 @@
       "missingDate": "Select a date.",
       "invalidDateTime": "Date or time is invalid.",
       "generic": "Failed to save the schedule. Please try again."
+    }
+  },
+  "Appointments": {
+    "title": "Appointments",
+    "subtitle": "Browse, book, and cancel patient appointments.",
+    "newAppointment": "New booking",
+    "empty": "No appointments match the current filters.",
+    "filters": {
+      "title": "Filters",
+      "from": "From",
+      "to": "To",
+      "department": "Department",
+      "doctor": "Doctor",
+      "patient": "Patient",
+      "status": "Status",
+      "order": "Sort",
+      "orderAsc": "Earliest first",
+      "orderDesc": "Latest first",
+      "apply": "Apply filters",
+      "reset": "Reset",
+      "clearField": "Clear this filter",
+      "doctorLoadingMore": "Loading more doctors…",
+      "doctorShowingCount": "Showing {loaded} of {total} doctors — scroll to load more",
+      "doctorSearchScopedHint": "Search only matches doctors already loaded. Scroll to load more.",
+      "doctorNoMatches": "No matching doctors",
+      "doctorPlaceholder": "Select doctor"
+    },
+    "List": {
+      "hnLabel": "HN",
+      "scheduledFor": "Scheduled",
+      "doctor": "Doctor",
+      "department": "Department",
+      "patient": "Patient",
+      "type": "Type",
+      "status": "Status",
+      "viewDetail": "View"
+    },
+    "Detail": {
+      "back": "Back to appointments",
+      "patientLabel": "Patient",
+      "hnLabel": "HN",
+      "doctorLabel": "Doctor",
+      "departmentLabel": "Department",
+      "appointmentType": "Type",
+      "status": "Status",
+      "startsAt": "Starts at",
+      "endsAt": "Ends at",
+      "reasonLabel": "Reason",
+      "noReason": "—",
+      "cancelledAt": "Cancelled at",
+      "cancellationReason": "Cancellation reason",
+      "createdAt": "Booked at",
+      "cancelAction": "Cancel appointment",
+      "cancelDialogTitle": "Cancel this appointment?",
+      "cancelDialogBody": "The slot will be freed for re-booking immediately. The audit trail records who cancelled and when.",
+      "cancelReasonLabel": "Cancellation reason (optional)",
+      "cancelReasonPlaceholder": "e.g. Patient no-show",
+      "cancelConfirm": "Cancel appointment",
+      "cancelDismiss": "Keep appointment",
+      "alreadyCancelled": "Already cancelled — no further action needed.",
+      "alreadyCompleted": "Already completed — cannot be cancelled.",
+      "notFound": "Appointment not found."
+    },
+    "Errors": {
+      "forbidden": "You don't have permission to view appointments.",
+      "loadFailed": "Failed to load appointments."
+    }
+  },
+  "Patients": {
+    "Register": {
+      "title": "Register patient",
+      "subtitle": "Capture demographics + contact details for a new walk-in patient. The HN is generated automatically on save.",
+      "sections": {
+        "identity": "Identity",
+        "contact": "Contact",
+        "emergency": "Emergency contact",
+        "address": "Address"
+      },
+      "fields": {
+        "firstNameEn": "First name (English)",
+        "lastNameEn": "Last name (English)",
+        "firstNameTh": "First name (Thai)",
+        "lastNameTh": "Last name (Thai)",
+        "dateOfBirth": "Date of birth",
+        "gender": "Gender",
+        "bloodGroup": "Blood group",
+        "identificationNo": "Identification number",
+        "phone": "Phone",
+        "email": "Email",
+        "emergencyPersonName": "Contact name",
+        "emergencyPersonRelation": "Relationship",
+        "emergencyPersonPhone": "Contact phone",
+        "address": "Address"
+      },
+      "placeholders": {
+        "firstNameEn": "e.g. Praewa",
+        "lastNameEn": "e.g. Boonmee",
+        "firstNameTh": "e.g. แพรวา",
+        "lastNameTh": "e.g. บุญมี",
+        "identificationNo": "Thai national ID or passport",
+        "phone": "e.g. +66-2-555-1234",
+        "email": "Optional",
+        "emergencyPersonName": "e.g. Anan Boonmee",
+        "emergencyPersonRelation": "e.g. Spouse",
+        "emergencyPersonPhone": "e.g. +66-2-555-9999",
+        "address": "Street, city, postal code"
+      },
+      "submit": "Register patient",
+      "cancel": "Cancel",
+      "selectGenderPlaceholder": "Select gender",
+      "selectBloodGroupPlaceholder": "Select blood group",
+      "bloodGroupUnknownHint": "Defaults to Unknown when omitted.",
+      "fieldErrors": {
+        "firstNameEnRequired": "Enter the patient's first name (English).",
+        "lastNameEnRequired": "Enter the patient's last name (English).",
+        "dateOfBirthRequired": "Pick a valid date of birth.",
+        "dateOfBirthFuture": "Date of birth cannot be in the future.",
+        "genderRequired": "Select a gender.",
+        "identificationNoRequired": "Enter an identification number.",
+        "phoneRequired": "Enter a phone number.",
+        "emergencyNameRequired": "Enter an emergency contact name.",
+        "emergencyRelationRequired": "Enter the relationship.",
+        "emergencyPhoneRequired": "Enter the emergency contact phone.",
+        "addressRequired": "Enter the patient's address.",
+        "emailInvalid": "Enter a valid email address."
+      },
+      "Errors": {
+        "forbidden": "You don't have permission to register patients.",
+        "generic": "Failed to register the patient. Please try again."
+      }
+    }
+  },
+  "BookingWizard": {
+    "title": "Book appointment",
+    "subtitle": "Pick a patient, a doctor, an appointment type, and an open slot.",
+    "stepLabels": {
+      "patient": "Patient",
+      "slot": "Doctor + slot",
+      "confirm": "Confirm"
+    },
+    "Patient": {
+      "searchLabel": "Search patients",
+      "searchPlaceholder": "Name, phone, HN, or ID",
+      "searchHelper": "Type at least two characters to search.",
+      "noResults": "No patients match \"{query}\". Try a different term or register a new patient.",
+      "noResultsEmpty": "Start typing to find a patient.",
+      "selected": "Selected patient",
+      "registerCta": "Register new patient",
+      "next": "Continue",
+      "showingCount": "Showing {loaded} of {total} patients",
+      "loadMore": "Show more"
+    },
+    "Slot": {
+      "departmentLabel": "Department",
+      "doctorLabel": "Doctor",
+      "typeLabel": "Appointment type",
+      "dateLabel": "Date",
+      "dateHelper": "Slots show only future times — pick today or later.",
+      "loadingSlots": "Loading slots…",
+      "emptySlots": "No open slots for this combination. Try another date or appointment type.",
+      "slotListTitle": "Open slots",
+      "selectedSlot": "Selected slot",
+      "back": "Back",
+      "next": "Continue",
+      "doctorPlaceholder": "Select doctor",
+      "doctorLoadingMore": "Loading more doctors…",
+      "doctorShowingCount": "Showing {loaded} of {total} doctors — scroll to load more",
+      "doctorSearchScopedHint": "Search only matches doctors already loaded. Scroll to load more.",
+      "doctorNoMatches": "No matching doctors",
+      "selectDoctorFirst": "Pick a doctor + date + type to see open slots.",
+      "departmentLockedHelper": "Auto-narrowed to your department.",
+      "reasonLabel": "Reason",
+      "reasonHelper": "Optional — required only for PROCEDURE bookings.",
+      "reasonPlaceholder": "e.g. Routine pacemaker check-up",
+      "reasonRequiredHelper": "Required for PROCEDURE bookings."
+    },
+    "Confirm": {
+      "title": "Confirm booking",
+      "patientLabel": "Patient",
+      "doctorLabel": "Doctor",
+      "departmentLabel": "Department",
+      "appointmentType": "Type",
+      "startsAt": "Starts at",
+      "endsAt": "Ends at",
+      "reasonLabel": "Reason",
+      "noReason": "—",
+      "back": "Back",
+      "submit": "Confirm booking"
+    },
+    "Errors": {
+      "forbidden": "You don't have permission to book appointments.",
+      "missingPatient": "Pick a patient before continuing.",
+      "missingSlot": "Pick an open slot before continuing.",
+      "missingDoctor": "Pick a doctor.",
+      "missingDepartment": "Pick a department.",
+      "missingType": "Pick an appointment type.",
+      "missingDate": "Pick a date.",
+      "missingReason": "PROCEDURE bookings require a reason.",
+      "generic": "Failed to book the appointment. Please try again."
     }
   }
 }

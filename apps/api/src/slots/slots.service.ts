@@ -64,7 +64,7 @@ export class SlotsService {
     caller: AuthenticatedUser,
     args: FindSlotsArgs,
   ): Promise<SlotResult[]> {
-    await this.assertScope(caller, args.departmentId);
+    await this.assertScope(caller, args.doctorId, args.departmentId);
     await this.assertDoctorExists(args.doctorId);
     await this.assertDepartmentAllowsType(args.departmentId, args.type);
 
@@ -96,14 +96,30 @@ export class SlotsService {
       return [];
     }
 
+    // Cover the FULL range of schedules being processed, not just the
+    // requested UTC day. A schedule that spans midnight UTC emits slots
+    // on both sides of the boundary, so a booking in the next-day portion
+    // would otherwise be silently dropped from the blocker set (its
+    // `startAt >= dayEnd`) and the slot finder would re-emit an already-
+    // booked slot. Compute the union [min(startAt), max(endAt)) across
+    // fetched schedules and use that as the half-open filter bound.
+    const scheduleRangeStart = schedules.reduce<Date>(
+      (acc, s) => (s.startAt < acc ? s.startAt : acc),
+      schedules[0].startAt,
+    );
+    const scheduleRangeEnd = schedules.reduce<Date>(
+      (acc, s) => (s.endAt > acc ? s.endAt : acc),
+      schedules[0].endAt,
+    );
+
     const blockingAppointments = await this.prisma.appointment.findMany({
       where: {
         doctorId: args.doctorId,
         status: { in: [...BLOCKING_APPOINTMENT_STATUSES] },
-        // Day-narrowed for index efficiency; the per-slot overlap check is
-        // still half-open. Use the same day bounds as the schedule fetch.
-        startAt: { lt: dayEnd },
-        endAt: { gt: dayStart },
+        // Half-open overlap against the schedule union — keeps the query
+        // indexable AND covers slots that spill past midnight UTC.
+        startAt: { lt: scheduleRangeEnd },
+        endAt: { gt: scheduleRangeStart },
       },
       select: { startAt: true, endAt: true },
     });
@@ -131,17 +147,26 @@ export class SlotsService {
   }
 
   /**
-   * Honor the scope encoded on the caller's
-   * `appointment.create.own-department` permission: a NURSE may only
-   * probe slots for doctors in their own department. ADMIN /
-   * MEDICAL_RECORDS_OFFICER / PHARMACY hit the route-permission guard
-   * (`403 INSUFFICIENT_PERMISSION`) before this method runs.
+   * Honor the scope encoded on the caller's `appointment.create.*`
+   * permission:
    *
-   * Future `appointment.create.all` callers (if the catalog grows one)
-   * would short-circuit on the `ALL` branch.
+   *   - `.all`            → future-proof short-circuit (no role holds
+   *                         this today).
+   *   - `.own-department` → NURSE: may only probe slots for doctors in
+   *                         their own department.
+   *   - `.own`            → DOCTOR self-booking: may only probe their
+   *                         own doctor row, regardless of the
+   *                         `departmentId` filter — cross-doctor
+   *                         requests return `INSUFFICIENT_PERMISSION_SCOPE`
+   *                         so probing for foreign doctors does not
+   *                         leak existence.
+   *
+   * ADMIN / MEDICAL_RECORDS_OFFICER / PHARMACY hit the route-permission
+   * guard (`403 INSUFFICIENT_PERMISSION`) before this method runs.
    */
   private async assertScope(
     caller: AuthenticatedUser,
+    doctorId: string,
     departmentId: string,
   ): Promise<void> {
     const scope = resolveAppointmentWriteScope(caller);
@@ -166,11 +191,38 @@ export class SlotsService {
       return;
     }
 
+    if (scope === SCOPE.OWN) {
+      if (!caller.doctor) {
+        throw AppException.forbidden(
+          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+          'DOCTOR user is missing a linked Doctor record.',
+        );
+      }
+
+      if (caller.doctor.id !== doctorId) {
+        throw AppException.forbidden(
+          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
+          'DOCTOR users may only probe slots for themselves.',
+          {
+            required: [PERMISSION.APPOINTMENT_CREATE_OWN],
+            scope: SCOPE.OWN,
+            requestedDoctorId: doctorId,
+            ownDoctorId: caller.doctor.id,
+          },
+        );
+      }
+
+      return;
+    }
+
     throw AppException.forbidden(
       ErrorCode.INSUFFICIENT_PERMISSION,
       'Caller is missing the required permission(s).',
       {
-        required: [PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT],
+        required: [
+          PERMISSION.APPOINTMENT_CREATE_OWN,
+          PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+        ],
         held: [...caller.permissionCodes],
       },
     );
@@ -284,6 +336,7 @@ export function computeSchedulesSlots(
             startAt: slotStart.toISOString(),
             endAt: slotEnd.toISOString(),
             departmentId: schedule.departmentId,
+            scheduleId: schedule.id,
           });
         }
       }

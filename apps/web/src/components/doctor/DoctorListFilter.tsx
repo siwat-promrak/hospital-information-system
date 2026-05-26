@@ -1,13 +1,11 @@
 "use client";
 
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
-import MenuItem from "@mui/material/MenuItem";
-import Select, { type SelectChangeEvent } from "@mui/material/Select";
+import Box from "@mui/material/Box";
 import { useTranslations } from "next-intl";
 import { useTransition } from "react";
 
 import { FE_PATH } from "@/auth/routes";
+import DepartmentSelect from "@/components/shared/select/DepartmentSelect";
 import { K, NS } from "@/i18n/keys.generated";
 import { useRouter } from "@/i18n/navigation";
 import { DOCTOR_QUERY_PARAM } from "@/lib/api/doctor.const";
@@ -27,6 +25,10 @@ interface DoctorListFilterProps {
  * query param via `router.replace` so the URL stays the canonical source
  * of truth and back/forward navigation works. Resets `page` to 1 on every
  * change so the new filter never lands on an out-of-range offset.
+ *
+ * The picker's × clear icon is the "All departments" affordance — picking
+ * a department writes the param; clearing it removes the param + falls
+ * back to the unfiltered list.
  */
 export default function DoctorListFilter({
   departments,
@@ -36,8 +38,7 @@ export default function DoctorListFilter({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  function handleChange(event: SelectChangeEvent<string>) {
-    const value = event.target.value;
+  function handleChange(value: string | "") {
     const search = new URLSearchParams();
 
     search.set(PAGINATION_QUERY_PARAM.PAGE, String(DEFAULT_PAGE));
@@ -52,29 +53,16 @@ export default function DoctorListFilter({
   }
 
   return (
-    <FormControl
-      size="small"
-      sx={{ minWidth: { xs: "100%", sm: 240 } }}
-      disabled={isPending}
-    >
-      <InputLabel id="doctor-department-filter">
-        {tHeader(K.Directory.Doctors.filterByDepartment)}
-      </InputLabel>
-      <Select
-        labelId="doctor-department-filter"
-        label={tHeader(K.Directory.Doctors.filterByDepartment)}
+    <Box sx={{ minWidth: { xs: "100%", sm: 240 } }}>
+      <DepartmentSelect
         value={activeDepartmentId ?? ""}
         onChange={handleChange}
-      >
-        <MenuItem value="">
-          {tHeader(K.Directory.Doctors.allDepartments)}
-        </MenuItem>
-        {departments.map((dept) => (
-          <MenuItem key={dept.id} value={dept.id}>
-            {dept.name}
-          </MenuItem>
-        ))}
-      </Select>
-    </FormControl>
+        departments={departments}
+        label={tHeader(K.Directory.Doctors.filterByDepartment)}
+        size="small"
+        clearable
+        disabled={isPending}
+      />
+    </Box>
   );
 }

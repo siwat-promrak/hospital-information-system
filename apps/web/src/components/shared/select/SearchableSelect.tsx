@@ -1,5 +1,6 @@
 "use client";
 
+import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import Autocomplete, {
   type AutocompleteRenderInputParams,
 } from "@mui/material/Autocomplete";
@@ -87,6 +88,24 @@ interface SearchableSelectProps<T> {
    * supports server-side search this hint can be removed.
    */
   searchScopedHint?: string;
+  /**
+   * Density mirror of MUI `<Select>` / `<FormControl>`'s `size`. Forwarded
+   * to BOTH the underlying `<Autocomplete>` (so the input frame matches)
+   * AND the rendered `<TextField>` (so the label + helper text align).
+   * Defaults to `"medium"` to match MUI's own defaults — pass `"small"`
+   * when the component sits next to a `<FormControl size="small">` on the
+   * same row so the two fields line up vertically.
+   */
+  size?: "small" | "medium";
+  /**
+   * Show MUI Autocomplete's built-in clear "×" icon when a value is set.
+   * Defaults to `false` because this picker is styled to mimic a plain
+   * `<Select>` (which has no clear affordance). Callers that want the
+   * affordance (e.g. the appointments filter card, where each field has
+   * its own per-filter clear) flip this to `true` so the user can drop
+   * the selection in-line without leaving the dropdown.
+   */
+  clearable?: boolean;
 }
 
 /**
@@ -263,6 +282,8 @@ export default function SearchableSelect<T>({
   hasMoreLabel,
   loadingMoreLabel,
   searchScopedHint,
+  size,
+  clearable,
 }: SearchableSelectProps<T>) {
   // Re-shape `options` as a mutable array because MUI typings reject
   // `readonly T[]` directly — the component itself never mutates the
@@ -278,9 +299,10 @@ export default function SearchableSelect<T>({
         error={error}
         helperText={helperText}
         required={required}
+        size={size}
       />
     ),
-    [label, placeholder, error, helperText, required],
+    [label, placeholder, error, helperText, required, size],
   );
 
   /**
@@ -405,8 +427,62 @@ export default function SearchableSelect<T>({
     [onChange],
   );
 
+  const clearIndicatorSlotProps = useMemo(
+    () => (clearable ? {} : { sx: { display: "none" } }),
+    [clearable],
+  );
+
   return (
     <Autocomplete
+      // Visual parity with `<Select>`:
+      //   - `popupIcon` is the chevron rendered on the right edge. We pass
+      //     it explicitly so a future MUI default change can't drift the
+      //     look away from the sibling `<Select>` (which also defaults to
+      //     `ArrowDropDownIcon`). The 180-deg rotation on open is built
+      //     into MUI's `.MuiAutocomplete-popupIndicatorOpen` style — same
+      //     behaviour the Select chevron has via `.iconOpen`.
+      //   - `forcePopupIcon` keeps the chevron visible AT ALL TIMES — the
+      //     `"auto"` default hides it once an option is selected, which
+      //     reads as a search box. Select always shows its chevron, so we
+      //     do too.
+      //   - `openOnFocus` opens the listbox as soon as the input takes
+      //     focus (matches Select's click-to-open semantics, where the
+      //     whole field is the open trigger — not just the chevron).
+      //   - `clearOnBlur={false}` STOPS MUI's default behaviour of nuking
+      //     any unmatched typed input on blur. The default rewrites the
+      //     input back to the selected option's label when the user clicks
+      //     outside — but only AFTER calling `onChange(null)` once when
+      //     the typed text doesn't match, so by the time the label is
+      //     restored the wizard's controlled `value` is already cleared.
+      //     With `clearOnBlur={false}` the input keeps whatever the user
+      //     typed and the selection survives the blur.
+      //   - `blurOnSelect="touch"` snaps the focus away from the input
+      //     after a pointer pick so the listbox closes cleanly — without
+      //     this MUI keeps focus on the input after click-to-pick and the
+      //     subsequent outside-click would treat any leftover typed text
+      //     as "user is still editing", reviving the clear-on-blur bug.
+      //     `"touch"` (rather than `true`) only blurs on touch/pointer
+      //     selections so keyboard navigation isn't surprised by a focus
+      //     jump.
+      //   - The hidden `clearIndicator` (see `slotProps.clearIndicator`
+      //     below) removes the floating "×" that Autocomplete normally
+      //     paints when a value is set. `<Select>` has no clear affordance
+      //     and our forms reset via dedicated "Reset" buttons (e.g. on
+      //     the appointments filter card), so dropping the icon is safe
+      //     by default. Pass `clearable` to opt back in (e.g. the
+      //     appointments filter card uses per-field clear icons).
+      //     We keep `disableClearable={false}` (the default) on purpose:
+      //     `disableClearable={true}` widens `onChange`'s value type to
+      //     non-nullable, which would force every caller to re-type its
+      //     `onChange` handler. Hiding the icon via CSS preserves the
+      //     `T | null` contract for free; the user can still drop the
+      //     selection programmatically (e.g. via the form's Reset button).
+      popupIcon={<ArrowDropDownIcon />}
+      forcePopupIcon
+      openOnFocus
+      clearOnBlur={false}
+      blurOnSelect="touch"
+      size={size}
       options={optionList}
       value={value}
       onChange={handleAutocompleteChange}
@@ -419,6 +495,7 @@ export default function SearchableSelect<T>({
       slotProps={{
         paper: paperSlotProps,
         listbox: listboxSlotProps,
+        clearIndicator: clearIndicatorSlotProps,
       }}
       renderInput={renderTextInput}
     />

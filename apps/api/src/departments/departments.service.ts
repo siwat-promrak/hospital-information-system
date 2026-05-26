@@ -36,6 +36,13 @@ export class DepartmentsService {
           id: true,
           name: true,
           description: true,
+          // Pull the join rows for the booking wizard's type filter.
+          // Soft-deleted join rows are filtered out so a retired
+          // `(departmentId, appointmentType)` pair stops being offered.
+          allowedAppointmentTypes: {
+            where: { deletedAt: null },
+            select: { appointmentType: true },
+          },
         },
         skip: resolved.skip,
         take: resolved.take,
@@ -43,6 +50,20 @@ export class DepartmentsService {
       this.prisma.department.count({ where }),
     ]);
 
-    return buildPaginatedResponse(rows, total, resolved);
+    // Flatten the join rows to a plain `AppointmentType[]` so the wire
+    // shape mirrors `DepartmentResponseDto` exactly. The DB rows arrive
+    // sorted by id (Prisma default) — sort the result alphabetically by
+    // enum value so two equivalent department rows always serialise the
+    // same array order (stable response shape across instances).
+    const data: DepartmentResponseDto[] = rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      allowedAppointmentTypes: row.allowedAppointmentTypes
+        .map((join) => join.appointmentType)
+        .sort(),
+    }));
+
+    return buildPaginatedResponse(data, total, resolved);
   }
 }

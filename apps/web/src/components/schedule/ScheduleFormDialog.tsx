@@ -10,19 +10,15 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
-import FormControl from "@mui/material/FormControl";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import InputLabel from "@mui/material/InputLabel";
-import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Controller, useForm } from "react-hook-form";
 
-import SearchableSelect from "@/components/shared/SearchableSelect";
+import DepartmentSelect from "@/components/shared/select/DepartmentSelect";
+import DoctorSelect from "@/components/shared/select/DoctorSelect";
 import { formatScheduleDoctorName } from "@/doctor/format";
 import { useRouter } from "@/i18n/navigation";
 import { K, NS } from "@/i18n/keys.generated";
@@ -34,7 +30,6 @@ import {
   type ScheduleActionError,
 } from "@/lib/api/schedule.actions";
 import { SCHEDULE_ERROR_CODE } from "@/lib/api/schedule.const";
-import { useIncrementalDoctorList } from "@/lib/api/use-incremental-doctor-list";
 import {
   scheduleFormSchema,
   type ScheduleFormValues,
@@ -51,6 +46,8 @@ import {
 import { useNotify } from "@/lib/notifications/use-notify";
 import { SNACKBAR_SUCCESS_KEY } from "@/lib/notifications/messages.const";
 import { isScheduleReadOnly } from "@/schedule/time";
+import type { PaginatedListInitial } from "@/lib/hooks/use-paginated-list";
+import type { DepartmentRow } from "@/types/department.types";
 import type { DoctorListRow } from "@/types/doctor.types";
 import type { ScheduleResponse } from "@/types/schedule.types";
 
@@ -76,23 +73,11 @@ interface ScheduleFormDialogProps {
   open: boolean;
   onClose: () => void;
   /**
-   * First page of doctors fetched on the server when the page rendered.
-   * Subsequent pages stream in via `useIncrementalDoctorList` as the user
-   * scrolls the dropdown.
+   * Page-1 SSR seed for the doctor picker. Streamed pages thereafter via
+   * `<DoctorSelect>` (which wraps `usePaginatedList`) as the user scrolls
+   * the dropdown.
    */
-  doctors: readonly DoctorListRow[];
-  /**
-   * Total number of doctor rows the BE would return for the current
-   * `departmentId` filter. Drives the "Showing X of Y" hint inside the
-   * dropdown and the `hasMore` flip.
-   */
-  doctorsTotal: number;
-  /**
-   * The page the SSR `doctors` payload corresponds to (`1` for the
-   * initial render). Threaded so the hook knows the next page to request
-   * when the user scrolls.
-   */
-  initialDoctorPage: number;
+  doctorSeed: PaginatedListInitial<DoctorListRow>;
   /**
    * Optional department filter forwarded to incremental fetches so the
    * paged results stay scoped to the same subset the SSR call used.
@@ -128,6 +113,43 @@ interface ScheduleFormDialogProps {
    * delete affordance the BE would reject).
    */
   canDelete: boolean;
+  /**
+   * Full department catalog — used to look up the prefilled department
+   * row's name when the dialog opens in create mode without a picked
+   * doctor (NURSE callers, who don't carry their own `lockedDoctorId`).
+   * The picker still auto-fills from `selectedDoctor.department` once a
+   * doctor is chosen.
+   */
+  departments: readonly DepartmentRow[];
+  /**
+   * Caller's home department id — pre-fills the (always-disabled)
+   * department field in CREATE mode so a NURSE who opens the modal
+   * already sees their dept selected. The form value is also pre-set
+   * to this id so submit carries the right department even before the
+   * caller picks a doctor.
+   *
+   * When omitted, the dialog falls back to the existing behavior:
+   * department mirrors the picked doctor's department.
+   */
+  prefilledDepartmentId?: string;
+  /**
+   * When `true`, the department field is pinned to `prefilledDepartmentId`
+   * for the entire create flow and the doctor-drives-dept auto-fill is
+   * suppressed — the picked doctor's department CANNOT overwrite the
+   * locked value. The doctor picker is additionally scoped to
+   * `doctorDepartmentId` (the caller's dept) so the user can't pick a
+   * foreign-dept doctor in the first place; this prop is the belt-and-
+   * braces defence that ensures a stale or wider picker list cannot
+   * drift the form's department into a value the caller's write scope
+   * doesn't authorise.
+   *
+   * Set to `true` by the page for callers whose schedule WRITE scope is
+   * narrower than `.all` (NURSE `.own-department`, DOCTOR `.own`). For
+   * `.all` callers (no seeded role today; future ADMIN if self-granted)
+   * the page leaves this `false` so the legacy doctor-drives-dept model
+   * stays in effect.
+   */
+  lockDepartmentToCaller?: boolean;
   /** Existing schedule to edit; `null` opens the dialog in create mode. */
   editing: ScheduleResponse | null;
   /**
@@ -162,14 +184,15 @@ const DEFAULT_BREAK_END_TIME = "13:00";
 export default function ScheduleFormDialog({
   open,
   onClose,
-  doctors,
-  doctorsTotal,
-  initialDoctorPage,
+  doctorSeed,
   doctorDepartmentId,
   lockedDoctorId,
   createsLockedToCaller,
   callerDoctorId,
   canDelete,
+  departments,
+  prefilledDepartmentId,
+  lockDepartmentToCaller,
   editing,
   prefill,
 }: ScheduleFormDialogProps) {
@@ -183,21 +206,14 @@ export default function ScheduleFormDialog({
   const [isPending, startTransition] = useTransition();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  // Incremental doctor list — starts from the SSR page-1 payload and
-  // grows as the user scrolls the dropdown. The shared hook owns the
-  // dedup-on-append + reset-on-prop-change semantics so the form dialog
-  // and the page-level `ScheduleDoctorFilter` stay aligned.
-  const {
-    loaded: loadedDoctors,
-    isLoadingMore: isLoadingMoreDoctors,
-    hasMore: hasMoreDoctors,
-    loadMore: handleLoadMoreDoctors,
-  } = useIncrementalDoctorList({
-    initialDoctors: doctors,
-    total: doctorsTotal,
-    initialPage: initialDoctorPage,
-    departmentId: doctorDepartmentId,
-  });
+  // Track the selected doctor row directly (rather than looking it up
+  // from a streamed list each render). The picker hands the row back on
+  // `onChange`, so this is the cheapest source of truth for the
+  // department auto-fill below — no need to re-resolve from the picker's
+  // internal `loaded` array.
+  const [pickedDoctor, setPickedDoctor] = useState<DoctorListRow | null>(
+    () => doctorSeed.data.find((d) => d.id === (editing?.doctorId ?? "")) ?? null,
+  );
 
   const isEdit = Boolean(editing);
 
@@ -235,6 +251,7 @@ export default function ScheduleFormDialog({
   });
 
   const watchedDoctorId = watch("doctorId");
+  const watchedDepartmentId = watch("departmentId");
   const watchedHasBreak = watch("hasBreak");
   const watchedDate = watch("date");
 
@@ -286,14 +303,25 @@ export default function ScheduleFormDialog({
           : DEFAULT_BREAK_END_TIME,
         acceptsBooking: editing.acceptsBooking,
       });
+      // Clear `pickedDoctor` — the picker is disabled in edit mode, so
+      // the `selectedDoctor` fallback (synth from `editing.doctor`)
+      // takes over and powers both the disabled picker label and the
+      // department field below.
+      setPickedDoctor(null);
 
       return;
     }
 
     // Create mode — start from the prefill (the cell the user clicked).
+    // Department resolution order: cell prefill (explicit) → caller's
+    // home department (NURSE / DOCTOR pre-fill) → empty. Doctor pre-
+    // fill (`lockedDoctorId`, DOCTOR caller pinned to their own row)
+    // narrows further; the department effect below re-syncs once the
+    // doctor is resolved.
     reset({
       doctorId: lockedDoctorId ?? "",
-      departmentId: prefill?.departmentId ?? "",
+      departmentId:
+        prefill?.departmentId ?? prefilledDepartmentId ?? "",
       date: prefill?.date ?? todayLocalISODate(),
       startTime: prefill?.startTime ?? DEFAULT_START_TIME,
       endTime: prefill?.endTime ?? DEFAULT_END_TIME,
@@ -302,29 +330,52 @@ export default function ScheduleFormDialog({
       breakEndTime: DEFAULT_BREAK_END_TIME,
       acceptsBooking: true,
     });
-  }, [open, editing, lockedDoctorId, prefill, reset]);
+    // Resolve the picker selection from `lockedDoctorId` (DOCTOR caller
+    // locked to their own row) against the SSR seed. When the seed
+    // doesn't contain the locked id (rare — caller's own row almost
+    // always sits on page 1), fall back to `null`; the picker is
+    // disabled in this case anyway, so the form's `doctorId` field
+    // still carries the right value for submit.
+    if (lockedDoctorId) {
+      setPickedDoctor(
+        doctorSeed.data.find((d) => d.id === lockedDoctorId) ?? null,
+      );
+    } else {
+      setPickedDoctor(null);
+    }
+  }, [
+    open,
+    editing,
+    lockedDoctorId,
+    prefill,
+    prefilledDepartmentId,
+    reset,
+    doctorSeed,
+  ]);
 
   // The selected doctor's department powers the department field. After
   // the RBAC refactor a doctor belongs to exactly one department, so the
   // picker collapses to a single, fixed entry — when the doctor changes,
-  // the department auto-pins to that doctor's department. Looks up across
-  // `loadedDoctors` (the incrementally-grown list) so a selected doctor
-  // stays resolved even after more pages load.
+  // the department auto-pins to that doctor's department.
+  //
+  // Source of truth is `pickedDoctor` (the row the picker handed back on
+  // `onChange`), reconciled against `watchedDoctorId` so a stale picker
+  // selection can't desync from the form's `doctorId` field after a
+  // `reset()` from `useForm`.
   //
   // Fallback path: when EDITING a schedule whose doctor isn't in the
-  // loaded list (the SSR fetch is paginated, so doctors past page 1
-  // aren't streamed in until the picker scrolls), synthesize a thin
-  // `DoctorListRow` from the schedule's embedded `doctor` + `department`
-  // refs. The picker is `disabled={isEdit}` so the synthetic row never
-  // has to power search / dropdown rendering — it only needs to supply
-  // the label + department for the disabled fields above. Without this
-  // the form would render a blank doctor name and blank department for
-  // any schedule whose doctor sits beyond `DOCTOR_INFINITE_SCROLL_PAGE_SIZE`.
+  // streamed picker list (the SSR fetch is paginated, so doctors past
+  // page 1 aren't streamed in until the picker scrolls), synthesize a
+  // thin `DoctorListRow` from the schedule's embedded `doctor` +
+  // `department` refs. The picker is `disabled={isEdit}` so the
+  // synthetic row never has to power search / dropdown rendering — it
+  // only needs to supply the label + department for the disabled fields
+  // above. Without this the form would render a blank doctor name and
+  // blank department for any schedule whose doctor sits beyond
+  // `DOCTOR_INFINITE_SCROLL_PAGE_SIZE`.
   const selectedDoctor = useMemo<DoctorListRow | null>(() => {
-    const found = loadedDoctors.find((d) => d.id === watchedDoctorId);
-
-    if (found) {
-      return found;
+    if (pickedDoctor && pickedDoctor.id === watchedDoctorId) {
+      return pickedDoctor;
     }
 
     if (editing && editing.doctorId === watchedDoctorId) {
@@ -347,10 +398,27 @@ export default function ScheduleFormDialog({
     }
 
     return null;
-  }, [loadedDoctors, watchedDoctorId, editing, locale]);
+  }, [pickedDoctor, watchedDoctorId, editing, locale]);
 
   useEffect(() => {
     if (!selectedDoctor) {
+      return;
+    }
+
+    // When the caller's write scope is narrower than `.all`, the dept
+    // is pinned to `prefilledDepartmentId` for the whole create flow
+    // — DO NOT let the picked doctor's `departmentId` override it.
+    // The picker is already scoped to `doctorDepartmentId` (caller's
+    // dept) so in practice the doctor's dept matches the locked value,
+    // but the guard protects against a stale picker list / future
+    // change that widens the option set.
+    //
+    // The edit path still runs this effect (the dialog is keyed on
+    // `editing` for `isEdit`), but edit-mode also sets `pickedDoctor`
+    // to null and `selectedDoctor` resolves from `editing.doctor`,
+    // whose `departmentId` already matches `editing.departmentId`.
+    // The sync is harmless there.
+    if (lockDepartmentToCaller && !editing) {
       return;
     }
 
@@ -358,7 +426,60 @@ export default function ScheduleFormDialog({
       shouldValidate: false,
       shouldDirty: false,
     });
-  }, [selectedDoctor, setValue]);
+  }, [selectedDoctor, setValue, lockDepartmentToCaller, editing]);
+
+  // Display-side wiring for the (always-disabled) department picker.
+  // The form's `departmentId` is the authoritative value (it's what
+  // submit sends to the BE); the picker just needs a label to render.
+  //
+  //   - When a doctor is picked, the form value === doctor's dept; the
+  //     `selectedDoctor.department` carries the name inline.
+  //   - When no doctor is picked but a prefill landed (NURSE caller
+  //     entering create mode), the form value === `prefilledDepartmentId`;
+  //     look up the matching row in the caller-supplied `departments`
+  //     catalog so the picker shows the right name.
+  //   - When the form value happens to be an id that isn't in the
+  //     catalog (defensive — shouldn't happen because the page passes
+  //     the full list), synthesize a thin row with an empty name so the
+  //     picker still has something to render and no crash.
+  const departmentDisplayValue = watchedDepartmentId ?? "";
+  const departmentDisplayOptions = useMemo<readonly DepartmentRow[]>(() => {
+    if (selectedDoctor) {
+      // The schedule form's department field is always disabled — the
+      // `allowedAppointmentTypes` is irrelevant here (the type Select is
+      // only on the booking wizard). Synthesize an empty array so the
+      // shape conforms to `DepartmentRow` without bloating the picker.
+      return [
+        {
+          id: selectedDoctor.departmentId,
+          name: selectedDoctor.department.name,
+          description: null,
+          allowedAppointmentTypes: [],
+        },
+      ];
+    }
+
+    if (!departmentDisplayValue) {
+      return [];
+    }
+
+    const fromCatalog = departments.find(
+      (d) => d.id === departmentDisplayValue,
+    );
+
+    if (fromCatalog) {
+      return [fromCatalog];
+    }
+
+    return [
+      {
+        id: departmentDisplayValue,
+        name: "",
+        description: null,
+        allowedAppointmentTypes: [],
+      },
+    ];
+  }, [selectedDoctor, departmentDisplayValue, departments]);
 
   /**
    * Server-side error handler. Field-level errors that point at a specific
@@ -619,54 +740,16 @@ export default function ScheduleFormDialog({
                 control={control}
                 name="doctorId"
                 render={({ field, fieldState }) => (
-                  <SearchableSelect<DoctorListRow>
+                  <DoctorSelect
                     value={selectedDoctor}
-                    onChange={(next) => field.onChange(next?.id ?? "")}
-                    options={loadedDoctors}
-                    loadMore={handleLoadMoreDoctors}
-                    hasMore={hasMoreDoctors}
-                    isLoading={isLoadingMoreDoctors}
-                    hasMoreLabel={tForm(K.Schedules.Form.doctorShowingCount, {
-                      loaded: loadedDoctors.length,
-                      total: doctorsTotal,
-                    })}
-                    loadingMoreLabel={tForm(K.Schedules.Form.doctorLoadingMore)}
-                    searchScopedHint={tForm(
-                      K.Schedules.Form.doctorSearchScopedHint,
-                    )}
-                    getOptionLabel={(option) =>
-                      `${option.fullName} (${option.doctorCode})`
-                    }
-                    getOptionKey={(option) => option.id}
-                    renderOption={(option) => (
-                      <Box
-                        sx={{
-                          display: "flex",
-                          flexDirection: "column",
-                          py: 0.25,
-                        }}
-                      >
-                        <Typography variant="body2" fontWeight={600} noWrap>
-                          {option.fullName}{" "}
-                          <Box
-                            component="span"
-                            sx={{ color: "text.secondary", fontWeight: 400 }}
-                          >
-                            ({option.doctorCode})
-                          </Box>
-                        </Typography>
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ whiteSpace: "normal" }}
-                        >
-                          {option.department.name}
-                        </Typography>
-                      </Box>
-                    )}
+                    onChange={(next) => {
+                      setPickedDoctor(next);
+                      field.onChange(next?.id ?? "");
+                    }}
+                    departmentId={doctorDepartmentId}
+                    initial={doctorSeed}
                     label={tForm(K.Schedules.Form.doctor)}
                     placeholder={tForm(K.Schedules.Form.doctorPlaceholder)}
-                    noOptionsText={tForm(K.Schedules.Form.doctorNoMatches)}
                     required
                     disabled={doctorPickerDisabled}
                     error={Boolean(fieldState.error)}
@@ -680,40 +763,36 @@ export default function ScheduleFormDialog({
                 )}
               />
 
-              {/* Department field — auto-derived from the selected doctor
-                  and never user-editable, so we don't register a picker.
-                  The form value lives in react-hook-form's state via
-                  `setValue("departmentId", ...)` in the doctor-change
-                  effect; this control is purely visual. Schema errors on
-                  `departmentId` are exceptionally rare (the auto-fill keeps
-                  the value valid) but we still surface them in the helper
-                  slot for defensiveness. */}
-              <FormControl
-                fullWidth
-                error={
-                  Boolean(errors.departmentId) ||
-                  Boolean(departmentServerError)
-                }
-                disabled
-              >
-                <InputLabel id="schedule-form-department" shrink>
-                  {tForm(K.Schedules.Form.department)}
-                </InputLabel>
-                <Select
-                  labelId="schedule-form-department"
-                  value={selectedDoctor ? selectedDoctor.departmentId : ""}
+              {/* Department field — always `disabled`. Renders the
+                  form's current `departmentId` value, which is driven by
+                  one of three sources (in this priority order):
+                    1. The selected doctor's department (auto-synced via
+                       the effect above whenever `selectedDoctor` changes).
+                    2. `prefilledDepartmentId` (the caller's home
+                       department, set in the create-mode `reset()`
+                       call) — applies until a doctor is picked.
+                    3. The user-provided cell prefill (only set by the
+                       day-details create flow).
+                  The `departments` prop carries the single row matching
+                  whichever id is currently in the form so the picker
+                  has a label to render. Falls back to a single synthesized
+                  row when the id isn't in the catalog (defensive — shouldn't
+                  happen because the page always passes the full list). */}
+              <Box>
+                <DepartmentSelect
+                  value={departmentDisplayValue}
+                  onChange={() => {
+                    // disabled — onChange is unreachable, but the prop is
+                    // required by the wrapper signature
+                  }}
+                  departments={departmentDisplayOptions}
                   label={tForm(K.Schedules.Form.department)}
-                  displayEmpty
-                  renderValue={() =>
-                    selectedDoctor?.department.name ?? ""
+                  disabled
+                  error={
+                    Boolean(errors.departmentId) ||
+                    Boolean(departmentServerError)
                   }
-                >
-                  {selectedDoctor ? (
-                    <MenuItem value={selectedDoctor.departmentId}>
-                      {selectedDoctor.department.name}
-                    </MenuItem>
-                  ) : null}
-                </Select>
+                />
                 {errorMessage(errors.departmentId?.message) ? (
                   <Box sx={{ mt: 0.5, ml: 1.5 }}>
                     <Alert severity="error" sx={{ py: 0 }}>
@@ -728,7 +807,7 @@ export default function ScheduleFormDialog({
                     </Alert>
                   </Box>
                 ) : null}
-              </FormControl>
+              </Box>
 
               <TextField
                 {...register("date")}

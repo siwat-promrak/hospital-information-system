@@ -1,13 +1,11 @@
 "use client";
 
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
-import MenuItem from "@mui/material/MenuItem";
-import Select, { type SelectChangeEvent } from "@mui/material/Select";
+import Box from "@mui/material/Box";
 import { useTranslations } from "next-intl";
 import { useTransition } from "react";
 
 import { FE_PATH } from "@/auth/routes";
+import DepartmentSelect from "@/components/shared/select/DepartmentSelect";
 import { K, NS } from "@/i18n/keys.generated";
 import { useRouter } from "@/i18n/navigation";
 import { SCHEDULE_QUERY_PARAM } from "@/lib/api/schedule.const";
@@ -29,8 +27,8 @@ interface ScheduleDepartmentFilterProps {
 /**
  * Department picker for the unified `/schedules` page — only rendered in
  * mode `"all"` (MRO with `schedule.read.all`). Picking a department writes
- * `?departmentId=<uuid>`; picking "All departments" clears it. The page
- * server-component re-runs the BE list call with the new filter.
+ * `?departmentId=<uuid>`; clearing it via the × icon removes the param.
+ * The page server-component re-runs the BE list call with the new filter.
  *
  * Always routes to `FE_PATH.SCHEDULES` (the page is now unified). The
  * caller passes `preserveParams` so the calendar's date / view state
@@ -45,8 +43,7 @@ export default function ScheduleDepartmentFilter({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  function handleChange(event: SelectChangeEvent<string>) {
-    const nextDepartmentId = event.target.value;
+  function handleChange(nextDepartmentId: string | "") {
     const search = new URLSearchParams();
 
     for (const [key, value] of Object.entries(preserveParams)) {
@@ -65,29 +62,16 @@ export default function ScheduleDepartmentFilter({
   }
 
   return (
-    <FormControl
-      size="small"
-      sx={{ minWidth: { xs: "100%", sm: 240 } }}
-      disabled={isPending}
-    >
-      <InputLabel id="schedule-department-filter">
-        {tSchedules(K.Schedules.filterByDepartment)}
-      </InputLabel>
-      <Select
-        labelId="schedule-department-filter"
-        label={tSchedules(K.Schedules.filterByDepartment)}
+    <Box sx={{ minWidth: { xs: "100%", sm: 240 } }}>
+      <DepartmentSelect
         value={activeDepartmentId ?? ""}
         onChange={handleChange}
-      >
-        <MenuItem value="">
-          {tSchedules(K.Schedules.allDepartments)}
-        </MenuItem>
-        {departments.map((dept) => (
-          <MenuItem key={dept.id} value={dept.id}>
-            {dept.name}
-          </MenuItem>
-        ))}
-      </Select>
-    </FormControl>
+        departments={departments}
+        label={tSchedules(K.Schedules.filterByDepartment)}
+        size="small"
+        clearable
+        disabled={isPending}
+      />
+    </Box>
   );
 }

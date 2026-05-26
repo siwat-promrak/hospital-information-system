@@ -15,6 +15,9 @@ export const NAV_ICON = {
   DOCTORS: "doctors",
   SCHEDULES: "schedules",
   MEDICAL_RECORDS: "medical_records",
+  APPOINTMENTS: "appointments",
+  APPOINTMENTS_NEW: "appointments_new",
+  PATIENTS_NEW: "patients_new",
 } as const;
 
 /**
@@ -74,5 +77,39 @@ export const NAV_ITEMS: readonly NavItem[] = [
     // includes the read-all permission. ADMIN never holds it, so the entry
     // stays out of the admin sidebar.
     permission: [PERMISSION_CODE.MEDICAL_RECORDS_READ_ALL],
+  },
+  {
+    id: "appointments",
+    href: FE_PATH.APPOINTMENTS,
+    iconName: NAV_ICON.APPOINTMENTS,
+    i18nKey: K.Nav.items.appointments,
+    // DOCTOR / NURSE / MRO all hold an `appointment.read.*` scope —
+    // PHARMACY does not in the seeded baseline so the entry stays out
+    // of their sidebar.
+    permission: [
+      PERMISSION_CODE.APPOINTMENT_READ_OWN,
+      PERMISSION_CODE.APPOINTMENT_READ_OWN_DEPARTMENT,
+      PERMISSION_CODE.APPOINTMENT_READ_ALL,
+    ],
+  },
+  {
+    id: "appointments-new",
+    href: FE_PATH.APPOINTMENTS_NEW,
+    iconName: NAV_ICON.APPOINTMENTS_NEW,
+    i18nKey: K.Nav.items.appointmentsNew,
+    // DOCTOR (`.own`) + NURSE (`.own-department`) can book. MRO and
+    // PHARMACY don't hold a create code in the seeded baseline.
+    permission: [
+      PERMISSION_CODE.APPOINTMENT_CREATE_OWN,
+      PERMISSION_CODE.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+    ],
+  },
+  {
+    id: "patients-new",
+    href: FE_PATH.PATIENTS_NEW,
+    iconName: NAV_ICON.PATIENTS_NEW,
+    i18nKey: K.Nav.items.patientsNew,
+    // NURSE + MRO hold `patient.create` in the seeded baseline.
+    permission: [PERMISSION_CODE.PATIENT_CREATE],
   },
 ];

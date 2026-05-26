@@ -74,11 +74,13 @@ describe('computeSchedulesSlots', () => {
   // strips a slot just because the test machine's clock drifted.
   const FAR_FUTURE_NOW = dt('2026-05-25T00:00:00.000Z');
   const SCHEDULE_DEPT_ID = 'dept-abc';
+  const SCHEDULE_ID = 'sched-abc';
 
   describe('grid step matches duration', () => {
     it('produces 09:00-09:20, 09:20-09:40, ... for CONSULTATION (20 min)', () => {
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-06-15T09:00:00Z'),
           endAt: dt('2026-06-15T10:00:00Z'),
@@ -95,16 +97,19 @@ describe('computeSchedulesSlots', () => {
           startAt: '2026-06-15T09:00:00.000Z',
           endAt: '2026-06-15T09:20:00.000Z',
           departmentId: SCHEDULE_DEPT_ID,
+          scheduleId: SCHEDULE_ID,
         },
         {
           startAt: '2026-06-15T09:20:00.000Z',
           endAt: '2026-06-15T09:40:00.000Z',
           departmentId: SCHEDULE_DEPT_ID,
+          scheduleId: SCHEDULE_ID,
         },
         {
           startAt: '2026-06-15T09:40:00.000Z',
           endAt: '2026-06-15T10:00:00.000Z',
           departmentId: SCHEDULE_DEPT_ID,
+          scheduleId: SCHEDULE_ID,
         },
       ]);
     });
@@ -112,6 +117,7 @@ describe('computeSchedulesSlots', () => {
     it('produces a single 60-min slot for PROCEDURE inside a 60-min window', () => {
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-06-15T09:00:00Z'),
           endAt: dt('2026-06-15T10:00:00Z'),
@@ -133,6 +139,7 @@ describe('computeSchedulesSlots', () => {
       // at 10:15, past the window, so it is dropped.
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-06-15T09:00:00Z'),
           endAt: dt('2026-06-15T10:00:00Z'),
@@ -159,6 +166,7 @@ describe('computeSchedulesSlots', () => {
       // 11:00–11:20 keep. 11:20–11:40 keep. 11:40–12:00 keep.
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-06-15T09:00:00Z'),
           endAt: dt('2026-06-15T12:00:00Z'),
@@ -187,6 +195,7 @@ describe('computeSchedulesSlots', () => {
       // (9:20 startAt 9:20 vs now 9:30 → past). Keep 09:40 onward.
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-06-15T09:00:00Z'),
           endAt: dt('2026-06-15T11:00:00Z'),
@@ -210,6 +219,7 @@ describe('computeSchedulesSlots', () => {
       // 09:00 startAt with now also 09:00 → strict > check drops the slot.
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-06-15T09:00:00Z'),
           endAt: dt('2026-06-15T10:00:00Z'),
@@ -230,6 +240,7 @@ describe('computeSchedulesSlots', () => {
     it('returns [] when every slot is in the past', () => {
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-05-01T09:00:00Z'),
           endAt: dt('2026-05-01T12:00:00Z'),
@@ -249,6 +260,7 @@ describe('computeSchedulesSlots', () => {
     it('excludes a slot overlapping a BOOKED appointment', () => {
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-06-15T09:00:00Z'),
           endAt: dt('2026-06-15T10:00:00Z'),
@@ -275,6 +287,7 @@ describe('computeSchedulesSlots', () => {
       // Appointment 09:20–09:40. Slot 09:40–10:00 does NOT overlap (touch only).
       const slots = computeSchedulesSlots({
         schedule: {
+          id: SCHEDULE_ID,
           departmentId: SCHEDULE_DEPT_ID,
           startAt: dt('2026-06-15T09:40:00Z'),
           endAt: dt('2026-06-15T10:00:00Z'),
@@ -299,6 +312,7 @@ describe('computeSchedulesSlots', () => {
   it('returns empty array for an empty (zero-length) window', () => {
     const slots = computeSchedulesSlots({
       schedule: {
+        id: SCHEDULE_ID,
         departmentId: SCHEDULE_DEPT_ID,
         startAt: dt('2026-06-15T09:00:00Z'),
         endAt: dt('2026-06-15T09:00:00Z'),
@@ -316,6 +330,7 @@ describe('computeSchedulesSlots', () => {
   it('echoes departmentId on every produced slot', () => {
     const slots = computeSchedulesSlots({
       schedule: {
+        id: SCHEDULE_ID,
         departmentId: 'specific-dept-id',
         startAt: dt('2026-06-15T09:00:00Z'),
         endAt: dt('2026-06-15T10:00:00Z'),
@@ -329,6 +344,26 @@ describe('computeSchedulesSlots', () => {
 
     for (const slot of slots) {
       expect(slot.departmentId).toBe('specific-dept-id');
+    }
+  });
+
+  it('echoes scheduleId on every produced slot', () => {
+    const slots = computeSchedulesSlots({
+      schedule: {
+        id: 'specific-schedule-id',
+        departmentId: SCHEDULE_DEPT_ID,
+        startAt: dt('2026-06-15T09:00:00Z'),
+        endAt: dt('2026-06-15T10:00:00Z'),
+        breakStartAt: null,
+        breakEndAt: null,
+      },
+      durationMinutes: 20,
+      blockingAppointments: [],
+      now: FAR_FUTURE_NOW,
+    });
+
+    for (const slot of slots) {
+      expect(slot.scheduleId).toBe('specific-schedule-id');
     }
   });
 });
@@ -493,16 +528,19 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
         startAt: '2099-06-15T09:00:00.000Z',
         endAt: '2099-06-15T09:20:00.000Z',
         departmentId: DEPARTMENT_ID,
+        scheduleId: 'sched-1',
       },
       {
         startAt: '2099-06-15T09:20:00.000Z',
         endAt: '2099-06-15T09:40:00.000Z',
         departmentId: DEPARTMENT_ID,
+        scheduleId: 'sched-1',
       },
       {
         startAt: '2099-06-15T09:40:00.000Z',
         endAt: '2099-06-15T10:00:00.000Z',
         departmentId: DEPARTMENT_ID,
+        scheduleId: 'sched-1',
       },
     ]);
 
@@ -553,6 +591,50 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
       '2099-06-15T09:00:00.000Z',
       '2099-06-15T14:00:00.000Z',
     ]);
+  });
+
+  it('queries blocking appointments across the schedule union (not just the requested UTC day)', async () => {
+    // A schedule spans 23:00 (day N) UTC → 01:00 (day N+1) UTC. The
+    // blocking-appointment filter MUST cover the schedule's full range,
+    // not just the requested date's UTC bounds — otherwise an appointment
+    // booked into the post-midnight portion would be silently dropped
+    // from the blocker set and the slot finder would re-emit a slot that
+    // is already booked. This test pins the Prisma `where` bounds to the
+    // union [min(schedule.startAt), max(schedule.endAt)).
+    const apptFindMany = jest.fn().mockResolvedValue([]);
+
+    const prisma = buildPrisma({
+      doctorSchedule: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'sched-boundary',
+            departmentId: DEPARTMENT_ID,
+            startAt: new Date('2099-06-15T23:00:00.000Z'),
+            endAt: new Date('2099-06-16T01:00:00.000Z'),
+            breakStartAt: null,
+            breakEndAt: null,
+          },
+        ]),
+      },
+      appointment: { findMany: apptFindMany },
+    });
+    const service = await buildService(prisma);
+
+    await service.findSlots(NURSE_CALLER, {
+      doctorId: DOCTOR_ID,
+      departmentId: DEPARTMENT_ID,
+      date: '2099-06-15',
+      type: AppointmentType.CONSULTATION,
+    });
+
+    expect(apptFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          startAt: { lt: new Date('2099-06-16T01:00:00.000Z') },
+          endAt: { gt: new Date('2099-06-15T23:00:00.000Z') },
+        }),
+      }),
+    );
   });
 
   it('returns [] (200) for a fully-past date', async () => {

@@ -30,6 +30,7 @@ import {
   buildWeekDays,
   formatWeekStartParam,
 } from "@/schedule/week";
+import type { PaginatedListInitial } from "@/lib/hooks/use-paginated-list";
 import type { DepartmentRow } from "@/types/department.types";
 import type { DoctorListRow } from "@/types/doctor.types";
 import type { ScheduleResponse } from "@/types/schedule.types";
@@ -37,24 +38,11 @@ import type { ScheduleResponse } from "@/types/schedule.types";
 interface ScheduleCalendarProps {
   schedules: readonly ScheduleResponse[];
   /**
-   * First page of doctors (SSR-fetched). Subsequent pages load
-   * incrementally from inside the form dialog as the user scrolls the
-   * doctor picker — see `ScheduleFormDialog` for the cursor logic.
+   * Page-1 SSR seed for the doctor picker inside `ScheduleFormDialog`.
+   * Subsequent pages stream in via `<DoctorSelect>` (which wraps
+   * `usePaginatedList`) as the user scrolls the dropdown.
    */
-  doctors: readonly DoctorListRow[];
-  /**
-   * Total doctor count behind the current filter — drives the
-   * "Showing X of Y" footer hint and the `hasMore` flag in the form
-   * dialog's incremental loader.
-   */
-  doctorsTotal: number;
-  /**
-   * Page number the SSR `doctors` payload corresponds to. Passed through
-   * to the dialog so the next incremental fetch knows which page to ask
-   * for. Always `1` today; the prop exists so the contract stays
-   * future-proof when other callers reach this component.
-   */
-  initialDoctorPage: number;
+  doctorSeed: PaginatedListInitial<DoctorListRow>;
   /**
    * Department filter forwarded to the dialog's incremental doctor
    * fetcher so the paged results stay scoped to the same subset SSR
@@ -133,6 +121,25 @@ interface ScheduleCalendarProps {
    * user steps through months / flips view mode.
    */
   extraPreserveParams?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Caller's home department id. Forwarded to `ScheduleFormDialog` so
+   * the create modal opens with the department field pre-set to the
+   * caller's dept — important for NURSE callers (who hold
+   * `schedule.create.own-department` but not `.own`) who otherwise
+   * land on an empty department + no doctor picked yet. DOCTOR callers
+   * also get the prefill, harmlessly: their doctor pre-fill resyncs
+   * the department to the doctor's row on selection.
+   */
+  prefilledDepartmentId?: string;
+  /**
+   * When `true`, the create dialog pins the department field to
+   * `prefilledDepartmentId` AND suppresses the doctor-drives-dept
+   * auto-fill — the picked doctor's department CANNOT overwrite the
+   * locked value. Driven from the page when the caller's write scope
+   * is narrower than `.all` (NURSE `.own-department`, DOCTOR `.own`
+   * fallback under `createsLockedToCaller`).
+   */
+  lockDepartmentToCaller?: boolean;
 }
 
 /**
@@ -162,9 +169,7 @@ function pad2(value: number): string {
  */
 export default function ScheduleCalendar({
   schedules,
-  doctors,
-  doctorsTotal,
-  initialDoctorPage,
+  doctorSeed,
   doctorDepartmentId,
   departments,
   view,
@@ -180,6 +185,8 @@ export default function ScheduleCalendar({
   canDelete,
   colorByDepartment,
   extraPreserveParams,
+  prefilledDepartmentId,
+  lockDepartmentToCaller,
 }: ScheduleCalendarProps) {
   const tSchedules = useTranslations(NS.Schedules);
 
@@ -453,14 +460,15 @@ export default function ScheduleCalendar({
       <ScheduleFormDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        doctors={doctors}
-        doctorsTotal={doctorsTotal}
-        initialDoctorPage={initialDoctorPage}
+        doctorSeed={doctorSeed}
         doctorDepartmentId={doctorDepartmentId}
         lockedDoctorId={lockedDoctorId}
         createsLockedToCaller={createsLockedToCaller}
         callerDoctorId={callerDoctorId}
         canDelete={canDelete}
+        departments={departments}
+        prefilledDepartmentId={prefilledDepartmentId}
+        lockDepartmentToCaller={lockDepartmentToCaller}
         editing={editing}
         prefill={prefill}
       />

@@ -14,10 +14,8 @@ import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { getMe } from "@/lib/api/auth.api";
 import { listDepartments } from "@/lib/api/department.api";
-import { listDoctors } from "@/lib/api/doctor.api";
-import { DOCTOR_INFINITE_SCROLL_PAGE_SIZE } from "@/lib/api/doctor.const";
+import { fetchDoctorPickerSeed } from "@/lib/api/doctor.actions";
 import {
-  DEFAULT_PAGE,
   MAX_PAGE_SIZE,
   PAGE_SIZE_ALL,
 } from "@/lib/api/pagination.const";
@@ -33,7 +31,6 @@ import { resolveScheduleWriteCapabilities } from "@/schedule/permissions";
 import {
   resolveScheduleViewMode,
   SCHEDULE_VIEW_MODE,
-  type ScheduleViewMode,
 } from "@/schedule/view-mode";
 import { requireSession } from "@/lib/server/session";
 import {
@@ -81,20 +78,18 @@ function resolveScope(raw: string | undefined): ScheduleScope {
 }
 
 /**
- * Per-mode page heading. Inlined rather than a helper because the typed
- * `as const` keys must reach `tSchedules(...)` without going through a
- * function return that widens them to `string`.
+ * Per-(viewMode, scope) page heading lookup. Inlined as a const lookup
+ * rather than a helper because the typed `as const` keys must reach
+ * `tSchedules(...)` without going through a function return that widens
+ * them to `string`.
  *
- * `OWN_PLUS_DEPT` reuses the `ALL` titles because the toggle (and the
- * active doctor filter) already tell the user what they're looking at —
- * a third heading would be noise.
+ * `OWN_PLUS_DEPT` is the only mode whose heading swaps with the active
+ * `scope` toggle (`MINE` → "My schedule", `DEPT` → "Department
+ * schedules"); the other three modes (`ALL`, `DEPT`, `OWN`) ignore the
+ * scope arg and use a fixed pair.
  */
 const HEADING_FOR_MODE = {
   [SCHEDULE_VIEW_MODE.ALL]: {
-    title: K.Schedules.allTitle,
-    subtitle: K.Schedules.allSubtitle,
-  },
-  [SCHEDULE_VIEW_MODE.OWN_PLUS_DEPT]: {
     title: K.Schedules.allTitle,
     subtitle: K.Schedules.allSubtitle,
   },
@@ -106,10 +101,24 @@ const HEADING_FOR_MODE = {
     title: K.Schedules.ownTitle,
     subtitle: K.Schedules.ownSubtitle,
   },
-} as const satisfies Record<
-  ScheduleViewMode,
-  { title: string; subtitle: string }
->;
+} as const;
+
+/**
+ * Heading lookup for the dual `OWN_PLUS_DEPT` mode — scope toggle
+ * drives the copy. Stored as a flat map (rather than a branch inside
+ * the page) so the literal `K.*` keys stay narrowed and `tSchedules`
+ * accepts them without widening to `string`.
+ */
+const HEADING_FOR_OWN_PLUS_DEPT_SCOPE = {
+  [SCHEDULE_SCOPE.MINE]: {
+    title: K.Schedules.ownTitle,
+    subtitle: K.Schedules.ownSubtitle,
+  },
+  [SCHEDULE_SCOPE.DEPT]: {
+    title: K.Schedules.deptTitle,
+    subtitle: K.Schedules.deptSubtitle,
+  },
+} as const;
 
 /**
  * Unified, permission-aware F06 schedule page. Replaces the previous
@@ -259,13 +268,11 @@ export default async function SchedulesPage({
     return { me, schedules };
   }
 
-  const [{ me, schedules: schedulesResult }, departmentsResult, doctorsResult] =
+  const [{ me, schedules: schedulesResult }, departmentsResult, doctorSeed] =
     await Promise.all([
       fetchMeAndSchedules(),
       listDepartments({ pageSize: MAX_PAGE_SIZE }),
-      listDoctors({
-        page: DEFAULT_PAGE,
-        pageSize: DOCTOR_INFINITE_SCROLL_PAGE_SIZE,
+      fetchDoctorPickerSeed({
         departmentId: doctorFilterScopeDepartmentId,
       }),
     ]);
@@ -285,6 +292,25 @@ export default async function SchedulesPage({
     scope,
     session.user.permissionCodes,
   );
+
+  // Pin the dialog's department field to the caller's home whenever the
+  // active surface authorises writes narrower than `.all`. Three cases
+  // collapse here:
+  //   - DOCTOR in `OWN_PLUS_DEPT` + "dept" with `createsLockedToCaller`
+  //     (fallback to `.own`): department MUST be the caller's home.
+  //   - NURSE (`DEPT` view): write scope is `.own-department`, so the
+  //     dept is necessarily the caller's home — pin it explicitly so
+  //     the doctor-drives-dept auto-fill cannot silently overwrite it
+  //     if the picker ever broadens.
+  //   - DOCTOR in `OWN_PLUS_DEPT` + "mine": doctor is already pinned to
+  //     the caller via `lockedDoctorId`, so the dept is implicitly
+  //     locked, but the explicit `lockDepartmentToCaller` is the
+  //     belt-and-braces guard against a future picker change.
+  // `ALL` (MRO) and any future role with `.all` writes keeps the legacy
+  // doctor-drives-dept model — the picker can broaden across departments
+  // and the dept follows whichever doctor the user picks.
+  const lockDepartmentToCaller =
+    viewMode !== SCHEDULE_VIEW_MODE.ALL && writeCapabilities.canCreate;
 
   // For modes that effectively pin the calendar to the caller's own
   // doctor row, surface that as `lockedDoctorId` so the dialog disables
@@ -330,7 +356,13 @@ export default async function SchedulesPage({
 
   const colorByDepartment = viewMode === SCHEDULE_VIEW_MODE.ALL;
 
-  const headingCopy = HEADING_FOR_MODE[viewMode];
+  // `OWN_PLUS_DEPT` swaps copy with the scope toggle; every other mode
+  // has a static heading drawn from the per-mode map. Resolving inline
+  // keeps the literal `K.*` keys narrow enough for `tSchedules(...)` to
+  // accept them without a typecast.
+  const headingCopy = isOwnPlusDept
+    ? HEADING_FOR_OWN_PLUS_DEPT_SCOPE[scope]
+    : HEADING_FOR_MODE[viewMode];
 
   // URL-preservation maps — every interactive control that navigates
   // (calendar header, view toggle, filters, scope toggle) drops its own
@@ -399,9 +431,7 @@ export default async function SchedulesPage({
           ) : null}
           {showDoctorFilter ? (
             <ScheduleDoctorFilter
-              doctors={doctorsResult.data}
-              doctorsTotal={doctorsResult.total}
-              initialDoctorPage={doctorsResult.page}
+              doctorSeed={doctorSeed}
               scopeDepartmentId={doctorFilterScopeDepartmentId}
               activeDoctorId={urlDoctorId ?? null}
               preserveParams={doctorFilterPreserve}
@@ -414,9 +444,7 @@ export default async function SchedulesPage({
       ) : null}
       <ScheduleCalendar
         schedules={schedulesResult.data}
-        doctors={doctorsResult.data}
-        doctorsTotal={doctorsResult.total}
-        initialDoctorPage={doctorsResult.page}
+        doctorSeed={doctorSeed}
         doctorDepartmentId={doctorFilterScopeDepartmentId}
         departments={departmentsResult.data}
         view={view}
@@ -432,6 +460,8 @@ export default async function SchedulesPage({
         canDelete={effectiveCanDelete}
         colorByDepartment={colorByDepartment}
         extraPreserveParams={calendarExtraPreserve}
+        prefilledDepartmentId={session.user.departmentId ?? undefined}
+        lockDepartmentToCaller={lockDepartmentToCaller}
       />
     </Stack>
   );

@@ -312,6 +312,88 @@ The `(app)` route group at `apps/web/src/app/[locale]/(app)/` wraps every authen
 
 A page that needs interactive UI (clickable cards, chip links, filter selects) MUST extract it to a `"use client"` component under `components/<entity>/` rather than using `component={Link}` on a server-rendered MUI component — React 19 RSC rejects passing a React component as a prop across the server → client boundary.
 
+### 5a.1 Paginated entity pickers
+
+Two categories of entities, two patterns:
+
+| Population | Examples | Fetch | UI |
+| --- | --- | --- | --- |
+| Small (≤ a few hundred, fits in one round-trip) | Departments, appointment types | `listX({ pageSize: MAX_PAGE_SIZE })` once | plain MUI `<Select>` |
+| Large (paginated always) | Doctors, patients, future nurses, future pharmacies | per-entity `loadXPageAction({ page, pageSize, ... filters })` paginated | entity wrapper (`<DoctorSelect>`, `<PatientPicker>`, future `<NurseSelect>` / `<PharmacySelect>`) that composes `<EntityPicker>` |
+
+The page server-renders page 1 of the large entity AND its total — typically via a per-entity `fetchXPickerSeed({ ...filters })` helper that returns the `PaginatedListInitial<X>` triplet — and passes that single seed object straight to the entity wrapper as a single prop (`doctorSeed`, future `nurseSeed`). The wrapper threads it through `<EntityPicker>` as `initial`; subsequent pages stream via `loadPage` (a closure the wrapper builds itself, capturing the current filter prop). Bumping the wrapper's filter prop (e.g. `departmentId`) flips the underlying `resetKey` and refetches page 1.
+
+**Always reach for the entity wrapper, never `<EntityPicker>` directly.** The wrapper owns every entity-specific detail — the `loadPage` closure, the `resetKey` shape, the option-label / row renderer, the `i18n` bag, the `autoFetchFirstPage` opt-in when no SSR seed is provided. Pages and feature components consume the wrapper's small typed API (`value` / `onChange` / `departmentId` / optional `initial`). `<EntityPicker>` stays exported as the building block the wrappers compose with; calling it directly from a page or feature module is a code smell — it almost always means an entity wrapper is missing.
+
+```tsx
+// bad — page-level call site re-assembling the entity plumbing inline
+<EntityPicker<DoctorListRow>
+  loadPage={(args) => loadDoctorsPageAction({ ...args, departmentId })}
+  resetKey={departmentId ?? ""}
+  initial={doctorInitial}
+  getOptionLabel={(d) => `${d.fullName} (${d.doctorCode})`}
+  getOptionKey={(d) => d.id}
+  i18n={{ loadingMore: t(...), showingCount: (l, t) => t(...) /* … */ }}
+  /* … */
+/>
+
+// good — entity wrapper owns the plumbing
+<DoctorSelect
+  value={doctor}
+  onChange={setDoctor}
+  departmentId={departmentId}
+  initial={doctorSeed}
+/>
+```
+
+Modal / below-the-fold call sites can omit the `initial` seed entirely; the wrapper passes `autoFetchFirstPage={true}` to `usePaginatedList` when no seed is provided, so page 1 fires on mount instead of leaving the dropdown blank.
+
+Do NOT build a new entity-specific hook (the old `useIncrementalDoctorList` was the wrong shape). The generic hook lives at `apps/web/src/lib/hooks/use-paginated-list.ts`; future entities (nurses, pharmacies) get an action under `lib/api/<entity>.actions.ts`, a thin `fetchXPickerSeed` helper next to it, and an entity wrapper under `components/shared/` that composes `<EntityPicker>` with the per-entity defaults — no new infrastructure.
+
+The same hook also powers non-dropdown paginated lists where the picker chrome isn't appropriate (e.g. the booking wizard's `<PatientPicker>` with its inline result list + "Show more" button) — drop the `<EntityPicker>` wrapper and consume `usePaginatedList` directly in that case. The entity wrapper still owns the data layer (its own action call + i18n), just with a different UX inside.
+
+### 5a.2 Select-shaped components live in `components/shared/select/`
+
+Every `<Select>`-shaped surface in the app goes through a component in
+`apps/web/src/components/shared/select/` — never inline a
+`FormControl + InputLabel + Select + MenuItem` stack at a call site, and
+never compose a select-shaped picker directly out of MUI primitives
+elsewhere. The folder has three layers:
+
+| Layer | Purpose | Components |
+| --- | --- | --- |
+| Primitive | The shared `FormControl + InputLabel + Select + × end-adornment + helperText` boilerplate. Generic over option value (`string \| number`). | `ClearableSelect` |
+| Entity wrapper (small-catalog) | Knows the entity catalog + option-label i18n; caller passes `value` + `onChange` + any contextual override (label, clearable, size, required). | `DepartmentSelect`, `AppointmentTypeSelect`, `AppointmentStatusSelect`, `OrderSelect`, `GenderSelect`, `BloodGroupSelect` |
+| Entity wrapper (large-catalog / paginated) | Wraps `EntityPicker` (which wraps `SearchableSelect` + `usePaginatedList`). | `DoctorSelect` (today); future `NurseSelect`, `PharmacySelect` |
+
+The split mirrors §5a.1: small catalogs (≤ a few hundred rows, fits in
+one fetch) go through the `ClearableSelect`-based wrappers; large
+catalogs (paginated) go through the `EntityPicker`-based wrappers. Both
+families live in the same folder so a single `grep` of
+`components/shared/select/` shows every select-shaped surface.
+
+UX contract:
+- A picker that has a "no value" state (filter dropdowns, optional form
+  fields) exposes the × clear icon via `clearable={true}`. The wrapper
+  forwards it to `<ClearableSelect>` which renders the × inside the
+  input's `endAdornment` whenever `value !== ""`. Consumers MUST NOT
+  reinvent the per-field × icon with their own `IconButton +
+  InputAdornment` — drift between filter cards is exactly the bug
+  `ClearableSelect` exists to prevent.
+- A picker that is always populated (sort direction, required form
+  fields where the BE rejects empty) leaves `clearable` off. The
+  wrapper's option list IS the field's affordance.
+- Placeholder text shows via MUI's `displayEmpty` + a disabled
+  placeholder `<MenuItem>` when the caller passes `placeholder`. No
+  "All X" placeholder MenuItem — the × clear icon is the only "no
+  filter" affordance, and the empty input state IS the empty signal.
+
+Inlining a `<Select>` at a page or feature module means a department
+dropdown will drift from the others (clear icon styling, helper text
+alignment, MenuItem map, i18n key lookup) the moment any single call
+site polishes its visuals. The wrappers exist so all surfaces stay in
+lockstep without a per-site cargo-cult of recent edits.
+
 ### 5b. Server-side API fetch — `internalFetch` vs `userFetch`
 
 The two helpers in `apps/web/src/lib/api/server-fetch.ts` are the ONLY way to call the Nest API from server components and the NextAuth `signIn` callback. Pick by the route's authorization model:
@@ -320,6 +402,17 @@ The two helpers in `apps/web/src/lib/api/server-fetch.ts` are the ONLY way to ca
 - `userFetch(path, init?)` — server-to-server on behalf of the signed-in user, forwards the incoming request's `cookie` + `authorization` headers via `next/headers`. Use for every cookie-authenticated endpoint.
 
 Both throw the typed `ApiError` (with `status`, `code`, `details`, `body`) from `lib/api/errors.ts` on any non-2xx, so callers can write flat promise chains and narrow with `isApiError(err)` / `hasCode(err, code)`. Do NOT call `fetch` directly from a feature module — the cookie-forwarding + envelope-parsing must stay in one place.
+
+### 5c. Global error boundary — `ApiError.digest` carries HTTP status
+
+`apps/web/src/app/[locale]/(app)/error.tsx` catches every uncaught error thrown by an authenticated route. The boundary renders one of three friendly cards (forbidden / not-found / generic) keyed off the HTTP status — not the `error.message` (Next.js scrubs that in prod) and not `instanceof ApiError` (the prototype is lost crossing the server→client boundary).
+
+The mechanism: `ApiError`'s constructor sets `this.digest = \`API_ERROR_${status}_${code}\``. The `digest` field is the only property Next.js preserves through the RSC error-serialization boundary in both dev AND prod. The boundary calls `parseApiErrorDigest(error.digest)` to recover `{ status, code }` and branches.
+
+What this means for page authors:
+- Do NOT wrap every BE call in try/catch. Let the typed `ApiError` propagate; the global boundary takes care of it.
+- Per-page try/catch is only justified when you want a NON-default rendering (e.g. the appointment detail page catches `APPOINTMENT_NOT_FOUND` to render a back-link card inside its layout). Use `isApiError(err) && (err.status === 404 || err.code === APPOINTMENT_ERROR_CODE.APPOINTMENT_NOT_FOUND)`.
+- New top-level error codes that should map to a specific card go through `ApiError.digest` automatically. The boundary's parser is generic — it never special-cases individual codes.
 
 ## Backend (apps/api)
 

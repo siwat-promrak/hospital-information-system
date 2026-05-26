@@ -24,13 +24,17 @@ export interface FindSlotsArgs {
 /**
  * Shape of one slot returned by `SlotsService#findSlots`. Identical to
  * `SlotResponseDto` (the wire-facing class with Swagger decorators); kept
- * here as a plain TS interface so internal callers (other services in F08)
+ * here as a plain TS interface so internal callers (other services in F09)
  * can consume the value without importing the DTO module just for typing.
+ *
+ * `scheduleId` is the owning `DoctorSchedule.id` — F09 booking takes it
+ * back as the provenance link for `Appointment.scheduleId`.
  */
 export interface SlotResult {
   startAt: string;
   endAt: string;
   departmentId: string;
+  scheduleId: string;
 }
 
 /**
@@ -47,8 +51,13 @@ export interface ResolvedDayBounds {
  * Subset of `DoctorSchedule` consumed by `computeSchedulesSlots`. Mirrors
  * the columns selected by `findSlots`; declared narrowly so the pure
  * computation function never depends on the full Prisma model.
+ *
+ * `id` is the owning `DoctorSchedule.id` — surfaced on every emitted
+ * `SlotResult.scheduleId` so the F09 booker can post it back into
+ * `POST /appointments` (populates the `Appointment.scheduleId` FK).
  */
 export interface ScheduleWindow {
+  id: string;
   departmentId: string;
   startAt: Date;
   endAt: Date;

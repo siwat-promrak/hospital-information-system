@@ -14,16 +14,21 @@ import { AppointmentTypeResponseDto } from './dto/appointment-type.response.dto'
  * is static (lives in `appointment-types.const.ts`) so the controller is a
  * one-liner.
  *
- * Gated on `appointment.create.own-department` because the only consumer
- * is the booker UI about to mint an appointment. NURSE holds it by
- * default; ADMIN / MEDICAL_RECORDS_OFFICER / PHARMACY do NOT — they must
- * self-grant via `permission.assign` (US-11.5) to probe this endpoint.
+ * Gated on the `appointment.create.*` family (any-of) because the only
+ * consumer is the booker UI about to mint an appointment. Both DOCTOR
+ * (`.own`, self-booking) and NURSE (`.own-department`, front-desk
+ * booking) need this catalog. ADMIN / MEDICAL_RECORDS_OFFICER / PHARMACY
+ * do NOT hold either by default — they must self-grant via `role.update`
+ * (US-11.5) to probe this endpoint.
  */
 @ApiTags('appointment-types')
 @Controller('appointment-types')
 export class AppointmentTypesController {
   @Get()
-  @RequirePermission(PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT)
+  @RequirePermission(
+    PERMISSION.APPOINTMENT_CREATE_OWN,
+    PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+  )
   @ApiListAppointmentTypes()
   list(): AppointmentTypeResponseDto[] {
     // Spread so the controller returns a fresh array (callers may mutate
