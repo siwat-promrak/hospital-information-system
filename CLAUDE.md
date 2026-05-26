@@ -403,6 +403,17 @@ The two helpers in `apps/web/src/lib/api/server-fetch.ts` are the ONLY way to ca
 
 Both throw the typed `ApiError` (with `status`, `code`, `details`, `body`) from `lib/api/errors.ts` on any non-2xx, so callers can write flat promise chains and narrow with `isApiError(err)` / `hasCode(err, code)`. Do NOT call `fetch` directly from a feature module — the cookie-forwarding + envelope-parsing must stay in one place.
 
+### 5c. Global error boundary — `ApiError.digest` carries HTTP status
+
+`apps/web/src/app/[locale]/(app)/error.tsx` catches every uncaught error thrown by an authenticated route. The boundary renders one of three friendly cards (forbidden / not-found / generic) keyed off the HTTP status — not the `error.message` (Next.js scrubs that in prod) and not `instanceof ApiError` (the prototype is lost crossing the server→client boundary).
+
+The mechanism: `ApiError`'s constructor sets `this.digest = \`API_ERROR_${status}_${code}\``. The `digest` field is the only property Next.js preserves through the RSC error-serialization boundary in both dev AND prod. The boundary calls `parseApiErrorDigest(error.digest)` to recover `{ status, code }` and branches.
+
+What this means for page authors:
+- Do NOT wrap every BE call in try/catch. Let the typed `ApiError` propagate; the global boundary takes care of it.
+- Per-page try/catch is only justified when you want a NON-default rendering (e.g. the appointment detail page catches `APPOINTMENT_NOT_FOUND` to render a back-link card inside its layout). Use `isApiError(err) && (err.status === 404 || err.code === APPOINTMENT_ERROR_CODE.APPOINTMENT_NOT_FOUND)`.
+- New top-level error codes that should map to a specific card go through `ApiError.digest` automatically. The boundary's parser is generic — it never special-cases individual codes.
+
 ## Backend (apps/api)
 
 ### 6. Swagger decorator organization

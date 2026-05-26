@@ -1102,6 +1102,55 @@ form. Sidebar nav exposes the three new routes; NURSE + MRO landing
 pages get permission-gated quick-action cards. BE handoff doc lives at
 `docs/handoffs/F09-booking-api.md`.
 
+**What actually shipped (delta from the original brief)**
+
+- **Generic paginated picker infrastructure co-shipped.** The original
+  F09 brief had a doctor-specific `useIncrementalDoctorList` hook. The
+  shipped code factors that into three layers: `usePaginatedList<T>`
+  (generic hook, `apps/web/src/lib/hooks/`) + `EntityPicker` (generic
+  dropdown primitive) + entity-aware wrappers (`DoctorSelect`,
+  `PatientPicker`). Future `NurseSelect` / `PharmacySelect` slot in
+  with one action file + one entity wrapper; no new infrastructure.
+  See CLAUDE.md §5a.1.
+- **Every `<Select>` lives under `components/shared/select/`.** A new
+  `ClearableSelect` primitive owns the `FormControl + InputLabel +
+  Select + × end-adornment` boilerplate; entity-aware wrappers
+  (`DepartmentSelect`, `AppointmentTypeSelect`, `AppointmentStatusSelect`,
+  `OrderSelect`, `GenderSelect`, `BloodGroupSelect`) bind the catalog +
+  i18n. No call site composes a select from MUI primitives directly.
+  See CLAUDE.md §5a.2.
+- **Global `(app)/error.tsx` boundary.** A throwing `ApiError` from any
+  authenticated route serialises its HTTP status through `error.digest`
+  (the only field that survives the server→client boundary in both dev
+  AND prod, since Next.js scrubs `error.message` in prod) so the
+  boundary can render a 403 "forbidden" / 404 "not found" / generic
+  card consistently. Replaces per-page try/catch sprawl.
+- **`Department.allowedAppointmentTypes` BE wire field.** Sourced from
+  the existing `department_appointment_types` join; lets the booking
+  wizard's type Select pre-filter to only the codes the picked
+  department offers. The BE still validates on `POST /appointments`
+  as the authoritative gate.
+- **Slot finder day-boundary fix.** The F07 blocker query was
+  day-narrowed to the requested UTC day. Schedules crossing midnight
+  UTC could re-emit already-booked slots because the post-midnight
+  appointment fell outside the day-narrow filter. Fixed by computing
+  the union `[min(startAt), max(endAt))` across the fetched schedules.
+  Locked by a new day-boundary e2e + wire-to-wire e2e (`POST` then
+  `GET /slots`).
+- **RBAC-aware UI throughout.** Create-schedule dialog locks dept to
+  caller's home for non-`.all` scopes (NURSE, DOCTOR); appointments
+  filter pins dept/doctor based on the caller's effective
+  `appointment.read.*` scope (.own → both locked, .own-department →
+  dept locked, .all → both editable); booking wizard's
+  "Register patient" CTA only renders when `patient.create` is held;
+  sidebar most-specific-match prevents `/appointments/new` from
+  highlighting both "Appointments" and "Book appointment".
+- **BE e2e at 122/122.** F09 added 21 appointments + 4 DOCTOR-scope
+  slot tests; the boundary regression added 2 more (day-boundary +
+  wire-to-wire). The widening of `/slots` + `/appointment-types` gates
+  to accept `appointment.create.own` unblocks DOCTOR self-booking
+  (F07 had gated on `.own-department` only).
+
 **Why a standalone feature**
 
 The booking write path is the highest-risk surface (transactional
