@@ -4,7 +4,7 @@
   "private": true,
   "description": "Hospital Information System — backend API (NestJS)",
   "scripts": {
-    "build": "prisma generate && nest build",
+    "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -16,8 +16,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "type-check": "tsc --noEmit -p tsconfig.json",
     "db:seed": "ts-node -P tsconfig.json prisma/seed/index.ts",
-    "prisma": "prisma",
-    "db:migrate:deploy": "prisma migrate deploy"
+    "prisma": "prisma"
   },
   "prisma": {
     "seed": "ts-node -P tsconfig.json prisma/seed/index.ts"
