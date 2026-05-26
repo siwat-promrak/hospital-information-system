@@ -125,6 +125,8 @@ below live in `docs/user-stories.md`.
 | F09 ✅ | Front-desk booking + lifecycle            | `feat/booking`                  | BE `POST /patients` (walk-in), `GET /patients?q=`, `POST /appointments` (inherits `departmentId` from the chosen schedule; validates `(departmentId, appointmentType)` against `department_appointment_types`), `GET /appointments`, `GET /appointments/:id`, `POST /appointments/:id/cancel` + FE booking wizard, `/appointments` list + detail + cancel dialog, `/patients/new` walk-in form. **NURSE in own department by default** (full CRUD on patients + `appointment.*.own-department`); DOCTOR can act on their own appointments via `appointment.*.own`. | US-7.1, US-7.2, US-7.3, US-7.4, US-8.1, US-8.2, US-8.3 | F08           | Manual: NURSE books for any patient in their department; conflicting double-book returns `409 SLOT_TAKEN`; mismatched `(departmentId, type)` returns `400 DEPARTMENT_TYPE_NOT_ALLOWED`; cancel frees slot; the `appointments_end_after_start` DB CHECK back-stops `endAt > startAt`.                                                                                | L      | P0       |
 | F11 | Admin user + role/permission management   | `feat/admin-users`              | BE `/admin/users` (list, invite, disable, enable — invite path supports DOCTOR by creating the User + Doctor rows transactionally with the doctor's home `User.departmentId` set), `/admin/roles/:id/policies` (grant/revoke), optional `/admin/roles` (create custom role, P2 — requires `role.create`) + minimal `(app)/admin/users` & `(app)/admin/roles` UI. ADMIN starts narrow (9 user+role permissions) and may grant additional capabilities to themselves or others via `role.update`. **Single feature — no API/UI split.** | US-11.1, US-11.2, US-11.3, US-11.5 (+ US-11.6 P2)     | F03, F09      | Manual: ADMIN invites a new NURSE email; new nurse signs in successfully; ADMIN disables them; subsequent sign-in returns `USER_DISABLED`; self-disable is blocked; ADMIN grants `appointment.create.own-department` to a custom role and observes the new permission on next request; baseline `is_deletable=false` policies cannot be revoked. | L      | P1       |
 | F12 | i18n parity + README                      | `chore/i18n-readme`             | Audit all strings to `messages/*.json`, add `Roles.*` / `Permissions.*` namespaces, regenerate keys, write project `README.md`. | US-12.1, US-12.2                                      | F11           | `pnpm type-check` green; manual lang switch shows no raw English on TH; README walkthrough takes a fresh clone to a running app in <15 min.                                                                                | M      | P1       |
+| F13 | Per-(department, type) booking rules      | `feat/dept-type-rules`          | Move per-`AppointmentType` `durationMinutes` off the global const map onto `department_appointment_types` so each (department, type) pair has its own duration; add nullable `bookingWindowStartMinute` + `bookingWindowEndMinute` columns (wall-clock local minute-of-day in `CLINIC_TIMEZONE`) so a department can restrict a type to part of the day (e.g. Cardiology `NEW_PATIENT_VISIT` before 11:00). Wire enforcement into `SlotsService` (filter slots outside the window) + `AppointmentsService.create` (back-stop `400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW`). Replace `GET /appointment-types`'s per-type duration field with a new `GET /departments/:id/appointment-types` returning `[{ code, label, durationMinutes, bookingWindowStartMinute?, bookingWindowEndMinute? }]`. Adds the `CLINIC_TIMEZONE` env (default `Asia/Bangkok`). | US-13.1, US-13.2, US-13.3, US-13.4 | F09 | Manual: a NURSE booking Cardiology `NEW_PATIENT_VISIT` for 14:00 sees no slots in the wizard AND a direct `POST /appointments` returns `400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW`; a 09:30 slot books normally; per-pair durations override the old global defaults (Orthopedics `PROCEDURE` = 90 min, others unchanged). | L      | P1       |
+| F14 | Appointment groups + transfers            | `feat/appointment-groups`       | New `appointment_groups` table (`id`, `patientId`, `openedAt`, `closedAt?`, audit cluster sans `deleted_*`) + five new columns on `Appointment` (`appointmentGroupId?`, `visitNumber?`, `transferredToDepartmentId?`, `transferredAt?`, `transferFulfilledByAppointmentId? @unique`). Lazy group creation: `POST /appointments` accepts optional `previousAppointmentId` and materialises a fresh group on first continuation. Doctor-side visit-ending actions are RPC-style POSTs: `POST /appointments/:id/complete` (status only), `POST /appointments/:id/transfer` (complete + flag transfer, group stays open), `POST /appointment-groups/:id/close` (complete latest visit + close group). Destination NURSE picks up via `GET /appointments?pendingTransferToDepartmentId=<B>`. Permissions reuse `appointment.{read,create,update}.*` — no new permission codes. | US-14.1, US-14.2, US-14.3, US-14.4, US-14.5, US-14.6, US-14.7 | F13 | Manual: DOCTOR transfers visit A (cardiology) to neurology → NURSE in neurology sees A in the pending queue → books visit B with `previousAppointmentId=A` → group is created, A gets `visit_number=1`, B gets `visit_number=2`, `transferFulfilledByAppointmentId` is set. DOCTOR closes the case → group's `closedAt` set, B transitions to `COMPLETED`. A subsequent `POST /appointments` with `previousAppointmentId=B` returns `400 APPOINTMENT_GROUP_CLOSED`. | L      | P1       |
 
 > **F04, F10 were removed when patient sign-in / self-service was scoped out (2026-05-24).** The feature IDs are intentionally left as gaps — IDs stay stable so commit and PR references continue to resolve. F08 was repurposed for the medical records module and F09 absorbed the original "F08 staff booking" scope when the RBAC overhaul moved booking to NURSE (department-scoped) and DOCTOR (own-doctor) instead of a blanket STAFF role.
 
@@ -1370,6 +1372,357 @@ need a final pass after all features have shipped.
 3. Switch language to TH — verify no raw English remains in primary
    flows (signin, doctors, booking, appointments list, admin user +
    roles screens).
+
+---
+
+### F13 — Per-(department, type) booking rules (P1, L)
+
+**Why a standalone feature**
+
+Today every department offers the same four appointment categories on
+the same duration grid (`NEW_PATIENT_VISIT=30`, `FOLLOW_UP=15`,
+`CONSULTATION=20`, `PROCEDURE=60`) and any time of day a doctor's
+schedule covers. Real clinics want per-department control:
+
+- A `PROCEDURE` in Orthopedics may need 90 minutes; in Dermatology, 30.
+- Cardiology may want `NEW_PATIENT_VISIT` confined to mornings so the
+  doctor can run follow-ups in the afternoon.
+
+The two rules — duration and booking window — share the same
+cardinality (one row per `(department, appointment_type)` pair) and the
+same enforcement surface (`SlotsService` and `AppointmentsService`), so
+bundling them into one migration keeps the table churn down to a single
+schema change.
+
+**Files expected to change**
+
+- `apps/api/prisma/schema.prisma` — `DepartmentAppointmentType` gains:
+  - `durationMinutes Int @map("duration_minutes")` (required, replaces
+    the global `APPOINTMENT_TYPE_DURATION_MINUTES` map).
+  - `bookingWindowStartMinute Int? @map("booking_window_start_minute")`
+    — nullable wall-clock minute-of-day in `CLINIC_TIMEZONE`.
+  - `bookingWindowEndMinute Int? @map("booking_window_end_minute")`
+    — nullable.
+- `apps/api/prisma/migrations/<timestamp>_dept_type_rules/migration.sql`
+  — forward migration:
+  1. `ADD COLUMN duration_minutes INT NOT NULL DEFAULT 0` then per-type
+     `UPDATE` backfill (mirror the current const map), then drop the
+     `DEFAULT`.
+  2. `ADD COLUMN booking_window_start_minute INT NULL`,
+     `booking_window_end_minute INT NULL`.
+  3. Append three raw-SQL CHECK constraints (Prisma 5 cannot express
+     them natively, per the F01 pattern):
+     - `department_appointment_types_duration_positive` —
+       `CHECK (duration_minutes > 0 AND duration_minutes <= 480)`.
+     - `department_appointment_types_window_bounds` —
+       `CHECK ((booking_window_start_minute IS NULL OR
+        (booking_window_start_minute >= 0 AND
+         booking_window_start_minute < 1440))
+       AND (booking_window_end_minute IS NULL OR
+        (booking_window_end_minute > 0 AND
+         booking_window_end_minute <= 1440)))`.
+     - `department_appointment_types_window_order` —
+       `CHECK (booking_window_start_minute IS NULL OR
+              booking_window_end_minute IS NULL OR
+              booking_window_start_minute < booking_window_end_minute)`.
+- `apps/api/prisma/seed/department-appointment-types.ts` — write
+  per-pair durations (start from the old global defaults, tweak the few
+  rows the product wants different, e.g. Orthopedics `PROCEDURE` = 90,
+  Cardiology `NEW_PATIENT_VISIT` window `[null, 660]`).
+- `apps/api/src/appointment-types/appointment-types.const.ts` — drop
+  `APPOINTMENT_TYPE_DURATION_MINUTES` (keep `APPOINTMENT_TYPE_LABEL` +
+  `APPOINTMENT_TYPE_ORDER`); the global `GET /appointment-types` becomes
+  a pure label catalog.
+- `apps/api/src/departments/` — add
+  `GET /departments/:id/appointment-types` returning
+  `[{ code, label, durationMinutes, bookingWindowStartMinute?,
+       bookingWindowEndMinute? }]` for the chosen department. This is
+  what the booking wizard fetches once the user picks a department.
+  Gated on `appointment.read.*` (any scope).
+- `apps/api/src/slots/slots.service.ts` — look up the duration from the
+  `(departmentId, type)` row that the existing
+  `DEPARTMENT_TYPE_NOT_ALLOWED` check already loads (no extra round
+  trip). Filter grid slots whose `startAt` (converted to local
+  minute-of-day via `dayjs.utc(startAt).tz(CLINIC_TIMEZONE)`) falls
+  outside the booking window.
+- `apps/api/src/appointments/appointments.service.ts` — same lookup,
+  reject creates outside the window with
+  `400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW`.
+- `apps/api/src/common/errors.ts` — add the new `ErrorCode`.
+- `apps/api/.env.example` — `CLINIC_TIMEZONE=Asia/Bangkok` (loaded once
+  in `apps/api/src/dayjs.ts` and passed to the conversion helper). The
+  env defaults to `Asia/Bangkok` in code so a missing var fails safe.
+- `apps/web/src/lib/api/department.api.ts` + `.const.ts` — add the new
+  `GET /departments/:id/appointment-types` typed client.
+- `apps/web/src/components/booking/...` — wizard step that picks the
+  type now consumes the per-department list; the type chip surfaces
+  the window copy (`"Before 11:00 only"`) so the user understands why
+  later slots are missing.
+
+**Design principle (CLAUDE.md addendum — codify in rule 9)**
+
+> Store **instants** (a specific moment in time) in UTC. Store
+> **recurring daily business rules** (cutoffs, opening times, booking
+> windows) as a wall-clock minute-of-day in the clinic's local timezone.
+> Comparison happens at the check site:
+> `dayjs.utc(startAt).tz(CLINIC_TIMEZONE).hour() * 60 + minute()`.
+> Storing a daily boundary as a UTC minute-of-day silently breaks the
+> moment the clinic's day crosses the UTC date line (DST, timezone
+> move, late-night / early-morning slots).
+
+**Migration / breaking-change notes**
+
+- One forward migration on top of `_init` + `_add_auth_log`. Apply with
+  `pnpm --filter @hospital/api prisma migrate dev`. No drop-and-recreate
+  needed — the new columns are additive (the required `duration_minutes`
+  is backfilled in the same migration).
+- `GET /appointment-types` no longer returns `durationMinutes`. The
+  booking wizard MUST move to `GET /departments/:id/appointment-types`
+  before this PR lands on `main`. (This is mostly internal — only the
+  wizard consumes it today.)
+- `APPOINTMENT_TYPE_DURATION_MINUTES` is removed. Any test fixture
+  importing it must move to a hardcoded literal or read from a seeded
+  `DepartmentAppointmentType` row.
+
+**Manual smoke test**
+
+```bash
+# Run the migration + reseed
+pnpm --filter @hospital/api prisma migrate dev
+pnpm --filter @hospital/api db:seed
+
+# Verify the per-department catalog
+curl -s "http://localhost:3001/api/v1/departments/<cardiology-id>/appointment-types" \
+  -H "Cookie: next-auth.session-token=<nurse-jwt>" | jq
+
+# Verify the booking-window rejection (NURSE in Cardiology, 14:00 local)
+curl -i -X POST "http://localhost:3001/api/v1/appointments" \
+  -H "Cookie: next-auth.session-token=<nurse-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{ "patientId": "...", "doctorScheduleId": "...",
+        "appointmentType": "NEW_PATIENT_VISIT",
+        "startAt": "2026-05-27T07:00:00Z" }'
+# expect 400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW
+
+# A morning slot books normally
+curl -i -X POST "http://localhost:3001/api/v1/appointments" \
+  ... "startAt": "2026-05-27T02:30:00Z" (= 09:30 Bangkok)
+# expect 201
+```
+
+Expected: the per-department catalog reflects the seeded overrides
+(Cardiology `NEW_PATIENT_VISIT` carries `bookingWindowEndMinute: 660`);
+the 14:00 booking is rejected; the 09:30 booking succeeds; the
+Cardiology page in the booking wizard hides afternoon slots for
+`NEW_PATIENT_VISIT` and shows them again for `FOLLOW_UP`.
+
+---
+
+### F14 — Appointment groups + transfers (P1, L)
+
+**Why a standalone feature**
+
+Today every `Appointment` is a standalone row. Real clinics need to
+link visits within a clinical thread — a follow-up to a prior
+`NEW_PATIENT_VISIT` belongs in the same case, and a referral to
+another specialist continues that case in a different department.
+Without grouping, "all visits for Mrs. Smith's diabetes thread" is
+unrecoverable from her mixed timeline of unrelated complaints.
+
+This feature lands a new `appointment_groups` table + five additive
+columns on `Appointment`. Groups are materialised lazily inside
+`POST /appointments` (no separate `POST /appointment-groups` endpoint).
+Transfer state lives on the originating `Appointment` row — the row
+IS the transfer record, so a dedicated `appointment_transfers` table
+is deferred until explicit referral metadata (urgency, structured
+reason codes) becomes a need. Permissions reuse the existing
+`appointment.*` family — zero new permission codes.
+
+**Files expected to change**
+
+- `apps/api/prisma/schema.prisma` —
+  - New `AppointmentGroup` model with `openedAt`, `closedAt?`, and the
+    audit cluster minus `deleted_*` (mirrors `Appointment`).
+  - `Appointment` gains five columns: `appointmentGroupId?`,
+    `visitNumber?`, `transferredToDepartmentId?`, `transferredAt?`,
+    `transferFulfilledByAppointmentId? @unique`.
+  - Inverse relations on `Patient`, `Department`, `User` for the new
+    FKs.
+- `apps/api/prisma/migrations/<timestamp>_appointment_groups/migration.sql`
+  — forward migration:
+  1. `CREATE TABLE appointment_groups` with the four audit FKs to
+     `users` (`created_by` required, `updated_by` nullable).
+  2. `ALTER TABLE appointments ADD COLUMN appointment_group_id UUID NULL
+     REFERENCES appointment_groups(id) ON DELETE NO ACTION`.
+  3. `ALTER TABLE appointments ADD COLUMN visit_number INT NULL`.
+  4. `ALTER TABLE appointments ADD COLUMN transferred_to_department_id
+     UUID NULL REFERENCES departments(id) ON DELETE NO ACTION`.
+  5. `ALTER TABLE appointments ADD COLUMN transferred_at TIMESTAMPTZ(3)
+     NULL`.
+  6. `ALTER TABLE appointments ADD COLUMN transfer_fulfilled_by_appointment_id
+     UUID NULL UNIQUE REFERENCES appointments(id) ON DELETE NO ACTION`.
+  7. `CREATE INDEX ... ON appointments(appointment_group_id)` (group
+     rollup hot path).
+  8. `CREATE INDEX ... ON appointments(transferred_to_department_id)
+     WHERE transfer_fulfilled_by_appointment_id IS NULL` (pickup queue
+     hot path — partial index keeps it small).
+  9. `CREATE INDEX ... ON appointment_groups(patient_id, closed_at)`.
+  10. Append raw-SQL CHECK constraints (Prisma 5 limitation, per F01
+      pattern):
+      - `appointments_visit_number_consistency` —
+        `CHECK ((appointment_group_id IS NULL AND visit_number IS NULL)
+              OR (appointment_group_id IS NOT NULL AND visit_number IS NOT NULL
+                  AND visit_number >= 1))`.
+      - `appointments_transfer_pair_consistency` —
+        `CHECK ((transferred_to_department_id IS NULL AND transferred_at IS NULL)
+              OR (transferred_to_department_id IS NOT NULL AND transferred_at IS NOT NULL))`.
+  11. `CREATE UNIQUE INDEX appointments_group_visit_number_unique
+      ON appointments(appointment_group_id, visit_number)
+      WHERE appointment_group_id IS NOT NULL` (partial unique — only
+      grouped rows participate).
+- `apps/api/src/appointment-groups/` — new module:
+  - `appointment-groups.module.ts`, `appointment-groups.controller.ts`,
+    `appointment-groups.service.ts`, `appointment-groups.swagger.ts`,
+    `appointment-groups.const.ts`, `appointment-groups.types.ts`.
+  - `dto/appointment-group.response.dto.ts` —
+    `AppointmentGroupResponseDto` + `AppointmentGroupDetailResponseDto`
+    (with chronological member list) + inner ref types
+    (`AppointmentGroupLatestVisitDto`).
+  - `dto/list-appointment-groups.query.dto.ts` — extends
+    `PaginationQueryDto`; `patientId` (UUID, required), `status`
+    (`open` / `closed` / `all`, default `all`).
+- `apps/api/src/appointments/` — controller + service additions:
+  - `POST /appointments` body gains optional
+    `previousAppointmentId`. Service runs the lazy-group transaction
+    described in US-14.2; introduces error codes
+    `PREVIOUS_APPOINTMENT_CANCELLED`,
+    `APPOINTMENT_GROUP_CLOSED`, `APPOINTMENT_GROUP_PATIENT_MISMATCH`,
+    `TRANSFER_DEPARTMENT_MISMATCH`, `TRANSFER_ALREADY_FULFILLED`.
+  - `POST /appointments/:id/complete` — new endpoint.
+  - `POST /appointments/:id/transfer` — new endpoint. Body:
+    `{ toDepartmentId: string }`. Atomic complete + flag transfer.
+    Error: `APPOINTMENT_ALREADY_TRANSFERRED` on duplicate.
+  - `GET /appointments` query DTO gains optional
+    `pendingTransferToDepartmentId` filter.
+- `apps/api/src/common/errors.ts` — add the seven new `ErrorCode`
+  entries.
+- `apps/api/src/appointment-groups/scope.ts` (optional) — only if the
+  group resolver duplicates the appointment scope helpers; otherwise
+  reuse `resolveAppointmentReadScope` from
+  `apps/api/src/auth/scope.ts` directly.
+- `apps/api/prisma/seed/` — no required seed changes; F14 starts with
+  zero groups (existing appointments stay NULL). Optionally extend
+  `appointments.ts` to seed a small handful of pre-grouped cases so
+  reviewers see the UI on first load — defer until the feature ships
+  if time-pressed.
+- `apps/web/src/components/booking/` — booking-wizard adds one step
+  ("Is this a continuation?") + the "Continue case" picker consuming
+  `GET /appointment-groups?patientId=&status=open`.
+- `apps/web/src/components/appointments/` — appointment detail page
+  gains three doctor-only action buttons (Complete / Transfer / Close
+  case) shown per role + per row state. The Transfer button opens a
+  department-picker modal.
+- `apps/web/src/app/[locale]/(app)/transfers/page.tsx` (new) —
+  destination-department pickup queue, paginated, gated on
+  `appointment.read.own-department`.
+- `apps/web/src/lib/api/appointment-group.api.ts` + `.const.ts` +
+  `.actions.ts` — typed client + server actions.
+- `apps/web/src/types/appointment-group.types.ts` — FE mirror of the
+  group response shapes.
+- `apps/web/messages/{en,th}.json` — new `AppointmentGroups.*`,
+  `Transfers.*`, `BookingWizard.Continuation.*` namespaces; regenerate
+  `i18n/keys.generated.ts`.
+
+**Wire surface summary**
+
+| Endpoint | Atomic effect | Auth |
+| --- | --- | --- |
+| `POST /appointments` (body gains `previousAppointmentId?`) | Insert. If continuation: validate + attach to / create group + fulfil transfer where applicable. | `appointment.create.{own,own-department}` on destination dept. |
+| `POST /appointments/:id/complete` | `status` → `COMPLETED`. No group / transfer side-effect. | Doctor of the appointment. |
+| `POST /appointments/:id/transfer` | `status` → `COMPLETED` + set `transferredToDepartmentId` + `transferredAt`. Group stays open. | Doctor of the appointment. |
+| `GET /appointments?pendingTransferToDepartmentId=<B>` | Pending pickup queue at department `B`. | `appointment.read.own-department` on `B` (or `.all`). |
+| `GET /appointment-groups?patientId=&status=open\|closed\|all` | Patient's groups (paginated). | `appointment.read.*` covering at least one member. |
+| `GET /appointment-groups/:id` | Group detail with chronological members. | Same as above. |
+| `POST /appointment-groups/:id/close` | Latest non-cancelled appointment → `COMPLETED` + group `closedAt = now()`. | Doctor of the latest non-cancelled appointment. |
+
+**Permissions**
+
+Zero new codes. Effective mapping uses existing
+`appointment.{read,create,update}.{own,own-department,all}`:
+
+- Read group / pickup queue / detail → `appointment.read.*` covering
+  at least one member of the group.
+- Complete / transfer / close → `appointment.update.*` covering the
+  source row (typically `.own` on the doctor's own row).
+- Pick up transfer (create new appointment in destination dept) →
+  `appointment.create.own-department` in that dept.
+
+The permission catalog stays at 35.
+
+**Migration / breaking-change notes**
+
+- Single forward migration on top of `_init` + `_add_auth_log` +
+  `_dept_type_rules`. Apply with
+  `pnpm --filter @hospital/api prisma migrate dev`. All columns are
+  additive nullable, so no backfill: pre-existing appointments stay
+  `appointment_group_id = NULL`, `visit_number = NULL`, all transfer
+  fields `NULL`.
+- `POST /appointments` gains a new optional body field
+  (`previousAppointmentId`). Backwards compatible.
+- The `GET /appointments` query gains a new optional filter
+  (`pendingTransferToDepartmentId`). Backwards compatible.
+- New error codes — FE error-mapping catalog
+  (`apps/web/src/lib/notifications/messages.const.ts`'s
+  `ERROR_CODE_TO_KEY`) must add the new keys, else the user sees the
+  generic snackbar.
+
+**Manual smoke test**
+
+```bash
+# Two doctors in different departments
+DOC_A_JWT=...  # cardiology doctor
+DOC_B_NURSE_JWT=...  # neurology nurse
+DOC_B_JWT=...  # neurology doctor (assigned to the picked-up appointment)
+PATIENT_ID=...
+
+# 1. Book a first appointment with DOC_A. Standalone, no group.
+curl -X POST .../appointments -d '{ patientId, doctorScheduleId, appointmentType }'
+APPT_A_ID=...
+
+# 2. DOC_A transfers to neurology after completing the visit
+curl -X POST .../appointments/$APPT_A_ID/transfer \
+  -d '{ "toDepartmentId": "<neuro-id>" }'
+# expect APPT_A.status = COMPLETED, transferredToDepartmentId set
+
+# 3. DOC_B_NURSE sees the pending transfer
+curl ".../appointments?pendingTransferToDepartmentId=<neuro-id>"
+# expect APPT_A in the result
+
+# 4. DOC_B_NURSE books the pickup
+curl -X POST .../appointments \
+  -d '{ patientId, doctorScheduleId (neuro), appointmentType,
+        previousAppointmentId: APPT_A_ID }'
+APPT_B_ID=...
+# expect: new AppointmentGroup created;
+#         APPT_A.appointmentGroupId = APPT_B.appointmentGroupId;
+#         APPT_A.visitNumber = 1, APPT_B.visitNumber = 2;
+#         APPT_A.transferFulfilledByAppointmentId = APPT_B_ID
+
+# 5. DOC_B closes the case after their visit
+curl -X POST .../appointment-groups/<group-id>/close
+# expect group.closedAt set; APPT_B.status = COMPLETED
+
+# 6. Attempt to attach a third visit to the closed group
+curl -X POST .../appointments \
+  -d '{ ..., previousAppointmentId: APPT_B_ID }'
+# expect 400 APPOINTMENT_GROUP_CLOSED
+```
+
+Expected outcomes are inline in the script. Spot-check the
+`appointment_groups` table in Prisma Studio to confirm the group
+exists with `openedAt` set, `closedAt` set after step 5, audit columns
+populated (`created_by` is the NURSE who booked step 4; `updated_by`
+is the DOCTOR who called close in step 5).
 
 ---
 
