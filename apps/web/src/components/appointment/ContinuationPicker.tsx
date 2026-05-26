@@ -11,12 +11,18 @@ import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatDoctorFullName } from "@/appointment/labels";
 import { K, NS } from "@/i18n/keys.generated";
+import { listAppointmentGroupsAction } from "@/lib/api/appointment-group.actions";
+import { APPOINTMENT_GROUP_STATUS } from "@/lib/api/appointment-group.const";
 import { listAppointmentsAction } from "@/lib/api/appointment.actions";
-import { APPOINTMENT_LIST_ORDER } from "@/lib/api/appointment.const";
+import {
+  APPOINTMENT_LIST_ORDER,
+  APPOINTMENT_STATUS,
+} from "@/lib/api/appointment.const";
+import { MAX_PAGE_SIZE } from "@/lib/api/pagination.const";
 import { usePaginatedList } from "@/lib/hooks/use-paginated-list";
 import { dayjs } from "@/lib/dayjs";
 import type { AppointmentResponse } from "@/types/appointment.types";
@@ -35,14 +41,36 @@ interface ContinuationPickerProps {
 const CONTINUATION_PAGE_SIZE = 10;
 
 /**
- * Paginated list of the patient's prior non-cancelled appointments.
- * Drives the F14 booking-wizard "Yes, continues a prior visit" branch.
+ * Paginated list of the patient's prior continuation-eligible
+ * appointments. Drives the F14 booking-wizard "Yes, continues a prior
+ * visit" branch.
  *
- * The BE call narrows on `?patientId=` and skips cancelled rows on the
- * service-layer side (the list endpoint defaults to non-cancelled-only
- * for continuation use cases per the F14 spec). Rows are sorted
- * `startAt DESC` so the most-recent visit surfaces first — the
- * front-desk's usual continuation is the immediate prior visit.
+ * Eligibility rules (corrective tightening of the original "non-cancelled
+ * rows" filter — too loose):
+ *   1. `status === 'COMPLETED'` — a `BOOKED` row hasn't happened yet so it
+ *      can't be the source of a continuation; a `CANCELLED` row never did.
+ *   2. (no group) OR (group is still open) — once a case is closed the
+ *      patient's care thread for that diagnosis is done, so a new visit
+ *      should open a fresh case rather than reach back into the closed one.
+ *
+ * Implementation:
+ *   - The COMPLETED narrowing is applied as `?status=COMPLETED` on the
+ *     existing `GET /appointments` call (the BE accepts it — see
+ *     `list-appointments.query.dto.ts`'s `@IsEnum(AppointmentStatus)`
+ *     field). This keeps the row count small even for patients with long
+ *     histories of cancellations / future bookings.
+ *   - The open-group narrowing is a client-side intersection: we fetch
+ *     the patient's open groups via `GET /appointment-groups?status=open`
+ *     (one round-trip, `pageSize=all` — the open-case count per patient
+ *     is bounded by the number of active threads, single digits in
+ *     practice) and only keep rows whose `appointmentGroupId` is either
+ *     `null` (ungrouped → eligible by rule 2) or in the open-groups set
+ *     (`closedAt === null` → also eligible). Closed-group rows AND rows
+ *     whose group state we couldn't fetch are filtered out.
+ *   - The BE doesn't currently expose a "filter to (ungrouped OR
+ *     open-group)" parameter on `GET /appointments`; if a future BE
+ *     revision adds one, drop the second fetch and the `useEffect` below
+ *     in favour of a single narrowed call.
  *
  * The list uses `usePaginatedList` directly (no `<EntityPicker>` wrapper)
  * because the UX is an inline result list with a "Show more" button,
@@ -65,6 +93,9 @@ export default function ContinuationPicker({
         page: args.page,
         pageSize: args.pageSize,
         order: APPOINTMENT_LIST_ORDER.DESC,
+        // Rule-1 narrowing — see eligibility rules above. The BE filter
+        // keeps the row count small even for patients with long histories.
+        status: APPOINTMENT_STATUS.COMPLETED,
       });
     },
     [patientId],
@@ -82,16 +113,73 @@ export default function ContinuationPicker({
       autoFetchFirstPage: true,
     });
 
-  const filteredRows = useMemo(() => {
-    // Belt-and-braces filter — the BE service layer hides cancelled
-    // rows from the continuation use case, but if a future revision
-    // surfaces them on the wire we still want the picker to hide them
-    // because picking a cancelled row would 422 with
-    // `PREVIOUS_APPOINTMENT_CANCELLED` on submit.
-    return loaded.filter((a) => a.status !== "CANCELLED");
-  }, [loaded]);
+  // Rule-2 input — the set of `appointmentGroupId`s where the group is
+  // still open (`closedAt === null`). Fetched once per patient in a
+  // single `pageSize=all` round-trip: the open-case count per patient is
+  // bounded (single digits in practice), so a pull-everything fetch is
+  // both cheap and simpler than threading pagination through the
+  // intersection logic.
+  //
+  // `null` means "haven't loaded yet" — distinct from `new Set()` which
+  // means "loaded, patient has zero open groups". The filter falls
+  // through to the safe state (hide grouped rows) while the set is
+  // still loading.
+  const [openGroupIds, setOpenGroupIds] = useState<ReadonlySet<string> | null>(
+    null,
+  );
 
-  const showEmpty = !isLoadingMore && filteredRows.length === 0;
+  useEffect(() => {
+    let cancelled = false;
+
+    setOpenGroupIds(null);
+
+    (async () => {
+      const groups = await listAppointmentGroupsAction({
+        patientId,
+        status: APPOINTMENT_GROUP_STATUS.OPEN,
+        pageSize: MAX_PAGE_SIZE,
+      });
+
+      if (!cancelled) {
+        setOpenGroupIds(new Set(groups.data.map((g) => g.id)));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  const filteredRows = useMemo(() => {
+    // Until the open-groups fetch resolves we conservatively show only
+    // ungrouped rows. Once it does, grouped rows whose group is in the
+    // open set surface as well. Belt-and-braces `status` recheck stays
+    // because the BE filter is the only guard against a future regression
+    // (and the cost of the membership test is trivial).
+    return loaded.filter((a) => {
+      if (a.status !== APPOINTMENT_STATUS.COMPLETED) {
+        return false;
+      }
+
+      if (a.appointmentGroupId == null) {
+        return true;
+      }
+
+      if (openGroupIds == null) {
+        return false;
+      }
+
+      return openGroupIds.has(a.appointmentGroupId);
+    });
+  }, [loaded, openGroupIds]);
+
+  // The picker has two parallel async loads (appointments page + open
+  // groups). Treat "still resolving" as a single loading state so the
+  // empty-state copy doesn't flicker before the open-groups fetch
+  // unmasks the grouped rows. `openGroupIds == null` means the
+  // open-groups fetch hasn't resolved yet.
+  const isResolving = isLoadingMore || openGroupIds == null;
+  const showEmpty = !isResolving && filteredRows.length === 0;
   const showLoadMore = hasMore && !isLoadingMore;
 
   return (
@@ -142,7 +230,7 @@ export default function ContinuationPicker({
         </Box>
       ) : null}
 
-      {isLoadingMore && filteredRows.length === 0 ? (
+      {isResolving && filteredRows.length === 0 ? (
         <Stack direction="row" spacing={1} alignItems="center" sx={{ pl: 1 }}>
           <CircularProgress size={16} />
           <Typography variant="body2" color="text.secondary">
