@@ -21,6 +21,8 @@ export const NAV_ICON = {
   // F14 — case timeline + referrals queue.
   APPOINTMENT_GROUPS: "appointment_groups",
   REFERRALS: "referrals",
+  // F15 — multi-doctor open-slot exploration screen.
+  FIND_SLOT: "find_slot",
 } as const;
 
 /**
@@ -128,6 +130,23 @@ export const NAV_ITEMS: readonly NavItem[] = [
     permission: [
       PERMISSION_CODE.APPOINTMENT_READ_OWN_DEPARTMENT,
       PERMISSION_CODE.APPOINTMENT_READ_ALL,
+    ],
+  },
+  {
+    id: "find-slot",
+    href: FE_PATH.FIND_SLOT,
+    iconName: NAV_ICON.FIND_SLOT,
+    i18nKey: K.Nav.items.findSlot,
+    // F15 — dedicated slot finder. Gated on any-of the schedule.read.*
+    // codes (same any-of as `/schedules`), so DOCTOR / NURSE / MRO all
+    // see the entry; PHARMACY does not. The page itself adapts its UI
+    // shape via `resolveScheduleViewMode()` — ALL / OWN_PLUS_DEPT / DEPT
+    // / OWN — and renders a forbidden card for any caller who reaches
+    // the URL without a schedule.read.* code.
+    permission: [
+      PERMISSION_CODE.SCHEDULE_READ_OWN,
+      PERMISSION_CODE.SCHEDULE_READ_OWN_DEPARTMENT,
+      PERMISSION_CODE.SCHEDULE_READ_ALL,
     ],
   },
 ];

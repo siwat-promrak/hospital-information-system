@@ -5,7 +5,11 @@ import type { AppointmentType } from '@prisma/client';
  * maps `FindSlotsQueryDto` into this shape so the service never has to
  * know about Express request plumbing.
  *
- * - `doctorId` — query param, uuid.
+ * - `doctorId` — query param, uuid. OPTIONAL — when omitted, the service
+ *   fans out across every doctor with an active schedule in
+ *   `departmentId` on `date` and merges the resulting slot grids (F15).
+ *   A caller whose write scope is `.own`-only MUST supply it; the scope
+ *   guard rejects `.own` + omitted-doctor as `INSUFFICIENT_PERMISSION_SCOPE`.
  * - `departmentId` — query param, uuid. REQUIRED per US-6.2 (a doctor may
  *   span multiple departments and each schedule pins exactly one).
  * - `date` — query param, ISO calendar date `YYYY-MM-DD`. Interpreted as a
@@ -15,7 +19,7 @@ import type { AppointmentType } from '@prisma/client';
  *   `(departmentId, type)` membership in `department_appointment_types`.
  */
 export interface FindSlotsArgs {
-  doctorId: string;
+  doctorId: string | undefined;
   departmentId: string;
   date: string;
   type: AppointmentType;
@@ -29,12 +33,19 @@ export interface FindSlotsArgs {
  *
  * `scheduleId` is the owning `DoctorSchedule.id` — F09 booking takes it
  * back as the provenance link for `Appointment.scheduleId`.
+ *
+ * F15 — every emitted slot carries the owning doctor's `id`, `doctorCode`,
+ * and display name so the multi-doctor fan-out response can render
+ * "Dr. X — 09:00" without a second lookup on the FE.
  */
 export interface SlotResult {
   startAt: string;
   endAt: string;
   departmentId: string;
   scheduleId: string;
+  doctorId: string;
+  doctorCode: string;
+  doctorName: string;
 }
 
 /**
@@ -55,6 +66,11 @@ export interface ResolvedDayBounds {
  * `id` is the owning `DoctorSchedule.id` — surfaced on every emitted
  * `SlotResult.scheduleId` so the F09 booker can post it back into
  * `POST /appointments` (populates the `Appointment.scheduleId` FK).
+ *
+ * F15 — `doctor` is the owning doctor's identity triplet (id + code +
+ * display name). The pure slot-grid step echoes these onto every emitted
+ * `SlotResult` so the FE can group multi-doctor fan-out responses by
+ * doctor without a second lookup.
  */
 export interface ScheduleWindow {
   id: string;
@@ -63,6 +79,22 @@ export interface ScheduleWindow {
   endAt: Date;
   breakStartAt: Date | null;
   breakEndAt: Date | null;
+  doctor: SlotDoctorRef;
+}
+
+/**
+ * Owning-doctor reference threaded onto every `ScheduleWindow` +
+ * propagated to every emitted `SlotResult`. Kept narrow on purpose —
+ * the slot grid never needs more than these three fields.
+ *
+ * `name` is the concatenated display name (`firstNameEn lastNameEn`)
+ * built at the data-fetch boundary in `SlotsService#findSlots`; the
+ * pure grid step never touches the underlying `User` row.
+ */
+export interface SlotDoctorRef {
+  id: string;
+  doctorCode: string;
+  name: string;
 }
 
 /**

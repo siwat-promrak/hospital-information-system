@@ -7,6 +7,7 @@ import CallSplitIcon from "@mui/icons-material/CallSplit";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DashboardIcon from "@mui/icons-material/Dashboard";
+import EventAvailableIcon from "@mui/icons-material/EventAvailable";
 import EventNoteIcon from "@mui/icons-material/EventNote";
 import FolderSharedIcon from "@mui/icons-material/FolderShared";
 import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
@@ -345,5 +346,6 @@ const ICON_FOR: Readonly<
   [NAV_ICON.PATIENTS_NEW]: PersonAddIcon,
   [NAV_ICON.APPOINTMENT_GROUPS]: AccountTreeIcon,
   [NAV_ICON.REFERRALS]: CallSplitIcon,
+  [NAV_ICON.FIND_SLOT]: EventAvailableIcon,
 };
 

@@ -32,6 +32,8 @@ export const FE_PATH = {
   APPOINTMENT_GROUPS: "/appointment-groups",
   // F14 — pickup queue for incoming referrals to the caller's department.
   REFERRALS: "/referrals",
+  // F15 — dedicated slot finder screen (multi-doctor open-slot exploration).
+  FIND_SLOT: "/find-slot",
 } as const;
 
 export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];

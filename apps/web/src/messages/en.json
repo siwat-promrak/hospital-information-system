@@ -132,7 +132,8 @@
       "appointmentsNew": "Book appointment",
       "patientsNew": "Register patient",
       "appointmentGroups": "Cases",
-      "referrals": "Referrals"
+      "referrals": "Referrals",
+      "findSlot": "Find slot"
     }
   },
   "Breadcrumb": {
@@ -150,7 +151,8 @@
     "patients": "Patients",
     "patientsNew": "Register",
     "appointmentGroups": "Cases",
-    "referrals": "Referrals"
+    "referrals": "Referrals",
+    "findSlot": "Find slot"
   },
   "UserMenu": {
     "openMenu": "Open user menu",
@@ -654,6 +656,37 @@
     },
     "Errors": {
       "forbidden": "You don't have permission to view referrals."
+    }
+  },
+  "FindSlot": {
+    "title": "Find a slot",
+    "subtitle": "Browse open slots across one or many doctors. Pick an appointment type and date, then click a slot to deep-link into the booking wizard.",
+    "filterCard": {
+      "departmentLabel": "Department",
+      "doctorLabel": "Doctor",
+      "appointmentTypeLabel": "Appointment type",
+      "dateLabel": "Date",
+      "searchButton": "Search",
+      "typeRequiredHelper": "Pick an appointment type to enable the search.",
+      "departmentLockedHelper": "Pinned to your department."
+    },
+    "scopeToggle": {
+      "mine": "Show mine",
+      "dept": "Show department"
+    },
+    "results": {
+      "title": "Open slots",
+      "timeRange": "{start} – {end}",
+      "doctorHeading": "{name} ({code})",
+      "emptyTitle": "No open slots",
+      "emptyDescription": "No bookable slots match the picked filters. Try another date or appointment type.",
+      "notReadyTitle": "Pick filters to search",
+      "notReadyDescription": "Pick an appointment type (and any other filters) and click Search to see open slots.",
+      "bookSlotButton": "Book this slot",
+      "slotCountLabel": "{count, plural, =0 {No slots} =1 {# slot} other {# slots}}"
+    },
+    "Errors": {
+      "forbidden": "You don't have permission to use the slot finder."
     }
   }
 }

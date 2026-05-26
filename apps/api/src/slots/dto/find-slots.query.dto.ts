@@ -1,15 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { AppointmentType } from '@prisma/client';
-import { IsEnum, IsNotEmpty, IsUUID, Matches } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsUUID, Matches } from 'class-validator';
 
 import { SLOT_ISO_DATE_PATTERN } from '../slots.const';
 
 const APPOINTMENT_TYPE_VALUES = Object.values(AppointmentType);
 
 /**
- * Query DTO for `GET /slots`. All FOUR params are REQUIRED mandatory
- * dimension filters: the slot finder is dimension-locked on
- * `(doctor, department, date, type)` and has no sensible defaults —
+ * Query DTO for `GET /slots`. Three of the FOUR params are required
+ * (`departmentId`, `date`, `type`); `doctorId` is OPTIONAL — when omitted
+ * the service fans out across every doctor with an active schedule in
+ * `departmentId` on `date` (F15). The slot finder is otherwise dimension-
+ * locked on `(department, date, type)` and has no sensible defaults —
  * guessing one would produce silently-wrong slots.
  *
  * Validation order: class-validator catches structural problems first
@@ -19,14 +21,20 @@ const APPOINTMENT_TYPE_VALUES = Object.values(AppointmentType);
  */
 export class FindSlotsQueryDto {
   @ApiProperty({
+    required: false,
     example: '4f3e2a10-1234-5678-9abc-deadbeef1234',
     description:
-      'Doctor to find slots for. REQUIRED — the slot finder is locked to ' +
-      'one doctor per call (use repeated calls for multi-doctor probes).',
+      'Doctor to find slots for. OPTIONAL — when omitted, the service ' +
+      'fans out across every doctor with an active schedule in ' +
+      '`departmentId` on `date` and merges the resulting slot grids ' +
+      '(F15 slot finder). A `.own`-only caller (DOCTOR with only ' +
+      '`appointment.create.own`) MUST pass their own `doctorId` — ' +
+      'omitting it falls through to `INSUFFICIENT_PERMISSION_SCOPE` ' +
+      'because that scope cannot probe multiple doctors.',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsUUID()
-  doctorId!: string;
+  doctorId?: string;
 
   @ApiProperty({
     example: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9',

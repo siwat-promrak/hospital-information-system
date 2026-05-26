@@ -67,6 +67,13 @@ const DOCTOR_PEER_USER_EMAIL = 'slots-doctor-peer-e2e@gmail.com';
 // flavour of the same rejection (DOCTOR with `.own` probing a colleague
 // in another dept must STILL be rejected with the same code).
 const DOCTOR_FOREIGN_USER_EMAIL = 'slots-doctor-foreign-e2e@gmail.com';
+// F15 — MRO user holds `schedule.read.all` but no `appointment.create.*`.
+// The widened permission gate lets them call /slots as a read-only
+// visibility tool.
+const MRO_EMAIL = 'slots-mro-e2e@gmail.com';
+// F15 — PHARMACY user holds no `schedule.read.*` and no
+// `appointment.create.*`. The widened gate must still reject them.
+const PHARMACY_EMAIL = 'slots-pharmacy-e2e@gmail.com';
 
 const DEPT_PRIMARY_NAME = 'Slots E2E Dept Primary';
 const DEPT_WITHOUT_TYPE_NAME = 'Slots E2E Dept Without Procedure';
@@ -90,6 +97,8 @@ interface Fixtures {
   doctorUser: UserWithRole;
   doctorPeerUser: UserWithRole;
   doctorForeignUser: UserWithRole;
+  mro: UserWithRole;
+  pharmacy: UserWithRole;
   doctor: Doctor;
   doctorPeer: Doctor;
   doctorForeign: Doctor;
@@ -144,11 +153,17 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
   const doctorRole = await prisma.role.findUnique({
     where: { code: ROLE.DOCTOR },
   });
+  const mroRole = await prisma.role.findUnique({
+    where: { code: ROLE.MEDICAL_RECORDS_OFFICER },
+  });
+  const pharmacyRole = await prisma.role.findUnique({
+    where: { code: ROLE.PHARMACY },
+  });
   const superAdmin = await prisma.user.findFirst({
     where: { email: 'superadmin@gmail.com' },
   });
 
-  if (!adminRole || !nurseRole || !doctorRole || !superAdmin) {
+  if (!adminRole || !nurseRole || !doctorRole || !mroRole || !pharmacyRole || !superAdmin) {
     return null;
   }
 
@@ -246,6 +261,38 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     roleCode: ROLE.DOCTOR,
   };
 
+  // F15 — MRO user. Holds `schedule.read.all` but no
+  // `appointment.create.*`. The widened /slots gate must accept them
+  // through the read-permission branch.
+  const mro: UserWithRole = {
+    user: await prisma.user.create({
+      data: {
+        email: normalizeEmail(MRO_EMAIL),
+        firstNameEn: 'Slot',
+        lastNameEn: 'Mro',
+        roleId: mroRole.id,
+        // MRO is cross-department in production — leave departmentId null.
+        createdBy: superAdmin.id,
+      },
+    }),
+    roleCode: ROLE.MEDICAL_RECORDS_OFFICER,
+  };
+
+  // F15 — PHARMACY user. Holds no `schedule.read.*` and no
+  // `appointment.create.*`. The widened gate must still reject them.
+  const pharmacy: UserWithRole = {
+    user: await prisma.user.create({
+      data: {
+        email: normalizeEmail(PHARMACY_EMAIL),
+        firstNameEn: 'Slot',
+        lastNameEn: 'Pharmacy',
+        roleId: pharmacyRole.id,
+        createdBy: superAdmin.id,
+      },
+    }),
+    roleCode: ROLE.PHARMACY,
+  };
+
   const stamp = Date.now().toString(36).slice(-6);
 
   // Post-Item-3: Doctor inherits its department from the linked User row
@@ -332,6 +379,8 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     doctorUser,
     doctorPeerUser,
     doctorForeignUser,
+    mro,
+    pharmacy,
     doctor,
     doctorPeer,
     doctorForeign,
@@ -348,6 +397,8 @@ async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
     normalizeEmail(DOCTOR_USER_EMAIL),
     normalizeEmail(DOCTOR_PEER_USER_EMAIL),
     normalizeEmail(DOCTOR_FOREIGN_USER_EMAIL),
+    normalizeEmail(MRO_EMAIL),
+    normalizeEmail(PHARMACY_EMAIL),
   ];
 
   const users = await prisma.user.findMany({
@@ -575,24 +626,35 @@ describe('F07 — appointment types + slot finder e2e', () => {
       .set('Authorization', `Bearer ${jwt}`);
 
     expect(res.status).toBe(200);
+    // F15 — every slot also carries the owning doctor's identity triplet
+    // (`doctorId`, `doctorCode`, `doctorName`). Asserted in detail below.
     expect(res.body).toEqual([
       {
         startAt: slotIso(9, 0),
         endAt: slotIso(9, 20),
         departmentId: fixtures!.deptPrimary.id,
         scheduleId: happySchedule.id,
+        doctorId: fixtures!.doctor.id,
+        doctorCode: fixtures!.doctor.doctorCode,
+        doctorName: 'Slot Doctor',
       },
       {
         startAt: slotIso(9, 20),
         endAt: slotIso(9, 40),
         departmentId: fixtures!.deptPrimary.id,
         scheduleId: happySchedule.id,
+        doctorId: fixtures!.doctor.id,
+        doctorCode: fixtures!.doctor.doctorCode,
+        doctorName: 'Slot Doctor',
       },
       {
         startAt: slotIso(9, 40),
         endAt: slotIso(10, 0),
         departmentId: fixtures!.deptPrimary.id,
         scheduleId: happySchedule.id,
+        doctorId: fixtures!.doctor.id,
+        doctorCode: fixtures!.doctor.doctorCode,
+        doctorName: 'Slot Doctor',
       },
     ]);
 
@@ -927,17 +989,26 @@ describe('F07 — appointment types + slot finder e2e', () => {
     expect(res.body.code).toBe(ErrorCode.VALIDATION_FAILED);
   });
 
-  maybe('STAFF: missing doctorId returns 400 VALIDATION_FAILED', async () => {
-    const jwt = await jwtFor(fixtures!.nurse);
-    const res = await request(server)
-      .get(
-        `/api/v1/slots?departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
-      )
-      .set('Authorization', `Bearer ${jwt}`);
+  maybe(
+    'STAFF: omitting doctorId is allowed (F15 multi-doctor fan-out) — 200',
+    async () => {
+      // F15 widened `doctorId` to OPTIONAL. The fan-out path returns
+      // 200 with the merged slot list across every doctor with an
+      // active schedule in `departmentId` on `date`. The detailed
+      // multi-doctor merge assertion lives in the F15 describe block
+      // further down; this case just locks the wire-level "no 400"
+      // contract.
+      const jwt = await jwtFor(fixtures!.nurse);
+      const res = await request(server)
+        .get(
+          `/api/v1/slots?departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
 
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe(ErrorCode.VALIDATION_FAILED);
-  });
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+    },
+  );
 
   maybe('STAFF: malformed doctorId (not a uuid) returns 400 VALIDATION_FAILED', async () => {
     // The old path-param form used `ParseUUIDPipe` to reject this; the
@@ -1048,9 +1119,14 @@ describe('F07 — appointment types + slot finder e2e', () => {
       expect(ownSlots[0].departmentId).toBe(fixtures!.deptPrimary.id);
     });
 
-    maybe('DOCTOR: GET /slots for a SAME-DEPT foreign doctorId returns 403 INSUFFICIENT_PERMISSION_SCOPE', async () => {
-      // doctorPeer lives in the SAME deptPrimary. The scope arm matches
-      // strictly on `Doctor.id`, so even a same-dept peer must be rejected.
+    maybe('DOCTOR: GET /slots for a SAME-DEPT foreign doctorId returns 200 (F15 — OWN_DEPARTMENT read scope)', async () => {
+      // doctorPeer lives in the SAME deptPrimary. Per F15 the seeded
+      // DOCTOR holds `schedule.read.own-department`, which short-
+      // circuits to `OWN_DEPARTMENT` before the `.own` doctor gate
+      // runs. The widened policy lets DOCTOR enumerate a colleague's
+      // slots in their OWN dept (US-15.2 — `OWN_PLUS_DEPT + dept`); the
+      // FE hides the "Book this slot" CTA for foreign doctors because
+      // `appointment.create.own` still gates the actual write.
       const jwt = await jwtFor(fixtures!.doctorUser);
       const res = await request(server)
         .get(
@@ -1058,24 +1134,18 @@ describe('F07 — appointment types + slot finder e2e', () => {
         )
         .set('Authorization', `Bearer ${jwt}`);
 
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
-      expect(res.body.details).toEqual(
-        expect.objectContaining({
-          required: [PERMISSION.APPOINTMENT_CREATE_OWN],
-          scope: SCOPE.OWN,
-          requestedDoctorId: fixtures!.doctorPeer.id,
-          ownDoctorId: fixtures!.doctor.id,
-        }),
-      );
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
     });
 
     maybe('DOCTOR: GET /slots for a CROSS-DEPT foreign doctorId STILL returns 403 INSUFFICIENT_PERMISSION_SCOPE', async () => {
-      // doctorForeign lives in deptWithoutType (a different dept). Same
-      // rejection family — the `.own` arm checks the doctor id BEFORE it
-      // ever looks at the department filter, so probing a colleague in a
-      // different dept fails with the same error code as the same-dept
-      // case above.
+      // doctorForeign lives in deptWithoutType (a different dept).
+      // F15's widest-scope-wins resolver: dept gate fails (caller's
+      // home dept != requested dept), then the `.own` fall-through
+      // also fails (requested doctorId != caller.doctor.id). The
+      // surfaced error is the OWN_DEPARTMENT scope rejection because
+      // that's the widest scope the caller held that didn't authorise
+      // the request.
       const jwt = await jwtFor(fixtures!.doctorUser);
       const res = await request(server)
         .get(
@@ -1087,13 +1157,227 @@ describe('F07 — appointment types + slot finder e2e', () => {
       expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
       expect(res.body.details).toEqual(
         expect.objectContaining({
-          required: [PERMISSION.APPOINTMENT_CREATE_OWN],
-          scope: SCOPE.OWN,
-          requestedDoctorId: fixtures!.doctorForeign.id,
-          ownDoctorId: fixtures!.doctor.id,
+          required: [
+            PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+            PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+          ],
+          scope: SCOPE.OWN_DEPARTMENT,
+          requestedDepartmentId: fixtures!.deptWithoutType.id,
         }),
       );
     });
+  });
+
+  // ─── F15 — multi-doctor fan-out + widened permission gate ────────────
+  //
+  // The F15 changes to /slots:
+  //  - `doctorId` becomes OPTIONAL; omitting it fans out across every
+  //    doctor with an active schedule in `departmentId` on `date`.
+  //  - The permission gate widens to also accept `schedule.read.all`
+  //    (any-of with the existing `appointment.create.{own,own-department}`).
+  //  - Every emitted slot carries the owning doctor's `doctorId`,
+  //    `doctorCode`, and `doctorName` for display.
+  //
+  // Each case below seeds a unique-time-window schedule (so the rows
+  // don't collide with prior tests in this suite) and asserts the wire-
+  // level contract.
+  describe('F15 — multi-doctor fan-out + widened permission gate', () => {
+    maybe(
+      'NURSE (.own-department) omits doctorId → 200 with merged slots from every doctor in own dept',
+      async () => {
+        // Two parallel schedules in the same dept on a non-colliding
+        // hour (18:00–19:00) — one for `doctor`, one for `doctorPeer`.
+        // The merged response MUST include slots from BOTH doctors.
+        const schedDoctor = await prisma.doctorSchedule.create({
+          data: {
+            doctorId: fixtures!.doctor.id,
+            departmentId: fixtures!.deptPrimary.id,
+            startAt: slotDate(18, 0),
+            endAt: slotDate(19, 0),
+            createdBy: fixtures!.superAdminId,
+          },
+        });
+        const schedPeer = await prisma.doctorSchedule.create({
+          data: {
+            doctorId: fixtures!.doctorPeer.id,
+            departmentId: fixtures!.deptPrimary.id,
+            startAt: slotDate(18, 0),
+            endAt: slotDate(19, 0),
+            createdBy: fixtures!.superAdminId,
+          },
+        });
+
+        const jwt = await jwtFor(fixtures!.nurse);
+        const res = await request(server)
+          .get(
+            `/api/v1/slots?departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+          )
+          .set('Authorization', `Bearer ${jwt}`);
+
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body)).toBe(true);
+
+        // Restrict to the schedules we just created (the suite seeds
+        // others on this same date).
+        const ourSlots = res.body.filter((s: { scheduleId: string }) =>
+          [schedDoctor.id, schedPeer.id].includes(s.scheduleId),
+        );
+
+        // Every emitted slot carries doctor identity (F15).
+        for (const slot of ourSlots) {
+          expect(typeof slot.doctorId).toBe('string');
+          expect(typeof slot.doctorCode).toBe('string');
+          expect(typeof slot.doctorName).toBe('string');
+        }
+
+        // BOTH doctors are represented in the merged response.
+        const doctorIds = new Set(
+          ourSlots.map((s: { doctorId: string }) => s.doctorId),
+        );
+        expect(doctorIds.has(fixtures!.doctor.id)).toBe(true);
+        expect(doctorIds.has(fixtures!.doctorPeer.id)).toBe(true);
+
+        // Sorted by startAt — interleaved doctor blocks share the same
+        // grid times, so we just check monotonicity.
+        const starts = ourSlots.map((s: { startAt: string }) =>
+          new Date(s.startAt).getTime(),
+        );
+        for (let i = 1; i < starts.length; i += 1) {
+          expect(starts[i]).toBeGreaterThanOrEqual(starts[i - 1]);
+        }
+      },
+    );
+
+    maybe(
+      'MRO (schedule.read.all, no appointment.create.*) → 200 with merged slots',
+      async () => {
+        // Schedule on a non-colliding hour (19:00–20:00) so this case
+        // doesn't share a window with the NURSE fan-out test above.
+        const mroSchedule = await prisma.doctorSchedule.create({
+          data: {
+            doctorId: fixtures!.doctor.id,
+            departmentId: fixtures!.deptPrimary.id,
+            startAt: slotDate(19, 0),
+            endAt: slotDate(20, 0),
+            createdBy: fixtures!.superAdminId,
+          },
+        });
+
+        const jwt = await jwtFor(fixtures!.mro);
+        const res = await request(server)
+          .get(
+            `/api/v1/slots?departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+          )
+          .set('Authorization', `Bearer ${jwt}`);
+
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body)).toBe(true);
+
+        const ourSlots = res.body.filter(
+          (s: { scheduleId: string }) => s.scheduleId === mroSchedule.id,
+        );
+
+        // 60-minute schedule × 20-minute CONSULTATION → 3 slots.
+        expect(ourSlots).toHaveLength(3);
+        expect(ourSlots[0].doctorId).toBe(fixtures!.doctor.id);
+        expect(typeof ourSlots[0].doctorCode).toBe('string');
+        expect(typeof ourSlots[0].doctorName).toBe('string');
+      },
+    );
+
+    maybe(
+      'PHARMACY (no schedule.read.* + no appointment.create.*) → 403 INSUFFICIENT_PERMISSION',
+      async () => {
+        const jwt = await jwtFor(fixtures!.pharmacy);
+        const res = await request(server)
+          .get(
+            `/api/v1/slots?departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+          )
+          .set('Authorization', `Bearer ${jwt}`);
+
+        expect(res.status).toBe(403);
+        expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION);
+      },
+    );
+
+    maybe(
+      'NURSE cross-dept (foreign departmentId) → 403 INSUFFICIENT_PERMISSION_SCOPE',
+      async () => {
+        // NURSE lives in deptPrimary; query deptWithoutType (a foreign
+        // department). The scope guard rejects with the SAME code
+        // whether `doctorId` is supplied or omitted.
+        const jwt = await jwtFor(fixtures!.nurse);
+        const res = await request(server)
+          .get(
+            `/api/v1/slots?departmentId=${fixtures!.deptWithoutType.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+          )
+          .set('Authorization', `Bearer ${jwt}`);
+
+        expect(res.status).toBe(403);
+        expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
+        expect(res.body.details).toEqual(
+          expect.objectContaining({
+            required: [
+              PERMISSION.SCHEDULE_READ_OWN_DEPARTMENT,
+              PERMISSION.APPOINTMENT_CREATE_OWN_DEPARTMENT,
+            ],
+            scope: SCOPE.OWN_DEPARTMENT,
+            requestedDepartmentId: fixtures!.deptWithoutType.id,
+          }),
+        );
+      },
+    );
+
+    maybe(
+      'DOCTOR (own-dept read + own-doctor write) omits doctorId → 200 with merged dept-wide slots (F15 — US-15.2)',
+      async () => {
+        // The seeded DOCTOR holds `schedule.read.own-department` +
+        // `schedule.read.own` + `appointment.create.own`. Widest-
+        // scope-wins promotes them to `OWN_DEPARTMENT` for the slot
+        // finder, so omitting `doctorId` and asking about their own
+        // department returns a merged dept-wide grid (matching the
+        // NURSE fan-out above). This is the exact code path that 403'd
+        // before the F15 follow-up fix.
+        const schedDoctor = await prisma.doctorSchedule.create({
+          data: {
+            doctorId: fixtures!.doctor.id,
+            departmentId: fixtures!.deptPrimary.id,
+            startAt: slotDate(20, 0),
+            endAt: slotDate(21, 0),
+            createdBy: fixtures!.superAdminId,
+          },
+        });
+        const schedPeer = await prisma.doctorSchedule.create({
+          data: {
+            doctorId: fixtures!.doctorPeer.id,
+            departmentId: fixtures!.deptPrimary.id,
+            startAt: slotDate(20, 0),
+            endAt: slotDate(21, 0),
+            createdBy: fixtures!.superAdminId,
+          },
+        });
+
+        const jwt = await jwtFor(fixtures!.doctorUser);
+        const res = await request(server)
+          .get(
+            `/api/v1/slots?departmentId=${fixtures!.deptPrimary.id}&date=${SCHEDULE_DATE_ISO}&type=${AppointmentType.CONSULTATION}`,
+          )
+          .set('Authorization', `Bearer ${jwt}`);
+
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body)).toBe(true);
+
+        const ourSlots = res.body.filter((s: { scheduleId: string }) =>
+          [schedDoctor.id, schedPeer.id].includes(s.scheduleId),
+        );
+
+        const doctorIds = new Set(
+          ourSlots.map((s: { doctorId: string }) => s.doctorId),
+        );
+        expect(doctorIds.has(fixtures!.doctor.id)).toBe(true);
+        expect(doctorIds.has(fixtures!.doctorPeer.id)).toBe(true);
+      },
+    );
   });
 });
 
