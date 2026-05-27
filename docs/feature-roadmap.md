@@ -131,6 +131,7 @@ below live in `docs/user-stories.md`.
 
 | F16 ✅ | Standalone-visit type guard + optional reason | `feat/booking-validation-rules` | Tighten the `POST /appointments` body: standalone bookings (no `previousAppointmentId`) MUST have `appointmentType=NEW_PATIENT_VISIT`; any other type returns `400 STANDALONE_APPOINTMENT_TYPE_INVALID`. Drop the `@ValidateIf(PROCEDURE) @IsNotEmpty()` decorator from `CreateAppointmentDto.reason` — `reason` is now optional for every type. FE booking wizard: the F14 continuation-type narrowing (memo + cascade `useEffect`) now short-circuits when `hasPrefilledSlot=true`, so a find-slot deep link carrying `NEW_PATIENT_VISIT` survives the filter instead of being cleared. | US-7.2 (amended) | F09, F14, F15 | Standalone `POST /appointments` with `FOLLOW_UP` → 400 STANDALONE_APPOINTMENT_TYPE_INVALID; standalone with `NEW_PATIENT_VISIT` → 201; PROCEDURE without `reason` → 201 (was 400); FE find-slot → booking deep link no longer clears the pre-filled `NEW_PATIENT_VISIT`. | S | P1 |
 | F17 ✅ | Booking-type partition completion + wizard filter | `feat/booking-type-filters` | Broaden `CONTINUATION_APPOINTMENT_TYPES` to `[FOLLOW_UP, PROCEDURE, CONSULTATION]` (was `[FOLLOW_UP, PROCEDURE]`) so the standalone / continuation sets form a complementary partition: standalone = `[NEW_PATIENT_VISIT]`, continuation = everything else. `CONSULTATION` is now reachable through `POST /appointments` (as a continuation only) — previously it was unbookable. Mirror the rule on the FE: the booking wizard's appointment-type select now filters to only `NEW_PATIENT_VISIT` in the standalone flow and to every type EXCEPT `NEW_PATIENT_VISIT` in the continuation flow. The `hasPrefilledSlot` short-circuit from F16 stays so find-slot deep links survive. | US-7.2 (amended) | F09, F14, F16 | Continuation `POST /appointments` with `CONSULTATION` + `previousAppointmentId` → 201 (was 400); continuation with `NEW_PATIENT_VISIT` → 400 CONTINUATION_APPOINTMENT_TYPE_INVALID; FE booking wizard standalone view shows only `NEW_PATIENT_VISIT`; continuation view shows every dept-allowed type minus `NEW_PATIENT_VISIT`. | S | P1 |
+| F20 | Patients directory (list + register CTA)             | `feat/patients-list`    | FE-only: `/patients` list page (paginated, free-text `?q=` filter, permission-gated "Register patient" CTA) built on the existing `GET /patients` + `POST /patients` BE from F09. `PatientListRow` shows name (en + th), HN, DOB, gender, phone. Sidebar nav entry gated on `patient.read`. No `/patients/:id` detail page in this feature. | US-20.1, US-20.2 | F09 | Sign in as NURSE → `/patients` renders the patient list with pagination; register CTA visible. Sign in as PHARMACY → `/patients` renders the list (read only, no register CTA). Sign in as ADMIN → forbidden card (ADMIN lacks `patient.read`). Search box filters by name/phone/ID/HN. | S | P1 |
 | F18 ✅ | Doctor workspace + RBAC collapse of medical-records mutations | `feat/doctor-workspace` | Introduces a doctor-only workspace surface: a new `/workspace` page listing the caller's visits in two sections (upcoming `BOOKED` + history `COMPLETED`/`CANCELLED`) and a **dedicated `/workspace/:id`** detail page (NOT an enhanced `/appointments/:id` — that reverted to its plain F09 form) showing patient panel, medical-records history (new `?appointmentGroupId=` filter on `GET /medical-records`, with an `?appointmentId=` fallback for standalone past visits; each card shows the authoring doctor + department), and a required note/drug panel (only while `BOOKED`) that submits with the chosen end-of-visit action. Three RPC endpoints absorb the note + drug: `POST /appointments/:id/complete` (now also closes the group when one exists — replaces the legacy `POST /appointment-groups/:id/close`), `POST /appointments/:id/refer`, and the new `POST /appointments/:id/follow-up` (atomic: complete current + create FOLLOW_UP in same group + insert record). Also adds `GET /patients/:id` (gated on `patient.read`) to feed the patient panel. RBAC delta: ADD `doctor_workspace.read.own` (FE nav/page gate only, DOCTOR-only); DELETE `medical_records.{create.own, update.own, update.all}` (records become write-once, only the workspace actions can author one). `POST /medical-records` and `PATCH /medical-records/:id` controller routes are removed; `GET /medical-records` keeps reading. | US-18.1, US-18.2, US-18.3, US-18.4, US-18.5, US-18.6 | F09, F14 | DOCTOR opens `/workspace`, sees their BOOKED queue (top) + past visits (below); opens a visit at `/workspace/:id`, writes a note, clicks Complete → appointment is `COMPLETED`, `medical_records` row inserted, and (when grouped) `appointment_groups.closedAt` set — all in one transaction. Clicking Follow Up → date+slot dialog → confirms → current visit completed AND new FOLLOW_UP appointment created in the same group with `previousAppointmentId` set. Clicking Refer → existing F14 referral flow now also creates the record. Empty `note` on any action → `400 VALIDATION_FAILED`. Direct `POST /medical-records` returns `404` (route gone). MRO loses `medical_records.update.all` → all `PATCH` calls return `404`. | L | P1 |
 
 > **F04, F10 were removed when patient sign-in / self-service was scoped out (2026-05-24).** The feature IDs are intentionally left as gaps — IDs stay stable so commit and PR references continue to resolve. F08 was repurposed for the medical records module and F09 absorbed the original "F08 staff booking" scope when the RBAC overhaul moved booking to NURSE (department-scoped) and DOCTOR (own-doctor) instead of a blanket STAFF role.
@@ -2107,6 +2108,63 @@ curl -i -X POST http://localhost:3001/api/v1/appointment-groups/<id>/close ...  
 # Sign in as records1@gmail.com (MRO) — any PATCH attempt on a
 # medical record returns 404; GET still works.
 ```
+
+---
+
+### F20 — Patients directory (list + register CTA) (P1, S)
+
+**Why a standalone feature**
+
+The patient list is a natural companion to the doctors directory (F05):
+a paginated, permission-gated directory surface built entirely on an
+existing backend API. Splitting it from the walk-in registration form
+(F09, `/patients/new`) keeps each PR focused and lets the list land
+independently.
+
+**Files shipped**
+
+Frontend (`apps/web/src/`):
+- `components/patient/PatientListRow.tsx` — one row: full name (en + th
+  via `formatPatientFullName`), HN badge, DOB (locale-formatted via
+  dayjs), gender (from `Common.Gender` catalog), phone. Display-only
+  (no detail link — no `/patients/:id` FE page in F20).
+- `components/patient/PatientListFilter.tsx` — free-text `q` search
+  field; resets `page=1` on change per CLAUDE.md §8.
+- `components/patient/PatientsNewButton.tsx` — client wrapper for the
+  "Register patient" `<Button component={Link}>` CTA (RSC boundary
+  pattern from `AppointmentsNewButton`).
+- `app/[locale]/(app)/patients/page.tsx` — server component: gated on
+  `PERMISSION_CODE.PATIENT_READ`, fetches `listPatients`, renders
+  filter + list + `<PaginationControl>`. "Register patient" CTA only
+  renders when the caller also holds `PERMISSION_CODE.PATIENT_CREATE`.
+  `generateMetadata` emits a localized title.
+- `app-shell/nav-items.const.ts` — added `PATIENTS` icon key + nav
+  catalog entry gated on `patient.read`, placed before `patients-new`.
+- `components/app-shell/AppSidebar.tsx` — registered
+  `RecentActorsIcon` for `NAV_ICON.PATIENTS`.
+- `messages/en.json` + `messages/th.json` — new `Patients.List`
+  namespace (`title`, `subtitle`, `registerPatient`, `empty`,
+  `hnLabel`, `dobLabel`, `genderLabel`, `phoneLabel`, `searchLabel`,
+  `searchPlaceholder`) + `Nav.items.patients` key.
+- `i18n/keys.generated.ts` — regenerated (`pnpm gen:i18n`).
+
+**Manual smoke test**
+
+1. Sign in as **NURSE** → `/patients` renders patient list with
+   pagination; "Register patient" button visible. Click it → lands on
+   `/patients/new` (existing F09 form).
+2. Type in the search box → URL updates to `?q=<term>&page=1`; list
+   filters by name/phone/ID/HN. Clear field → back to unfiltered list.
+3. Paginate with `?page=2` → pagination control shows correct totals;
+   `?q=` filter is preserved across pages.
+4. Sign in as **PHARMACY** → `/patients` renders patient list (read
+   only); "Register patient" button is absent (PHARMACY lacks
+   `patient.create`).
+5. Sign in as **ADMIN** → `/patients` renders the forbidden card
+   (ADMIN lacks `patient.read` in the seeded baseline).
+6. Sidebar: NURSE / MRO / DOCTOR / PHARMACY all see a "Patients" entry
+   between the existing "Register patient" entry and the nav ordering
+   above it. ADMIN sidebar has no "Patients" entry.
 
 ---
 

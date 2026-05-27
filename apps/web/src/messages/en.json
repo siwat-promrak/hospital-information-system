@@ -134,7 +134,8 @@
       "appointmentGroups": "Cases",
       "referrals": "Referrals",
       "findSlot": "Find slot",
-      "workspace": "Workspace"
+      "workspace": "Workspace",
+      "patients": "Patients"
     }
   },
   "Breadcrumb": {
@@ -521,6 +522,18 @@
       "emergencyPersonRelationLabel": "Relationship",
       "emergencyPersonPhoneLabel": "Emergency phone",
       "addressLabel": "Address"
+    },
+    "List": {
+      "title": "Patients",
+      "subtitle": "Browse and manage the patient directory.",
+      "registerPatient": "Register patient",
+      "empty": "No patients found.",
+      "hnLabel": "HN",
+      "dobLabel": "Date of birth",
+      "genderLabel": "Gender",
+      "phoneLabel": "Phone",
+      "searchLabel": "Search patients",
+      "searchPlaceholder": "Name, phone, ID, or HN…"
     }
   },
   "BookingWizard": {

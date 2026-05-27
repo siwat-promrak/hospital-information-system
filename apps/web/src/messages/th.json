@@ -134,7 +134,8 @@
       "appointmentGroups": "เคส",
       "referrals": "การส่งต่อ",
       "findSlot": "ค้นหาช่วงเวลา",
-      "workspace": "พื้นที่ทำงาน"
+      "workspace": "พื้นที่ทำงาน",
+      "patients": "ผู้ป่วย"
     }
   },
   "Breadcrumb": {
@@ -521,6 +522,18 @@
       "emergencyPersonRelationLabel": "ความสัมพันธ์",
       "emergencyPersonPhoneLabel": "โทรศัพท์ฉุกเฉิน",
       "addressLabel": "ที่อยู่"
+    },
+    "List": {
+      "title": "ผู้ป่วย",
+      "subtitle": "ค้นหาและจัดการทะเบียนผู้ป่วย",
+      "registerPatient": "ลงทะเบียนผู้ป่วย",
+      "empty": "ไม่พบผู้ป่วย",
+      "hnLabel": "HN",
+      "dobLabel": "วันเกิด",
+      "genderLabel": "เพศ",
+      "phoneLabel": "โทรศัพท์",
+      "searchLabel": "ค้นหาผู้ป่วย",
+      "searchPlaceholder": "ชื่อ, โทรศัพท์, เลขประจำตัว, หรือ HN…"
     }
   },
   "BookingWizard": {
