@@ -92,10 +92,18 @@ export type ScheduleScope =
   (typeof SCHEDULE_SCOPE)[keyof typeof SCHEDULE_SCOPE];
 
 export const SCHEDULE_ERROR_CODE = {
-  OVERLAP: "SCHEDULE_OVERLAP",
   DOCTOR_NOT_IN_DEPARTMENT: "DOCTOR_NOT_IN_DEPARTMENT",
-  INSUFFICIENT_PERMISSION_SCOPE: "INSUFFICIENT_PERMISSION_SCOPE",
+  /**
+   * Returned by `PATCH /schedules/:id` AND `DELETE /schedules/:id` when
+   * the schedule has at least one non-CANCELLED appointment
+   * (`status IN ('BOOKED', 'COMPLETED')`). The BE response carries
+   * `details.blockingAppointmentCount` so the FE can render a pluralised
+   * "N appointments are still booked" message.
+   */
+  HAS_APPOINTMENTS: "SCHEDULE_HAS_APPOINTMENTS",
   INSUFFICIENT_PERMISSION: "INSUFFICIENT_PERMISSION",
+  INSUFFICIENT_PERMISSION_SCOPE: "INSUFFICIENT_PERMISSION_SCOPE",
+  OVERLAP: "SCHEDULE_OVERLAP",
   /**
    * Returned by `POST /schedules` AND `PATCH /schedules/:id` when the
    * resulting `startAt` is in the past. The BE re-checks on the merged

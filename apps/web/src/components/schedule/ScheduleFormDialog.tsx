@@ -199,6 +199,9 @@ export default function ScheduleFormDialog({
   const tForm = useTranslations(NS.SchedulesForm);
   const tFieldErrors = useTranslations(NS.SchedulesFormFieldErrors);
   const tErrors = useTranslations(NS.SchedulesErrors);
+  const tHasAppointmentsErrors = useTranslations(
+    NS.SchedulesErrorsHasAppointments,
+  );
   const tSchedules = useTranslations(NS.Schedules);
   const locale = useLocale();
   const router = useRouter();
@@ -482,14 +485,42 @@ export default function ScheduleFormDialog({
   }, [selectedDoctor, departmentDisplayValue, departments]);
 
   /**
+   * Pull the `blockingAppointmentCount` out of a `SCHEDULE_HAS_APPOINTMENTS`
+   * error envelope. The BE always sets it as a positive integer, but the
+   * `details` map is typed as `Record<string, unknown>` over the wire so
+   * we defensively narrow before formatting the message — a missing or
+   * non-number value falls back to `1` so the "1 appointment is still
+   * booked" copy still reads naturally.
+   */
+  function readBlockingAppointmentCount(
+    details: Record<string, unknown> | undefined,
+  ): number {
+    const raw = details?.blockingAppointmentCount;
+
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      return raw;
+    }
+
+    return 1;
+  }
+
+  /**
    * Server-side error handler. Field-level errors that point at a specific
    * input (`DOCTOR_NOT_IN_DEPARTMENT` → department select) stay inline so
    * the user sees the red helper text directly under the field. Everything
    * else surfaces via the top Alert (and the app-wide snackbar) so the
    * user gets an unambiguous "this didn't save" signal even when the modal
    * is scrolled.
+   *
+   * `operation` distinguishes update vs delete so the
+   * `SCHEDULE_HAS_APPOINTMENTS` 409 can pick the matching copy ("Cannot
+   * edit…" vs "Cannot delete…"). The form dialog stays open in this case
+   * so the user can dismiss / cancel from a known surface.
    */
-  function applyServerError(error: ScheduleActionError): void {
+  function applyServerError(
+    error: ScheduleActionError,
+    operation: "update" | "delete",
+  ): void {
     setServerError(null);
     setDepartmentServerError(null);
 
@@ -497,6 +528,20 @@ export default function ScheduleFormDialog({
       setDepartmentServerError(
         tErrors(K.Schedules.Errors.doctorNotInDepartment),
       );
+
+      return;
+    }
+
+    if (error.code === SCHEDULE_ERROR_CODE.HAS_APPOINTMENTS) {
+      const count = readBlockingAppointmentCount(error.details);
+      const messageKey =
+        operation === "delete"
+          ? K.Schedules.Errors.hasAppointments.delete
+          : K.Schedules.Errors.hasAppointments.update;
+      const message = tHasAppointmentsErrors(messageKey, { count });
+
+      setServerError(message);
+      notify.error(error.code, message);
 
       return;
     }
@@ -545,7 +590,7 @@ export default function ScheduleFormDialog({
         const result = await updateScheduleAction(editing.id, body);
 
         if (!result.ok) {
-          applyServerError(result.error);
+          applyServerError(result.error, "update");
 
           return;
         }
@@ -563,7 +608,12 @@ export default function ScheduleFormDialog({
       });
 
       if (!result.ok) {
-        applyServerError(result.error);
+        // Create can never surface `SCHEDULE_HAS_APPOINTMENTS` (no
+        // appointments exist against a row that doesn't exist yet),
+        // so the operation kind is "update" only as a placeholder
+        // for the unused branch — the function only branches on
+        // `SCHEDULE_HAS_APPOINTMENTS`, which can't fire here.
+        applyServerError(result.error, "update");
 
         return;
       }
@@ -583,7 +633,14 @@ export default function ScheduleFormDialog({
       const result = await deleteScheduleAction(editing.id);
 
       if (!result.ok) {
-        applyServerError(result.error);
+        // Close the inner delete-confirm dialog so the snackbar +
+        // top-of-form Alert in the still-open ScheduleFormDialog are
+        // visible to the user. The form dialog stays open so the user
+        // can dismiss / cancel from a known surface (per the
+        // SCHEDULE_HAS_APPOINTMENTS UX agreement — no auto-close on
+        // reversible blocking errors).
+        setConfirmingDelete(false);
+        applyServerError(result.error, "delete");
 
         return;
       }

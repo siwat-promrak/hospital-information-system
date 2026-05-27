@@ -328,7 +328,12 @@
       "missingDepartment": "Select a department.",
       "missingDate": "Select a date.",
       "invalidDateTime": "Date or time is invalid.",
-      "generic": "Failed to save the schedule. Please try again."
+      "generic": "Failed to save the schedule. Please try again.",
+      "hasAppointments": {
+        "title": "Schedule has appointments",
+        "update": "Cannot edit this schedule because {count, plural, one {# appointment is} other {# appointments are}} still booked on it. Cancel them first.",
+        "delete": "Cannot delete this schedule because {count, plural, one {# appointment is} other {# appointments are}} still booked on it. Cancel them first."
+      }
     }
   },
   "Appointments": {
