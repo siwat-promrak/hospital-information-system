@@ -738,6 +738,8 @@
     "byDoctor": "โดย นพ./พญ. {doctorName}",
     "visitNumber": "การเข้ารับบริการครั้งที่ {number}",
     "noteLabel": "บันทึก",
-    "drugLabel": "ยา"
+    "drugLabel": "ยา",
+    "doctorLabel": "แพทย์",
+    "departmentLabel": "แผนก"
   }
 }

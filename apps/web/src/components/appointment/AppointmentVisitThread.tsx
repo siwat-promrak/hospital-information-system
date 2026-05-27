@@ -7,6 +7,7 @@ import Typography from "@mui/material/Typography";
 import { getTranslations } from "next-intl/server";
 
 import { K, NS } from "@/i18n/keys.generated";
+import { formatDoctorFullName } from "@/appointment/labels";
 import { listMedicalRecords } from "@/lib/api/medical-record.api";
 import { PAGE_SIZE_ALL } from "@/lib/api/pagination.const";
 import { dayjs } from "@/lib/dayjs";
@@ -82,6 +83,29 @@ export default async function AppointmentVisitThread({
                     <Typography variant="caption" color="text.secondary">
                       {dayjs(record.createdAt).locale(locale).format("LL HH:mm")}
                     </Typography>
+                  </Stack>
+
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={2}
+                  >
+                    <Stack spacing={0.5}>
+                      <Typography variant="caption" color="text.secondary">
+                        {t(K.VisitThread.doctorLabel)}
+                      </Typography>
+                      <Typography variant="body2">
+                        {formatDoctorFullName(record.doctor)} ({record.doctor.doctorCode})
+                      </Typography>
+                    </Stack>
+
+                    <Stack spacing={0.5}>
+                      <Typography variant="caption" color="text.secondary">
+                        {t(K.VisitThread.departmentLabel)}
+                      </Typography>
+                      <Typography variant="body2">
+                        {record.department.name}
+                      </Typography>
+                    </Stack>
                   </Stack>
 
                   <Stack spacing={0.5}>

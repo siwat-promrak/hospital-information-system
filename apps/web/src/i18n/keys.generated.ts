@@ -719,6 +719,8 @@ export const K = {
   },
   VisitThread: {
     byDoctor: "byDoctor",
+    departmentLabel: "departmentLabel",
+    doctorLabel: "doctorLabel",
     drugLabel: "drugLabel",
     empty: "empty",
     noteLabel: "noteLabel",

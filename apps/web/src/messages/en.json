@@ -738,6 +738,8 @@
     "byDoctor": "By Dr. {doctorName}",
     "visitNumber": "Visit {number}",
     "noteLabel": "Note",
-    "drugLabel": "Medications"
+    "drugLabel": "Medications",
+    "doctorLabel": "Doctor",
+    "departmentLabel": "Department"
   }
 }
