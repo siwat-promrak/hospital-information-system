@@ -2058,6 +2058,69 @@ grid toggle, so that I can either read the full text of a few records
   copy-select inside the note text.
 - Switching modes never refetches — the same RSC response data is
   re-rendered with a different presentation.
+---
+
+## E20 — Patients directory (list + register CTA)
+
+Delivered by **F20** (`feat/patients-list`). Provides front-desk and
+clinical staff with a searchable, paginated view of all registered
+patients, and a permission-gated shortcut into the walk-in registration
+form.
+
+> There is **no `/patients/:id` detail page** in F20 — the patient
+> demographic panel is surfaced in context (booking wizard, workspace
+> visit detail). A standalone patient detail page is deferred.
+
+---
+
+### US-20.1 — List patients (paginated, filterable, gated on `patient.read`)
+
+**As a** NURSE / MRO / DOCTOR / PHARMACY user  
+**I want** a paginated directory at `/patients`  
+**so that** I can browse or search for a patient without leaving the app.
+
+**Acceptance criteria**
+
+- The page is only accessible to callers who hold `patient.read`.
+  Callers who lack the permission see a "forbidden" card instead of the
+  list (no redirect, consistent with the rest of the directory pages).
+- The list is paginated with the shared `Paginated<T>` envelope
+  (`page`, `pageSize=20`, `total`, `totalPages`). A
+  `<PaginationControl>` renders at the bottom and is hidden when
+  `totalPages <= 1`.
+- Each row displays: patient full name (English primary; Thai in
+  parentheses when present), HN, date of birth (locale-formatted),
+  gender (localized via the `Common.Gender` catalog), phone number.
+- A free-text search field maps to the BE's `?q=` filter (matches name
+  en/th, phone, identification number, HN). Changing the filter resets
+  `page` to 1.
+- The `q` filter is preserved across page navigations (appended to the
+  pagination control's links).
+- An empty state message renders when no patients match the filter.
+- The page title is localized; `generateMetadata` emits the translated
+  title for the `<title>` tag.
+- The "Patients" sidebar nav entry is visible for every role that holds
+  `patient.read` and points to `/patients`.
+
+---
+
+### US-20.2 — Register-patient CTA (gated on `patient.create`)
+
+**As a** NURSE or MRO user  
+**I want** a "Register patient" button on the patients list header  
+**so that** I can navigate directly to the walk-in registration form
+without hunting for it in the sidebar.
+
+**Acceptance criteria**
+
+- The "Register patient" button is **only rendered** when the caller
+  holds `patient.create`. PHARMACY and DOCTOR (who hold `patient.read`
+  but not `patient.create`) see the list without the button.
+- Clicking the button navigates to `FE_PATH.PATIENTS_NEW`
+  (`/patients/new`), which is the existing F09 walk-in form. No new
+  registration logic is introduced in F20.
+- The button uses the standard MUI `variant="contained"` primary style
+  with a `+` icon, consistent with the "Book appointment" CTA pattern.
 
 ---
 

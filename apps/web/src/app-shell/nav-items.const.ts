@@ -16,6 +16,7 @@ export const NAV_ICON = {
   MEDICAL_RECORDS: "medical_records",
   APPOINTMENTS: "appointments",
   APPOINTMENTS_NEW: "appointments_new",
+  PATIENTS: "patients",
   PATIENTS_NEW: "patients_new",
   // F14 — case timeline + referrals queue.
   APPOINTMENT_GROUPS: "appointment_groups",
@@ -103,6 +104,16 @@ export const NAV_ITEMS: readonly NavItem[] = [
       PERMISSION_CODE.APPOINTMENT_CREATE_OWN,
       PERMISSION_CODE.APPOINTMENT_CREATE_OWN_DEPARTMENT,
     ],
+  },
+  {
+    id: "patients",
+    href: FE_PATH.PATIENTS,
+    iconName: NAV_ICON.PATIENTS,
+    i18nKey: K.Nav.items.patients,
+    // F20 — patients directory. All roles that hold `patient.read` see
+    // the entry: DOCTOR, NURSE, MRO, PHARMACY (per the seeded baseline).
+    // ADMIN does not hold `patient.read` by default.
+    permission: [PERMISSION_CODE.PATIENT_READ],
   },
   {
     id: "patients-new",
