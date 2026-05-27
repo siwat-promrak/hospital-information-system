@@ -617,7 +617,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     expect(queueIds).toContain(apptAId);
 
     // 4. Nurse B books the pickup in dept B (visit 2). Continuation
-    // bookings MUST use FOLLOW_UP or PROCEDURE.
+    // bookings MUST use FOLLOW_UP, PROCEDURE, or CONSULTATION.
     const apptBRes = await request(server)
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseBJwt}`)
@@ -870,7 +870,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     expect(referRes.status).toBe(200);
 
     // Try to continue in dept A again — does NOT match dept B.
-    // FOLLOW_UP because continuations must be FOLLOW_UP or PROCEDURE.
+    // FOLLOW_UP because it is a valid continuation type.
     const wrongDeptRes = await request(server)
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseAJwt}`)
@@ -1013,7 +1013,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     );
   });
 
-  maybe('Continuation with CONSULTATION type → 400 CONTINUATION_APPOINTMENT_TYPE_INVALID', async () => {
+  maybe('Continuation with CONSULTATION type → 201', async () => {
     const f = fixtures!;
     const nurseBJwt = await jwtFor(f.nurseB);
     const doctorBJwt = await jwtFor(f.doctorBUser);
@@ -1038,6 +1038,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
       .set('Authorization', `Bearer ${doctorBJwt}`);
     expect(completeRes.status).toBe(200);
 
+    // CONSULTATION is now a valid continuation type — should return 201.
     const continueRes = await request(server)
       .post('/api/v1/appointments')
       .set('Authorization', `Bearer ${nurseBJwt}`)
@@ -1050,6 +1051,51 @@ describe('F14 — appointment groups + referrals e2e', () => {
         startAt: scratchIso(2, 13, 30),
         previousAppointmentId: apptRes.body.id,
       });
+    expect(continueRes.status).toBe(201);
+    expect(continueRes.body.appointmentGroupId).toEqual(expect.any(String));
+    expect(continueRes.body.visitNumber).toBe(2);
+  });
+
+  maybe('Continuation with NEW_PATIENT_VISIT type → 400 CONTINUATION_APPOINTMENT_TYPE_INVALID', async () => {
+    const f = fixtures!;
+    const nurseBJwt = await jwtFor(f.nurseB);
+    const doctorBJwt = await jwtFor(f.doctorBUser);
+
+    // 14:50 — on the NEW_PATIENT_VISIT (30-min) grid re-anchored at
+    // the prior CONSULTATION blocker's end (13:50 + 60 = 14:50).
+    const apptRes = await request(server)
+      .post('/api/v1/appointments')
+      .set('Authorization', `Bearer ${nurseBJwt}`)
+      .send({
+        patientId: f.patient.id,
+        doctorId: f.doctorB.id,
+        departmentId: f.deptB.id,
+        scheduleId: f.scheduleB.id,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+        startAt: scratchIso(2, 14, 50),
+      });
+    expect(apptRes.status).toBe(201);
+
+    const completeRes = await request(server)
+      .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
+      .set('Authorization', `Bearer ${doctorBJwt}`);
+    expect(completeRes.status).toBe(200);
+
+    // NEW_PATIENT_VISIT is the only type that cannot be used as a
+    // continuation. The type-guard fires before the grid check, so the
+    // startAt below doesn't need to be on a grid step.
+    const continueRes = await request(server)
+      .post('/api/v1/appointments')
+      .set('Authorization', `Bearer ${nurseBJwt}`)
+      .send({
+        patientId: f.patient.id,
+        doctorId: f.doctorB.id,
+        departmentId: f.deptB.id,
+        scheduleId: f.scheduleB.id,
+        appointmentType: AppointmentType.NEW_PATIENT_VISIT,
+        startAt: scratchIso(2, 15, 30),
+        previousAppointmentId: apptRes.body.id,
+      });
     expect(continueRes.status).toBe(400);
     expect(continueRes.body.code).toBe(
       ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
@@ -1058,6 +1104,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
       expect.arrayContaining([
         AppointmentType.FOLLOW_UP,
         AppointmentType.PROCEDURE,
+        AppointmentType.CONSULTATION,
       ]),
     );
   });

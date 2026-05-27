@@ -40,8 +40,12 @@ export type AppointmentListOrder =
 /**
  * F14 — continuation visits (booking with `previousAppointmentId`) MUST
  * carry one of these appointment types. `NEW_PATIENT_VISIT` is by
- * definition not a continuation; `CONSULTATION` is a fresh advisory.
- * Only follow-ups and procedures continue a clinical thread.
+ * definition not a continuation; every other type — FOLLOW_UP, PROCEDURE,
+ * and CONSULTATION — continues an existing clinical thread.
+ *
+ * Partition (complementary, exhaustive over AppointmentType):
+ *   Standalone  → NEW_PATIENT_VISIT
+ *   Continuation → FOLLOW_UP | PROCEDURE | CONSULTATION
  *
  * The check fires inside `AppointmentsService.create` after the
  * prev-visit precondition cluster and before the per-(department, type)
@@ -51,6 +55,7 @@ export type AppointmentListOrder =
 export const CONTINUATION_APPOINTMENT_TYPES = [
   AppointmentType.FOLLOW_UP,
   AppointmentType.PROCEDURE,
+  AppointmentType.CONSULTATION,
 ] as const;
 
 export type ContinuationAppointmentType =

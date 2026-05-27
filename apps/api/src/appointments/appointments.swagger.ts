@@ -152,13 +152,14 @@ const PREVIOUS_APPOINTMENT_NOT_COMPLETED_EXAMPLE = {
 const CONTINUATION_APPOINTMENT_TYPE_INVALID_EXAMPLE = {
   statusCode: 400,
   code: ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
-  message: 'Continuation visits must be FOLLOW_UP or PROCEDURE.',
+  message: 'Continuation visits must be FOLLOW_UP, PROCEDURE, or CONSULTATION.',
   details: {
     previousAppointmentId: '7c8e2a10-1234-5678-9abc-deadbeefcafe',
-    appointmentType: AppointmentType.CONSULTATION,
+    appointmentType: AppointmentType.NEW_PATIENT_VISIT,
     allowedAppointmentTypes: [
       AppointmentType.FOLLOW_UP,
       AppointmentType.PROCEDURE,
+      AppointmentType.CONSULTATION,
     ],
   },
 };
