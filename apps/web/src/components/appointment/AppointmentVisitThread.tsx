@@ -12,31 +12,42 @@ import { PAGE_SIZE_ALL } from "@/lib/api/pagination.const";
 import { dayjs } from "@/lib/dayjs";
 
 interface AppointmentVisitThreadProps {
-  appointmentGroupId: string;
+  appointmentId: string;
+  appointmentGroupId: string | null;
   locale: string;
 }
 
 /**
- * F17 — read-only visit thread showing all medical records for the same
- * appointment group. Fetches via
- * `GET /medical-records?appointmentGroupId=<id>&pageSize=all` (the
- * `pageSize=all` sentinel — visit threads rarely exceed a handful of
- * rows). Sorted by `createdAt ASC` (the BE returns in this order by
- * default).
+ * F17 — read-only medical-records history.
  *
- * Omit this component entirely when `appointmentGroupId` is null
- * (standalone visit not yet part of a group).
+ * Two fetch modes, chosen by whether the visit belongs to a case:
+ *  - Grouped (`appointmentGroupId` set): every record in the case via
+ *    `GET /medical-records?appointmentGroupId=<id>&pageSize=all` — the full
+ *    visit thread (includes this visit's own record once completed).
+ *  - Standalone (`appointmentGroupId` null): this appointment's own record
+ *    via `GET /medical-records?appointmentId=<id>&pageSize=all` — so a
+ *    past standalone visit still surfaces the note the doctor wrote.
+ *
+ * The `pageSize=all` sentinel is safe — a case rarely exceeds a handful of
+ * rows. Records sort `createdAt ASC` (the BE default), so the latest sits
+ * at the bottom. Always read-only.
  */
 export default async function AppointmentVisitThread({
+  appointmentId,
   appointmentGroupId,
   locale,
 }: AppointmentVisitThreadProps) {
   const t = await getTranslations(NS.VisitThread);
 
-  const result = await listMedicalRecords({
-    appointmentGroupId,
-    pageSize: PAGE_SIZE_ALL,
-  });
+  const result = appointmentGroupId
+    ? await listMedicalRecords({
+        appointmentGroupId,
+        pageSize: PAGE_SIZE_ALL,
+      })
+    : await listMedicalRecords({
+        appointmentId,
+        pageSize: PAGE_SIZE_ALL,
+      });
 
   return (
     <Card variant="outlined">

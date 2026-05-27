@@ -121,16 +121,7 @@ export default function AppointmentListRow({
               mt: 0.5,
             }}
           >
-            <Typography
-              component={Link}
-              href={href}
-              variant="body2"
-              color="text.secondary"
-              sx={{
-                textDecoration: "none",
-                "&:hover": { color: "primary.main" },
-              }}
-            >
+            <Typography variant="body2" color="text.secondary">
               {start.format("ddd, D MMM YYYY HH:mm")} – {end.format("HH:mm")}
             </Typography>
             <Typography variant="body2" color="text.secondary">

@@ -42,7 +42,9 @@ interface WorkspaceDetailPageProps {
  * - "Back to workspace" button
  * - Appointment summary card (patient name, chips, detail rows)
  * - `AppointmentPatientPanel` (full demographics)
- * - `AppointmentVisitThread` when `appointmentGroupId` is set
+ * - `AppointmentVisitThread` (read-only medical records) when the visit
+ *   is grouped (full case history) OR is a past visit (so a completed
+ *   standalone visit still surfaces its own record)
  * - `WorkspaceNotePanel` (Complete / Follow Up / Refer) only when
  *   `appointment.status === 'BOOKED'`; completed/cancelled show a
  *   read-only status alert instead
@@ -233,8 +235,13 @@ export default async function WorkspaceDetailPage({
 
       <AppointmentPatientPanel patient={patient} locale={locale} />
 
-      {appointment.appointmentGroupId ? (
+      {/* Read-only medical records. Rendered when the visit is grouped
+          (full case history) OR when it is a past visit (so a completed
+          standalone visit still surfaces its own record). A BOOKED
+          standalone visit has no record yet, so it's omitted there. */}
+      {appointment.appointmentGroupId || !isBooked ? (
         <AppointmentVisitThread
+          appointmentId={appointment.id}
           appointmentGroupId={appointment.appointmentGroupId}
           locale={locale}
         />
