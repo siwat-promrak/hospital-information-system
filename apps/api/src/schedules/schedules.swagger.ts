@@ -72,6 +72,16 @@ const NOT_IN_DEPARTMENT_EXAMPLE = {
   },
 };
 
+const SCHEDULE_HAS_APPOINTMENTS_EXAMPLE = {
+  statusCode: 409,
+  code: ErrorCode.SCHEDULE_HAS_APPOINTMENTS,
+  message: 'Cannot mutate a schedule with existing appointments.',
+  details: {
+    scheduleId: 'aa3d2f17-3c0b-4b4f-a3e8-31f2bbb55bd9',
+    blockingAppointmentCount: 2,
+  },
+};
+
 const PaginatedScheduleDto = PaginatedDto(ScheduleResponseDto);
 
 export function ApiListSchedules(): MethodDecorator & ClassDecorator {
@@ -173,7 +183,10 @@ export function ApiUpdateSchedule(): MethodDecorator & ClassDecorator {
       summary: 'Update a schedule (partial)',
       description:
         'Body is a partial of the create payload minus `doctorId`. ' +
-        'Affiliation + overlap checks re-run against the merged row.',
+        'Affiliation + overlap checks re-run against the merged row. ' +
+        'Rejects with `409 SCHEDULE_HAS_APPOINTMENTS` when the schedule ' +
+        'already has at least one non-CANCELLED appointment ' +
+        '(`status IN (BOOKED, COMPLETED)`) referencing it.',
     }),
     ApiParam({ name: 'id', description: 'Schedule id (uuid).' }),
     ApiOkResponse({ description: 'Schedule updated', type: ScheduleResponseDto }),
@@ -190,11 +203,15 @@ export function ApiUpdateSchedule(): MethodDecorator & ClassDecorator {
       schema: { example: NOT_FOUND_EXAMPLE },
     }),
     ApiConflictResponse({
-      description: '`DOCTOR_NOT_IN_DEPARTMENT` or `SCHEDULE_OVERLAP`.',
+      description:
+        '`DOCTOR_NOT_IN_DEPARTMENT`, `SCHEDULE_OVERLAP`, or ' +
+        '`SCHEDULE_HAS_APPOINTMENTS` when non-CANCELLED appointments ' +
+        'still reference the schedule.',
       schema: {
         oneOf: [
           { example: NOT_IN_DEPARTMENT_EXAMPLE },
           { example: OVERLAP_EXAMPLE },
+          { example: SCHEDULE_HAS_APPOINTMENTS_EXAMPLE },
         ],
       },
     }),
@@ -206,8 +223,10 @@ export function ApiDeleteSchedule(): MethodDecorator & ClassDecorator {
     ApiOperation({
       summary: 'Soft-delete a schedule',
       description:
-        'Sets `deletedAt` / `deletedBy`. Existing future appointments ' +
-        'inside the window are NOT cancelled (they remain `BOOKED`).',
+        'Sets `deletedAt` / `deletedBy`. Rejects with ' +
+        '`409 SCHEDULE_HAS_APPOINTMENTS` when the schedule already has ' +
+        'at least one non-CANCELLED appointment ' +
+        '(`status IN (BOOKED, COMPLETED)`) referencing it.',
     }),
     ApiParam({ name: 'id', description: 'Schedule id (uuid).' }),
     ApiNoContentResponse({ description: 'Schedule deleted.' }),
@@ -218,6 +237,12 @@ export function ApiDeleteSchedule(): MethodDecorator & ClassDecorator {
     ApiNotFoundResponse({
       description: 'Schedule id is unknown or already deleted.',
       schema: { example: NOT_FOUND_EXAMPLE },
+    }),
+    ApiConflictResponse({
+      description:
+        '`SCHEDULE_HAS_APPOINTMENTS` when non-CANCELLED appointments ' +
+        'still reference the schedule.',
+      schema: { example: SCHEDULE_HAS_APPOINTMENTS_EXAMPLE },
     }),
   );
 }

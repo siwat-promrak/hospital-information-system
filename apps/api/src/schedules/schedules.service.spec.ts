@@ -545,3 +545,195 @@ describe('SchedulesService (DI wiring smoke)', () => {
     expect(module.get(SchedulesService)).toBeInstanceOf(SchedulesService);
   });
 });
+
+describe('SchedulesService — SCHEDULE_HAS_APPOINTMENTS guard', () => {
+  const NOW = new Date('2026-06-15T12:00:00.000Z');
+
+  // Stamp the existing row's startAt into the future so the
+  // past-startAt guard never fires before the appointment guard.
+  const FUTURE_EXISTING = {
+    id: 'sched-1',
+    doctorId: 'doctor-own',
+    departmentId: 'dept-doctor',
+    startAt: new Date('2026-06-20T09:00:00.000Z'),
+    endAt: new Date('2026-06-20T12:00:00.000Z'),
+    breakStartAt: null,
+    breakEndAt: null,
+    acceptsBooking: true,
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const buildService = (
+    appointmentCount: number,
+  ): { service: SchedulesService; appointmentCountMock: jest.Mock; scheduleUpdateMock: jest.Mock } => {
+    const appointmentCountMock = jest.fn().mockResolvedValue(appointmentCount);
+    const scheduleUpdateMock = jest.fn().mockResolvedValue({
+      ...FUTURE_EXISTING,
+      acceptsBooking: false,
+      doctor: {
+        id: 'doctor-own',
+        doctorCode: 'D-1',
+        user: {
+          firstNameEn: 'Doc',
+          lastNameEn: 'Own',
+          firstNameTh: null,
+          lastNameTh: null,
+        },
+      },
+      department: {
+        id: 'dept-doctor',
+        name: 'Dept',
+        description: null,
+      },
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+
+    const prisma = {
+      doctorSchedule: {
+        findFirst: jest.fn().mockResolvedValue(FUTURE_EXISTING),
+        update: scheduleUpdateMock,
+      },
+      appointment: {
+        count: appointmentCountMock,
+      },
+      $transaction: jest.fn().mockImplementation(async (cb) => {
+        // Minimal tx mock — the assertNoOverlap call inside update()
+        // accepts the same shape. We only need it to resolve cleanly so
+        // the path that DOES reach the update is exercised.
+        return cb({
+          doctor: {
+            findFirst: jest.fn().mockResolvedValue({ user: { departmentId: 'dept-doctor' } }),
+          },
+          doctorSchedule: {
+            findMany: jest.fn().mockResolvedValue([]),
+            update: scheduleUpdateMock,
+          },
+        });
+      }),
+    } as unknown as PrismaService;
+
+    return {
+      service: new SchedulesService(prisma),
+      appointmentCountMock,
+      scheduleUpdateMock,
+    };
+  };
+
+  // update() ----------------------------------------------------------------
+
+  it('update — 0 appointments → does NOT throw and proceeds to mutation', async () => {
+    const { service, appointmentCountMock, scheduleUpdateMock } = buildService(0);
+
+    await expect(
+      service.update(DOCTOR_USER, FUTURE_EXISTING.id, { acceptsBooking: false }),
+    ).resolves.toBeDefined();
+
+    expect(appointmentCountMock).toHaveBeenCalledWith({
+      where: {
+        scheduleId: FUTURE_EXISTING.id,
+        status: { in: ['BOOKED', 'COMPLETED'] },
+      },
+    });
+    expect(scheduleUpdateMock).toHaveBeenCalled();
+  });
+
+  it('update — 1 BOOKED appointment → throws SCHEDULE_HAS_APPOINTMENTS (409)', async () => {
+    const { service, scheduleUpdateMock } = buildService(1);
+
+    try {
+      await service.update(DOCTOR_USER, FUTURE_EXISTING.id, { acceptsBooking: false });
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(ErrorCode.SCHEDULE_HAS_APPOINTMENTS);
+      expect((err as AppException).getStatus()).toBe(409);
+      expect((err as AppException).details).toEqual({
+        scheduleId: FUTURE_EXISTING.id,
+        blockingAppointmentCount: 1,
+      });
+    }
+
+    expect(scheduleUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it('update — only CANCELLED appointments (count returns 0) → succeeds', async () => {
+    // The guard only counts BOOKED + COMPLETED — CANCELLED rows are not
+    // matched by the `where` filter. The mock therefore models the BE
+    // returning 0 even when CANCELLED rows exist.
+    const { service, appointmentCountMock, scheduleUpdateMock } = buildService(0);
+
+    await expect(
+      service.update(DOCTOR_USER, FUTURE_EXISTING.id, { acceptsBooking: false }),
+    ).resolves.toBeDefined();
+
+    expect(appointmentCountMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: ['BOOKED', 'COMPLETED'] },
+        }),
+      }),
+    );
+    expect(scheduleUpdateMock).toHaveBeenCalled();
+  });
+
+  // softDelete() ------------------------------------------------------------
+
+  it('softDelete — 0 appointments → soft-deletes the row', async () => {
+    const { service, appointmentCountMock, scheduleUpdateMock } = buildService(0);
+
+    await expect(
+      service.softDelete(DOCTOR_USER, FUTURE_EXISTING.id),
+    ).resolves.toBeUndefined();
+
+    expect(appointmentCountMock).toHaveBeenCalledWith({
+      where: {
+        scheduleId: FUTURE_EXISTING.id,
+        status: { in: ['BOOKED', 'COMPLETED'] },
+      },
+    });
+    expect(scheduleUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: FUTURE_EXISTING.id },
+        data: expect.objectContaining({ deletedBy: DOCTOR_USER.id }),
+      }),
+    );
+  });
+
+  it('softDelete — 1 BOOKED appointment → throws SCHEDULE_HAS_APPOINTMENTS (409)', async () => {
+    const { service, scheduleUpdateMock } = buildService(1);
+
+    try {
+      await service.softDelete(DOCTOR_USER, FUTURE_EXISTING.id);
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(ErrorCode.SCHEDULE_HAS_APPOINTMENTS);
+      expect((err as AppException).getStatus()).toBe(409);
+      expect((err as AppException).details).toEqual({
+        scheduleId: FUTURE_EXISTING.id,
+        blockingAppointmentCount: 1,
+      });
+    }
+
+    expect(scheduleUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it('softDelete — only CANCELLED appointments (count returns 0) → succeeds', async () => {
+    const { service, scheduleUpdateMock } = buildService(0);
+
+    await expect(
+      service.softDelete(DOCTOR_USER, FUTURE_EXISTING.id),
+    ).resolves.toBeUndefined();
+
+    expect(scheduleUpdateMock).toHaveBeenCalled();
+  });
+});

@@ -718,9 +718,17 @@ schedule, so that I can correct mistakes or change hours.
     `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
   - NURSE (`.own-department`): the schedule's `departmentId` MUST equal
     `caller.user.departmentId`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
-- Editing a schedule does **not** retroactively cancel appointments
-  already booked outside the new window — those remain `BOOKED`. F09
-  will surface affected counts when it ships.
+- `PATCH /schedules/:id` is rejected with `409 SCHEDULE_HAS_APPOINTMENTS`
+  when at least one **non-CANCELLED** appointment
+  (`status IN (BOOKED, COMPLETED)`) references the schedule via
+  `Appointment.scheduleId`. CANCELLED appointments do NOT block — they
+  have already freed the slot. The 409 details payload carries
+  `{ scheduleId, blockingAppointmentCount }` so the FE can surface a
+  concrete count. _(Amendment 2026-05-27,
+  `feat/schedule-guard-on-appointments`: replaces the prior "edits do
+  not retroactively cancel appointments" carve-out — that escape hatch
+  is gone; either cancel the appointments first or leave the schedule
+  alone.)_
 - The UI opens the same `ScheduleFormDialog` on chip click. Doctor /
   department / date are non-editable in edit mode (the doctor lock
   matches the BE which excludes `doctorId` from `UpdateScheduleDto`).
@@ -747,8 +755,15 @@ that the doctor stops being offered for new bookings inside that window.
     `caller.doctor.id`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
   - NURSE (`.own-department`): the schedule's `departmentId` MUST equal
     `caller.user.departmentId`; else `403 INSUFFICIENT_PERMISSION_SCOPE`.
-- Deleting a schedule does NOT cancel existing future appointments
-  inside that window; F09 surfaces affected counts when it ships.
+- `DELETE /schedules/:id` is rejected with `409 SCHEDULE_HAS_APPOINTMENTS`
+  when at least one **non-CANCELLED** appointment
+  (`status IN (BOOKED, COMPLETED)`) references the schedule via
+  `Appointment.scheduleId`. CANCELLED appointments do NOT block — they
+  have already freed the slot. The 409 details payload carries
+  `{ scheduleId, blockingAppointmentCount }`. _(Amendment 2026-05-27,
+  `feat/schedule-guard-on-appointments`: replaces the prior "delete does
+  not cancel existing future appointments" carve-out — callers must
+  cancel referencing appointments first.)_
 
 ---
 

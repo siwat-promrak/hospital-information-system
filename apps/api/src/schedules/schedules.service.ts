@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AppointmentStatus, Prisma } from '@prisma/client';
 
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '../common/errors';
@@ -280,6 +280,8 @@ export class SchedulesService {
       existing.departmentId,
     );
 
+    await this.assertNoBlockingAppointments(id);
+
     const merged = {
       departmentId: dto.departmentId ?? existing.departmentId,
       startAt: dto.startAt ? new Date(dto.startAt) : existing.startAt,
@@ -389,6 +391,8 @@ export class SchedulesService {
       existing.departmentId,
     );
 
+    await this.assertNoBlockingAppointments(id);
+
     await this.prisma.doctorSchedule.update({
       where: { id },
       data: {
@@ -396,6 +400,29 @@ export class SchedulesService {
         deletedBy: caller.id,
       },
     });
+  }
+
+  /**
+   * Guard: reject schedule mutation (update / delete) when at least one
+   * non-CANCELLED appointment (`status IN (BOOKED, COMPLETED)`) references
+   * this schedule via `Appointment.scheduleId`. CANCELLED rows do NOT
+   * block — they have already freed the slot back up.
+   */
+  private async assertNoBlockingAppointments(scheduleId: string): Promise<void> {
+    const blockingCount = await this.prisma.appointment.count({
+      where: {
+        scheduleId,
+        status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.COMPLETED] },
+      },
+    });
+
+    if (blockingCount > 0) {
+      throw AppException.conflict(
+        ErrorCode.SCHEDULE_HAS_APPOINTMENTS,
+        'Cannot mutate a schedule with existing appointments.',
+        { scheduleId, blockingAppointmentCount: blockingCount },
+      );
+    }
   }
 
   private toResponse(row: ScheduleRow): ScheduleResponseDto {

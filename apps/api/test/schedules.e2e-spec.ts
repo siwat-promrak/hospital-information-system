@@ -27,7 +27,13 @@
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import type { Department, Doctor, User } from '@prisma/client';
+import {
+  AppointmentStatus,
+  AppointmentType,
+  type Department,
+  type Doctor,
+  type User,
+} from '@prisma/client';
 import type { Server } from 'node:http';
 import request from 'supertest';
 
@@ -64,6 +70,11 @@ const SEARCH_DOCTOR_LAST_NAME_EN = 'Quintessence';
 const SEARCH_DOCTOR_FIRST_NAME_TH = 'จันทรเกษม';
 const SEARCH_DOCTOR_LAST_NAME_TH = 'แสนสิริ';
 const SEARCH_DOCTOR_CODE_PREFIX = 'E2E-SRCH';
+
+// Distinctive id prefix for the scratch patient row spun up by the
+// SCHEDULE_HAS_APPOINTMENTS guard test. Used by teardown to scope the
+// patient cleanup without colliding with other suites' patient rows.
+const SCHED_APPT_PATIENT_ID_PREFIX = 'sched-appt-e2e-pid-';
 
 interface UserWithRole {
   user: User;
@@ -279,6 +290,22 @@ async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
     select: { id: true },
   });
   const departmentIds = departments.map((d) => d.id);
+
+  // Appointments + the scratch patient created by the
+  // SCHEDULE_HAS_APPOINTMENTS guard test must drop BEFORE the schedules
+  // they reference (Appointment.scheduleId is a non-null FK).
+  await prisma.appointment.deleteMany({
+    where: {
+      OR: [
+        { doctorId: { in: doctorIds } },
+        { departmentId: { in: departmentIds } },
+      ],
+    },
+  });
+
+  await prisma.patient.deleteMany({
+    where: { identificationNo: { startsWith: SCHED_APPT_PATIENT_ID_PREFIX } },
+  });
 
   await prisma.doctorSchedule.deleteMany({
     where: {
@@ -732,6 +759,148 @@ describe('F06 — Doctor schedule CRUD e2e (v2 dated windows)', () => {
     expect(get.status).toBe(404);
     expect(get.body.code).toBe(ErrorCode.SCHEDULE_NOT_FOUND);
   });
+
+  // ─── SCHEDULE_HAS_APPOINTMENTS guard (update + delete) ─────────────────────
+
+  maybe(
+    'PATCH /:id is rejected with 409 SCHEDULE_HAS_APPOINTMENTS when a BOOKED appointment references the schedule (and DELETE on the same id is also rejected)',
+    async () => {
+      // Seed a fresh future schedule + one BOOKED appointment that
+      // references it. Day 26 is well clear of every other test window.
+      const schedule = await prisma.doctorSchedule.create({
+        data: {
+          doctorId: fixtures!.doctorOwn.id,
+          departmentId: fixtures!.deptOne.id,
+          startAt: scheduleDate(26, 9),
+          endAt: scheduleDate(26, 12),
+          createdBy: fixtures!.nurse.user.id,
+        },
+      });
+
+      const patientStamp = Date.now().toString();
+      const patient = await prisma.patient.create({
+        data: {
+          // hn must be 9 chars per the seeded-pattern helper; pad here too.
+          hn: patientStamp.padStart(9, '0').slice(-9),
+          firstNameEn: 'Sched',
+          lastNameEn: 'Guard',
+          identificationNo: `${SCHED_APPT_PATIENT_ID_PREFIX}${patientStamp}`,
+          phone: '+66-2-555-9001',
+          dateOfBirth: new Date('1990-01-15T00:00:00.000Z'),
+          gender: 'FEMALE',
+          emergencyPersonName: 'Kin',
+          emergencyPersonRelation: 'Spouse',
+          emergencyPersonPhone: '+66-2-555-9002',
+          address: '789 Schedule Guard Road',
+          createdBy: fixtures!.superAdminId,
+        },
+      });
+
+      await prisma.appointment.create({
+        data: {
+          patientId: patient.id,
+          doctorId: fixtures!.doctorOwn.id,
+          departmentId: fixtures!.deptOne.id,
+          scheduleId: schedule.id,
+          appointmentType: AppointmentType.CONSULTATION,
+          status: AppointmentStatus.BOOKED,
+          startAt: scheduleDate(26, 9, 30),
+          endAt: scheduleDate(26, 10),
+          createdBy: fixtures!.superAdminId,
+        },
+      });
+
+      const jwt = await jwtFor(fixtures!.nurse);
+
+      // PATCH → 409 SCHEDULE_HAS_APPOINTMENTS.
+      const patch = await request(server)
+        .patch(`/api/v1/schedules/${schedule.id}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ acceptsBooking: false });
+
+      expect(patch.status).toBe(409);
+      expect(patch.body.code).toBe(ErrorCode.SCHEDULE_HAS_APPOINTMENTS);
+      expect(patch.body.details).toEqual(
+        expect.objectContaining({
+          scheduleId: schedule.id,
+          blockingAppointmentCount: 1,
+        }),
+      );
+
+      // DELETE → also 409 SCHEDULE_HAS_APPOINTMENTS (same guard).
+      const del = await request(server)
+        .delete(`/api/v1/schedules/${schedule.id}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(del.status).toBe(409);
+      expect(del.body.code).toBe(ErrorCode.SCHEDULE_HAS_APPOINTMENTS);
+    },
+  );
+
+  maybe(
+    'PATCH + DELETE succeed when the only referencing appointment is CANCELLED',
+    async () => {
+      // Same shape as above, but flip the appointment status to CANCELLED
+      // so the guard SHOULD let both PATCH and DELETE through.
+      const schedule = await prisma.doctorSchedule.create({
+        data: {
+          doctorId: fixtures!.doctorOwn.id,
+          departmentId: fixtures!.deptOne.id,
+          startAt: scheduleDate(27, 9),
+          endAt: scheduleDate(27, 12),
+          createdBy: fixtures!.nurse.user.id,
+        },
+      });
+
+      const patientStamp = `${Date.now()}-c`;
+      const patient = await prisma.patient.create({
+        data: {
+          hn: patientStamp.replace(/\D/g, '').padStart(9, '0').slice(-9),
+          firstNameEn: 'Sched',
+          lastNameEn: 'Cancelled',
+          identificationNo: `${SCHED_APPT_PATIENT_ID_PREFIX}${patientStamp}`,
+          phone: '+66-2-555-9101',
+          dateOfBirth: new Date('1990-01-15T00:00:00.000Z'),
+          gender: 'MALE',
+          emergencyPersonName: 'Kin',
+          emergencyPersonRelation: 'Spouse',
+          emergencyPersonPhone: '+66-2-555-9102',
+          address: '790 Schedule Guard Road',
+          createdBy: fixtures!.superAdminId,
+        },
+      });
+
+      await prisma.appointment.create({
+        data: {
+          patientId: patient.id,
+          doctorId: fixtures!.doctorOwn.id,
+          departmentId: fixtures!.deptOne.id,
+          scheduleId: schedule.id,
+          appointmentType: AppointmentType.CONSULTATION,
+          status: AppointmentStatus.CANCELLED,
+          startAt: scheduleDate(27, 9, 30),
+          endAt: scheduleDate(27, 10),
+          createdBy: fixtures!.superAdminId,
+        },
+      });
+
+      const jwt = await jwtFor(fixtures!.nurse);
+
+      const patch = await request(server)
+        .patch(`/api/v1/schedules/${schedule.id}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ acceptsBooking: false });
+
+      expect(patch.status).toBe(200);
+      expect(patch.body.acceptsBooking).toBe(false);
+
+      const del = await request(server)
+        .delete(`/api/v1/schedules/${schedule.id}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(del.status).toBe(204);
+    },
+  );
 
   // ─── DTO validation ─────────────────────────────────────────────────────────
 
