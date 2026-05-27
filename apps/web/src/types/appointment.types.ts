@@ -174,7 +174,7 @@ export interface CompleteAppointmentBody extends WorkspaceNoteBody {}
  * F14 refer body with the mandatory workspace note fields.
  */
 export interface ReferAppointmentWithNoteBody extends WorkspaceNoteBody {
-  referredToDepartmentId: string;
+  toDepartmentId: string;
 }
 
 /**
