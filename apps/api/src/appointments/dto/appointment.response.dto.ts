@@ -50,6 +50,17 @@ export class AppointmentDepartmentRefDto {
   name!: string;
 }
 
+export class AppointmentCancelledByUserDto {
+  @ApiProperty({ example: 'aa3d2f17-aaaa-4b4f-a3e8-31f2bbb55ccc' })
+  id!: string;
+
+  @ApiProperty({ example: 'Anan' })
+  firstNameEn!: string;
+
+  @ApiProperty({ example: 'Charoen' })
+  lastNameEn!: string;
+}
+
 export class AppointmentResponseDto {
   @ApiProperty({ example: '7c8e2a10-1234-5678-9abc-deadbeefcafe' })
   id!: string;
@@ -146,4 +157,7 @@ export class AppointmentResponseDto {
 
   @ApiProperty({ type: AppointmentDepartmentRefDto })
   department!: AppointmentDepartmentRefDto;
+
+  @ApiPropertyOptional({ type: AppointmentCancelledByUserDto, nullable: true })
+  cancelledByUser!: AppointmentCancelledByUserDto | null;
 }

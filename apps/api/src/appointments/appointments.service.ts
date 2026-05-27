@@ -86,6 +86,9 @@ const appointmentInclude = Prisma.validator<Prisma.AppointmentInclude>()({
       name: true,
     },
   },
+  cancelledByUser: {
+    select: { id: true, firstNameEn: true, lastNameEn: true },
+  },
 });
 
 type AppointmentRow = Prisma.AppointmentGetPayload<{
@@ -1024,7 +1027,7 @@ export class AppointmentsService {
         status: AppointmentStatus.CANCELLED,
         cancelledAt: dayjs.utc().toDate(),
         cancelledBy: caller.id,
-        cancellationReason: dto.cancellationReason ?? null,
+        cancellationReason: dto.cancellationReason,
         updatedBy: caller.id,
       },
       include: appointmentInclude,
@@ -1823,6 +1826,13 @@ export class AppointmentsService {
         id: row.department.id,
         name: row.department.name,
       },
+      cancelledByUser: row.cancelledByUser
+        ? {
+            id: row.cancelledByUser.id,
+            firstNameEn: row.cancelledByUser.firstNameEn,
+            lastNameEn: row.cancelledByUser.lastNameEn,
+          }
+        : null,
     };
   }
 }

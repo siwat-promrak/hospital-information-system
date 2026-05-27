@@ -1,21 +1,21 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
 /**
  * Request body for `POST /appointments/:id/cancel`. The cancellation
- * reason is optional — many cancellations are no-shows where the front
- * desk has nothing meaningful to type. When omitted the BE stores
- * `null` (cancelled-by + cancelled-at are still recorded for the audit
- * trail).
+ * reason is required — every cancellation must carry a free-text reason
+ * for the audit trail. Whitespace-only input is normalised to the empty
+ * string by the `@Transform` below and then fails `@IsNotEmpty()`.
  */
 export class CancelAppointmentDto {
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 'Patient no-show',
-    description: 'Optional free-text reason. Stored on the row for the audit trail.',
-    nullable: true,
+    description: 'Required free-text reason. Stored on the row for the audit trail.',
   })
-  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
+  @IsNotEmpty()
   @MaxLength(4000)
-  cancellationReason?: string | null;
+  cancellationReason!: string;
 }

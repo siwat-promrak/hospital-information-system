@@ -128,6 +128,14 @@ export default function AppointmentListRow({
               {formatDoctorFullName(appointment.doctor)} ·{" "}
               {appointment.department.name}
             </Typography>
+            {appointment.status === "CANCELLED" &&
+            appointment.cancelledByUser ? (
+              <Typography variant="caption" color="text.secondary">
+                {tList(K.Appointments.List.cancelledBy, {
+                  name: `${appointment.cancelledByUser.firstNameEn} ${appointment.cancelledByUser.lastNameEn}`,
+                })}
+              </Typography>
+            ) : null}
             <Box
               sx={{
                 display: "flex",
