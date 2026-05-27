@@ -1957,6 +1957,96 @@ of the same action.
 
 ---
 
+## E19 — Medical-records browse screen ✅ shipped (F19, `feat/medical-records-screen`)
+
+Today the only ways to surface medical records on the FE are the F18
+doctor workspace detail page (own-visit notes inside `/workspace/:id`)
+and the visit-thread component embedded there. There is no
+patient-first browse surface — a NURSE / MRO / PHARMACY user who wants
+to look up "all of Mrs. Smith's records" has to start from a specific
+appointment or do it via Swagger / the database.
+
+E19 adds a dedicated `/medical-records` browse page that any caller
+holding `medical_records.read.all` (DOCTOR, NURSE, MRO, PHARMACY) can
+reach. The flow is patient-first: nothing renders until a patient is
+picked. The page consumes the existing F08/F18 `GET /medical-records`
+endpoint as-is — **no BE wire contract changes**.
+
+Per-role baseline reach (unchanged from F18):
+- **DOCTOR** — `medical_records.read.all`. Sees the page.
+- **NURSE** — `medical_records.read.all`. Sees the page.
+- **MRO** — `medical_records.read.all`. Sees the page.
+- **PHARMACY** — `medical_records.read.all`. Sees the page.
+- **ADMIN** — no `medical_records.*` in the seeded baseline. Sidebar
+  entry hidden; direct URL navigation hits the forbidden card.
+
+### US-19.1 — Caller browses a patient's medical records
+
+**US-19.1** — As any user holding `medical_records.read.all`, I want a
+dedicated `/medical-records` page where I pick a patient and then see
+every medical record for them, so that I can review a patient's
+clinical history without starting from a specific appointment.
+
+**Acceptance criteria:**
+
+- Route `/medical-records`. Page guarded on `medical_records.read.all`;
+  callers without it see the standard forbidden card.
+- Sidebar entry "Medical records" is visible to callers holding
+  `medical_records.read.all` (already wired in F18's nav catalog).
+- Layout (top to bottom):
+  1. Title + subtitle ("Medical records" / "Browse a patient's
+     clinical history").
+  2. **Patient filter** — the F09 `<PatientPicker>` typeahead reused
+     in a URL-driven wrapper. Picking a patient sets `?patientId=<id>`
+     and resets `?page=1`. Clearing the patient strips both
+     `patientId` AND `page` from the URL.
+  3. **View toggle** — segmented `<ToggleButtonGroup>` `LIST` / `GRID`.
+     URL-encoded as `?view=list|grid` (default `list`). Changing the
+     toggle preserves `patientId` AND `page` (same dataset, different
+     visual).
+  4. **Records body** — paginated via the shared `<PaginationControl>`.
+- Empty / loading states:
+  - No patient selected → centered hint card: "Select a patient to
+    view their medical records."
+  - Patient selected, zero records → "No medical records for this
+    patient yet."
+- `GET /medical-records?patientId=<id>&page=N&pageSize=20` is the
+  underlying call. Response shape unchanged — the `Paginated<MedicalRecordResponse>`
+  envelope, sorted by `createdAt DESC` per the F08 service.
+- The FE `MedicalRecordResponse` type previously omitted the nested
+  `patient` ref even though the BE has always returned it; this
+  feature lifts the missing `MedicalRecordPatientRef` into the FE
+  type so the wire and the FE shape agree.
+
+### US-19.2 — Caller switches between list and grid views
+
+**US-19.2** — As a caller browsing a patient's records, I want a list /
+grid toggle, so that I can either read the full text of a few records
+(list) or scan a denser overview of many records at once (grid).
+
+**Acceptance criteria:**
+
+- The toggle has two values: `LIST` (default) and `GRID`. Stored in
+  the URL as `?view=list|grid` so deep links and Back-button
+  navigation preserve the choice.
+- **LIST mode** — vertical stack of cards. Each card shows the
+  authoring doctor (name + `doctorCode`), the department name, the
+  formatted `createdAt`, the full note, and the drug if present.
+  Reuses the F18 visit-thread card visuals.
+- **GRID mode** — responsive 1/2/3-column grid (`xs` / `sm` / `md`).
+  Each grid cell renders the same fields as list mode but with the
+  note clamped to 3 lines and the drug clamped to 2 lines via CSS
+  `WebkitLineClamp`, so the cells stay uniform.
+- Each card optionally exposes a "View appointment" chip-style link
+  routing to the source appointment detail
+  (`FE_PATH_BUILDER.appointmentDetail(record.appointmentId)`) — the
+  chip is the only clickable surface, so it doesn't fight with
+  copy-select inside the note text.
+- Switching modes never refetches — the same RSC response data is
+  re-rendered with a different presentation.
+
+---
+
 ## Constraints reference
 
 DB-level CHECK constraints, all appended as raw SQL to the init migration
