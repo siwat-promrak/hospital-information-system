@@ -16,6 +16,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "type-check": "tsc --noEmit -p tsconfig.json",
     "db:seed": "ts-node -P tsconfig.json prisma/seed/index.ts",
+    "build:seed": "tsc -p tsconfig.seed.json",
+    "db:seed:prod": "node dist-seed/prisma/seed/index.js",
     "prisma": "prisma"
   },
   "prisma": {
