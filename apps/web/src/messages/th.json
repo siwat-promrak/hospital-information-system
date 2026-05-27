@@ -544,7 +544,6 @@
       "rowDepartmentLabel": "แผนก",
       "rowDoctorLabel": "แพทย์",
       "rowVisitLabel": "ครั้งที่ {visitNumber}",
-      "rowUngrouped": "ครั้งเดียว",
       "selectedSummary": "เชื่อมโยงกับการเข้ารักษาเมื่อ {date} · {department} · {doctor}",
       "back": "ย้อนกลับ",
       "next": "ถัดไป",

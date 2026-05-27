@@ -544,7 +544,6 @@
       "rowDepartmentLabel": "Department",
       "rowDoctorLabel": "Doctor",
       "rowVisitLabel": "Visit #{visitNumber}",
-      "rowUngrouped": "Standalone visit",
       "selectedSummary": "Linked to visit on {date} · {department} · {doctor}",
       "back": "Back",
       "next": "Continue",
