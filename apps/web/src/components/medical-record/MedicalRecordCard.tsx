@@ -1,7 +1,6 @@
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
-import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { getTranslations } from "next-intl/server";
@@ -9,9 +8,10 @@ import { getTranslations } from "next-intl/server";
 import { formatDoctorFullName } from "@/appointment/labels";
 import { FE_PATH_BUILDER } from "@/auth/routes";
 import { K, NS } from "@/i18n/keys.generated";
-import { Link } from "@/i18n/navigation";
 import { dayjs } from "@/lib/dayjs";
 import type { MedicalRecordResponse } from "@/types/medical-record.types";
+
+import ViewAppointmentChip from "./ViewAppointmentChip";
 
 interface MedicalRecordCardProps {
   record: MedicalRecordResponse;
@@ -66,14 +66,9 @@ export default async function MedicalRecordCard({
             <Typography variant="subtitle1" component="h3" fontWeight={600}>
               {formatDoctorFullName(record.doctor)} ({record.doctor.doctorCode})
             </Typography>
-            <Chip
-              component={Link}
+            <ViewAppointmentChip
               href={FE_PATH_BUILDER.appointmentDetail(record.appointmentId)}
-              clickable
               label={t(K.MedicalRecords.viewAppointment)}
-              size="small"
-              variant="outlined"
-              color="primary"
             />
           </Stack>
 
