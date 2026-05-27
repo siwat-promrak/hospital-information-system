@@ -20,7 +20,7 @@ export const APPOINTMENT_API_PATH_BUILDER = {
   // F14 — doctor-only "this visit is done" toggle. Body `{ note, drug? }`.
   complete: (id: string) => BE_PATH_BUILDER.appointmentComplete(id),
   // F14 / F18 — doctor-only "send to another department" action. Body
-  // `{ referredToDepartmentId, note, drug? }`.
+  // `{ toDepartmentId, note, drug? }`.
   refer: (id: string) => BE_PATH_BUILDER.appointmentRefer(id),
   // F18 — doctor-only "follow up" action. Body `{ startAt, note, drug? }`.
   followUp: (id: string) => BE_PATH_BUILDER.appointmentFollowUp(id),
