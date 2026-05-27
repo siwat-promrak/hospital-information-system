@@ -208,7 +208,18 @@ export default function ClearableSelect<V extends string | number>({
       disabled={disabled}
       error={error}
     >
-      <InputLabel id={labelId}>{label}</InputLabel>
+      <InputLabel
+        id={labelId}
+        // When a placeholder is in play the input slot always carries
+        // copy (either the placeholder text or the matched option's
+        // label) — force the label into the shrunken position so it
+        // doesn't overlap the placeholder/value at rest. Leaving
+        // `shrink` undefined preserves MUI's value-driven default for
+        // the no-placeholder case.
+        shrink={showPlaceholder ? true : undefined}
+      >
+        {label}
+      </InputLabel>
       <Select<V | "">
         labelId={labelId}
         label={label}
@@ -217,6 +228,10 @@ export default function ClearableSelect<V extends string | number>({
         displayEmpty={showPlaceholder}
         renderValue={renderValue}
         endAdornment={endAdornment}
+        // Pair with the shrunken InputLabel above so the outlined
+        // input's border notch sits open (matching the shrunken label)
+        // instead of slicing through the placeholder text.
+        notched={showPlaceholder ? true : undefined}
       >
         {options.map((option) => (
           <MenuItem key={String(option.value)} value={option.value}>
