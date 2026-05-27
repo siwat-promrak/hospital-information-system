@@ -597,7 +597,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const referRes = await request(server)
       .post(`/api/v1/appointments/${apptAId}/refer`)
       .set('Authorization', `Bearer ${doctorAJwt}`)
-      .send({ toDepartmentId: f.deptB.id });
+      .send({ toDepartmentId: f.deptB.id, note: 'Refer note' });
 
     expect(referRes.status).toBe(200);
     expect(referRes.body.status).toBe(AppointmentStatus.COMPLETED);
@@ -656,14 +656,23 @@ describe('F14 — appointment groups + referrals e2e', () => {
     ).map((r) => r.id);
     expect(queueAfterIds).not.toContain(apptAId);
 
-    // 5. Doctor B closes the case.
+    // 5. Doctor B completes the appointment (which atomically closes the group).
     const closeRes = await request(server)
-      .post(`/api/v1/appointment-groups/${groupId}/close`)
-      .set('Authorization', `Bearer ${doctorBJwt}`);
+      .post(`/api/v1/appointments/${apptBId}/complete`)
+      .set('Authorization', `Bearer ${doctorBJwt}`)
+      .send({ note: 'Closing case note' });
 
     expect(closeRes.status).toBe(200);
-    expect(closeRes.body.closedAt).toEqual(expect.any(String));
-    const latest = (closeRes.body.members as Array<{
+    expect(closeRes.body.status).toBe(AppointmentStatus.COMPLETED);
+
+    // Verify the group is closed by fetching the group.
+    const groupRes = await request(server)
+      .get(`/api/v1/appointment-groups/${groupId}`)
+      .set('Authorization', `Bearer ${nurseBJwt}`);
+
+    expect(groupRes.status).toBe(200);
+    expect(groupRes.body.closedAt).toEqual(expect.any(String));
+    const latest = (groupRes.body.members as Array<{
       id: string;
       status: string;
     }>).find((m) => m.id === apptBId);
@@ -707,7 +716,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const referRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/refer`)
       .set('Authorization', `Bearer ${nurseBJwt}`)
-      .send({ toDepartmentId: f.deptB.id });
+      .send({ toDepartmentId: f.deptB.id, note: 'Refer note' });
 
     // Nurse B has appointment.update.own-department but the appointment
     // is in dept A → 403 INSUFFICIENT_PERMISSION_SCOPE.
@@ -736,13 +745,13 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const first = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/refer`)
       .set('Authorization', `Bearer ${doctorAJwt}`)
-      .send({ toDepartmentId: f.deptB.id });
+      .send({ toDepartmentId: f.deptB.id, note: 'Refer note' });
     expect(first.status).toBe(200);
 
     const second = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/refer`)
       .set('Authorization', `Bearer ${doctorAJwt}`)
-      .send({ toDepartmentId: f.deptB.id });
+      .send({ toDepartmentId: f.deptB.id, note: 'Refer note' });
     expect(second.status).toBe(409);
     expect(second.body.code).toBe(ErrorCode.APPOINTMENT_ALREADY_REFERRED);
   });
@@ -767,15 +776,18 @@ describe('F14 — appointment groups + referrals e2e', () => {
 
     const completeRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
-      .set('Authorization', `Bearer ${doctorAJwt}`);
+      .set('Authorization', `Bearer ${doctorAJwt}`)
+      .send({ note: 'Complete note' });
     expect(completeRes.status).toBe(200);
     expect(completeRes.body.status).toBe(AppointmentStatus.COMPLETED);
 
     const completeAgain = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
-      .set('Authorization', `Bearer ${doctorAJwt}`);
-    expect(completeAgain.status).toBe(200);
-    expect(completeAgain.body.status).toBe(AppointmentStatus.COMPLETED);
+      .set('Authorization', `Bearer ${doctorAJwt}`)
+      .send({ note: 'Complete note' });
+
+    expect(completeAgain.status).toBe(409);
+    expect(completeAgain.body.code).toBe(ErrorCode.APPOINTMENT_ALREADY_COMPLETED);
   });
 
   maybe('Complete on CANCELLED row → 409 APPOINTMENT_NOT_BOOKED', async () => {
@@ -804,7 +816,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
 
     const completeRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
-      .set('Authorization', `Bearer ${doctorAJwt}`);
+      .set('Authorization', `Bearer ${doctorAJwt}`)
+      .send({ note: 'Complete note' });
     expect(completeRes.status).toBe(409);
     expect(completeRes.body.code).toBe(ErrorCode.APPOINTMENT_NOT_BOOKED);
   });
@@ -866,7 +879,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const referRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/refer`)
       .set('Authorization', `Bearer ${doctorAJwt}`)
-      .send({ toDepartmentId: f.deptB.id });
+      .send({ toDepartmentId: f.deptB.id, note: 'Refer note' });
     expect(referRes.status).toBe(200);
 
     // Try to continue in dept A again — does NOT match dept B.
@@ -951,7 +964,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
 
     const completeRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
-      .set('Authorization', `Bearer ${doctorBJwt}`);
+      .set('Authorization', `Bearer ${doctorBJwt}`)
+      .send({ note: 'Complete note' });
     expect(completeRes.status).toBe(200);
     expect(completeRes.body.status).toBe(AppointmentStatus.COMPLETED);
 
@@ -1035,7 +1049,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
 
     const completeRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
-      .set('Authorization', `Bearer ${doctorBJwt}`);
+      .set('Authorization', `Bearer ${doctorBJwt}`)
+      .send({ note: 'Complete note' });
     expect(completeRes.status).toBe(200);
 
     // CONSULTATION is now a valid continuation type — should return 201.
@@ -1131,7 +1146,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
     // Continuations require the prev to be COMPLETED (F14 — Rule 1).
     const completeRes = await request(server)
       .post(`/api/v1/appointments/${firstRes.body.id}/complete`)
-      .set('Authorization', `Bearer ${doctorAJwt}`);
+      .set('Authorization', `Bearer ${doctorAJwt}`)
+      .send({ note: 'Complete note' });
     expect(completeRes.status).toBe(200);
 
     // Continuation → group is materialised.
@@ -1199,7 +1215,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
     // Continuations require the prev to be COMPLETED (F14 — Rule 1).
     const completeRes = await request(server)
       .post(`/api/v1/appointments/${firstRes.body.id}/complete`)
-      .set('Authorization', `Bearer ${doctorAJwt}`);
+      .set('Authorization', `Bearer ${doctorAJwt}`)
+      .send({ note: 'Complete note' });
     expect(completeRes.status).toBe(200);
 
     const secondRes = await request(server)
@@ -1222,10 +1239,12 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const groupId = secondRes.body.appointmentGroupId as string;
 
     const closeRes = await request(server)
-      .post(`/api/v1/appointment-groups/${groupId}/close`)
-      .set('Authorization', `Bearer ${doctorBJwt}`);
+      .post(`/api/v1/appointments/${secondRes.body.id}/complete`)
+      .set('Authorization', `Bearer ${doctorBJwt}`)
+      .send({ note: 'Closing case note' });
+
     // Doctor B is not the latest-visit doctor (Doctor A is).
     expect(closeRes.status).toBe(403);
-    expect(closeRes.body.code).toBe(ErrorCode.APPOINTMENT_GROUP_CLOSE_FORBIDDEN);
+    expect(closeRes.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);
   });
 });

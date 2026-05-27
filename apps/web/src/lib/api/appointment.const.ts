@@ -17,11 +17,13 @@ export const APPOINTMENT_API_PATH = BE_PATH.APPOINTMENTS;
 export const APPOINTMENT_API_PATH_BUILDER = {
   detail: (id: string) => BE_PATH_BUILDER.appointmentDetail(id),
   cancel: (id: string) => BE_PATH_BUILDER.appointmentCancel(id),
-  // F14 — doctor-only "this visit is done" toggle. No body.
+  // F14 — doctor-only "this visit is done" toggle. Body `{ note, drug? }`.
   complete: (id: string) => BE_PATH_BUILDER.appointmentComplete(id),
-  // F14 — doctor-only "send to another department" action. Body
-  // `{ toDepartmentId }`.
+  // F14 / F18 — doctor-only "send to another department" action. Body
+  // `{ referredToDepartmentId, note, drug? }`.
   refer: (id: string) => BE_PATH_BUILDER.appointmentRefer(id),
+  // F18 — doctor-only "follow up" action. Body `{ startAt, note, drug? }`.
+  followUp: (id: string) => BE_PATH_BUILDER.appointmentFollowUp(id),
 } as const;
 
 export const APPOINTMENT_QUERY_PARAM = {
@@ -135,6 +137,13 @@ export const APPOINTMENT_ERROR_CODE = {
    * surfaces only when a caller bypasses the wizard.
    */
   CONTINUATION_APPOINTMENT_TYPE_INVALID: "CONTINUATION_APPOINTMENT_TYPE_INVALID",
+  /**
+   * F18 — `POST /appointments/:id/complete|refer|follow-up` was called
+   * on an appointment that already has a `medical_records` row (the
+   * `medical_records.appointment_id @unique` invariant). Fires only when
+   * a caller races two identical requests or the page is not refreshed.
+   */
+  MEDICAL_RECORD_ALREADY_EXISTS: "MEDICAL_RECORD_ALREADY_EXISTS",
 } as const;
 
 export type AppointmentErrorCode =

@@ -5,8 +5,10 @@ import {
   ApiCreatedResponse,
   ApiExtraModels,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
 
@@ -43,7 +45,37 @@ const FORBIDDEN_READ_EXAMPLE = {
   details: { required: [PERMISSION.PATIENT_READ], held: [] },
 };
 
+const PATIENT_NOT_FOUND_EXAMPLE = {
+  statusCode: 404,
+  code: ErrorCode.PATIENT_NOT_FOUND,
+  message: 'Patient not found.',
+};
+
 const PaginatedPatientDto = PaginatedDto(PatientResponseDto);
+
+export function ApiGetPatient(): MethodDecorator & ClassDecorator {
+  return applyDecorators(
+    ApiOperation({
+      summary: 'Get a patient by id',
+      description:
+        'Returns the patient detail for `:id`. Gated on `patient.read`. ' +
+        'Soft-deleted patients return 404.',
+    }),
+    ApiParam({ name: 'id', description: 'Patient id (uuid).' }),
+    ApiOkResponse({
+      description: 'Patient detail',
+      type: PatientResponseDto,
+    }),
+    ApiNotFoundResponse({
+      description: 'Patient not found',
+      schema: { example: PATIENT_NOT_FOUND_EXAMPLE },
+    }),
+    ApiForbiddenResponse({
+      description: 'Caller is missing `patient.read`.',
+      schema: { example: FORBIDDEN_READ_EXAMPLE },
+    }),
+  );
+}
 
 export function ApiCreatePatient(): MethodDecorator & ClassDecorator {
   return applyDecorators(

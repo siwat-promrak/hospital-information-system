@@ -23,6 +23,8 @@ export const NAV_ICON = {
   REFERRALS: "referrals",
   // F15 — multi-doctor open-slot exploration screen.
   FIND_SLOT: "find_slot",
+  // F18 — doctor-only workspace queue.
+  WORKSPACE: "workspace",
 } as const;
 
 /**
@@ -148,5 +150,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
       PERMISSION_CODE.SCHEDULE_READ_OWN_DEPARTMENT,
       PERMISSION_CODE.SCHEDULE_READ_ALL,
     ],
+  },
+  {
+    id: "workspace",
+    href: FE_PATH.WORKSPACE,
+    iconName: NAV_ICON.WORKSPACE,
+    i18nKey: K.Nav.items.workspace,
+    // F18 — doctor-only workspace queue. Only visible when the caller
+    // holds `doctor_workspace.read.own` — NURSE / MRO / PHARMACY / ADMIN
+    // do not hold this code and therefore never see the entry.
+    permission: [PERMISSION_CODE.DOCTOR_WORKSPACE_READ_OWN],
   },
 ];

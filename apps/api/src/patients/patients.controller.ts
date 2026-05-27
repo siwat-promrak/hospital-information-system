@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -11,14 +11,15 @@ import { CreatePatientDto } from './dto/create-patient.dto';
 import { ListPatientsQueryDto } from './dto/list-patients.query.dto';
 import { PatientResponseDto } from './dto/patient.response.dto';
 import { PatientsService } from './patients.service';
-import { ApiCreatePatient, ApiListPatients } from './patients.swagger';
+import { ApiCreatePatient, ApiGetPatient, ApiListPatients } from './patients.swagger';
 
 /**
  * F09 patients controller. Front-desk walk-in registration + search.
  *
  * Permission gating:
- *  - `POST /patients` → `patient.create` (NURSE + MRO by default).
- *  - `GET /patients`  → `patient.read` (DOCTOR + NURSE + MRO + PHARMACY).
+ *  - `POST /patients`    → `patient.create` (NURSE + MRO by default).
+ *  - `GET /patients`     → `patient.read` (DOCTOR + NURSE + MRO + PHARMACY).
+ *  - `GET /patients/:id` → `patient.read` (same gate as the list).
  */
 @ApiTags('patients')
 @Controller('patients')
@@ -36,6 +37,15 @@ export class PatientsController {
       pageSize: query.pageSize,
       q: query.q,
     });
+  }
+
+  @Get(':id')
+  @RequirePermission(PERMISSION.PATIENT_READ)
+  @ApiGetPatient()
+  getById(
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<PatientResponseDto> {
+    return this.patients.getById(id);
   }
 
   @Post()

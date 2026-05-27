@@ -1,8 +1,7 @@
 /**
- * Unit coverage for the F14 additions to `AppointmentsService` —
- * `complete()` and `refer()`. Both are exercised with hand-rolled
- * Prisma stubs since they sit outside the `$transaction` envelope used
- * for booking. Full end-to-end coverage (real DB, lazy-group flow)
+ * Unit coverage for the F14/F18 additions to `AppointmentsService` —
+ * `complete()`, `refer()`. Both are exercised with hand-rolled
+ * Prisma stubs. Full end-to-end coverage (real DB, lazy-group flow)
  * lives in `test/appointments.e2e-spec.ts` +
  * `test/appointment-groups.e2e-spec.ts`.
  */
@@ -12,10 +11,16 @@ import { PERMISSION } from '../auth/permissions';
 import { ROLE } from '../auth/roles';
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '../common/errors';
+import type { MedicalRecordsService } from '../medical-records/medical-records.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../users/users.types';
 
 import { AppointmentsService } from './appointments.service';
+
+/** Stub medical-records service — createInsideTx is a no-op in unit tests. */
+const medicalRecordsStub = {
+  createInsideTx: jest.fn(async () => undefined),
+} as unknown as MedicalRecordsService;
 
 const HOME_DEPT_ID = 'dept-home';
 const FOREIGN_DEPT_ID = 'dept-foreign';
@@ -142,18 +147,26 @@ function baseRow(overrides: Partial<MockApptRow> = {}): MockApptRow {
   };
 }
 
+/** Wrap a tx-mock object in a `$transaction` shim for complete/refer tests. */
+function withTx(txObj: Record<string, unknown>): PrismaService {
+  return {
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>, _opts?: unknown) =>
+      fn(txObj),
+  } as unknown as PrismaService;
+}
+
 describe('AppointmentsService.complete', () => {
   it('rejects when caller is not the doctor on the appointment', async () => {
-    const prisma = {
+    const prisma = withTx({
       appointment: {
         findFirst: async () =>
           baseRow({ doctorId: DOC_FOREIGN_ID, departmentId: FOREIGN_DEPT_ID }),
       },
-    } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+    });
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     try {
-      await service.complete(DOCTOR_USER, APPT_ID);
+      await service.complete(DOCTOR_USER, APPT_ID, { note: 'n/a' });
       fail('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(AppException);
@@ -164,16 +177,16 @@ describe('AppointmentsService.complete', () => {
   });
 
   it('rejects from CANCELLED with 409 APPOINTMENT_NOT_BOOKED', async () => {
-    const prisma = {
+    const prisma = withTx({
       appointment: {
         findFirst: async () =>
           baseRow({ status: AppointmentStatus.CANCELLED }),
       },
-    } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+    });
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     try {
-      await service.complete(DOCTOR_USER, APPT_ID);
+      await service.complete(DOCTOR_USER, APPT_ID, { note: 'n/a' });
       fail('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(AppException);
@@ -182,23 +195,24 @@ describe('AppointmentsService.complete', () => {
     }
   });
 
-  it('is idempotent on COMPLETED — returns the existing row without writing', async () => {
+  it('rejects with APPOINTMENT_ALREADY_COMPLETED when already COMPLETED', async () => {
     const completedRow = baseRow({ status: AppointmentStatus.COMPLETED });
-    const updateSpy = jest.fn(async () => completedRow);
 
-    const prisma = {
+    const prisma = withTx({
       appointment: {
         findFirst: async () => completedRow,
-        findFirstOrThrow: async () => completedRow,
-        update: updateSpy,
       },
-    } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+    });
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
-    const result = await service.complete(DOCTOR_USER, APPT_ID);
-
-    expect(updateSpy).not.toHaveBeenCalled();
-    expect(result.status).toBe(AppointmentStatus.COMPLETED);
+    try {
+      await service.complete(DOCTOR_USER, APPT_ID, { note: 'n/a' });
+      fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppException);
+      expect((err as AppException).code).toBe(ErrorCode.APPOINTMENT_ALREADY_COMPLETED);
+      expect((err as AppException).getStatus()).toBe(409);
+    }
   });
 
   it('transitions BOOKED → COMPLETED and stamps completedAt + updatedBy', async () => {
@@ -208,15 +222,19 @@ describe('AppointmentsService.complete', () => {
     });
     const updateSpy = jest.fn(async () => updatedRow);
 
-    const prisma = {
+    const prisma = withTx({
       appointment: {
         findFirst: async () => bookedRow,
+        findFirstOrThrow: async () => updatedRow,
         update: updateSpy,
       },
-    } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+      appointmentGroup: {
+        update: jest.fn(async () => ({})),
+      },
+    });
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
-    const result = await service.complete(DOCTOR_USER, APPT_ID);
+    const result = await service.complete(DOCTOR_USER, APPT_ID, { note: 'Visit complete.' });
 
     expect(updateSpy).toHaveBeenCalledTimes(1);
     expect(result.status).toBe(AppointmentStatus.COMPLETED);
@@ -231,15 +249,15 @@ describe('AppointmentsService.complete', () => {
   });
 
   it('returns 404 APPOINTMENT_NOT_FOUND when the row is missing', async () => {
-    const prisma = {
+    const prisma = withTx({
       appointment: {
         findFirst: async () => null,
       },
-    } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+    });
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     try {
-      await service.complete(DOCTOR_USER, 'missing-appt');
+      await service.complete(DOCTOR_USER, 'missing-appt', { note: 'n/a' });
       fail('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(AppException);
@@ -253,15 +271,19 @@ describe('AppointmentsService.complete', () => {
       baseRow({ status: AppointmentStatus.COMPLETED }),
     );
 
-    const prisma = {
+    const prisma = withTx({
       appointment: {
         findFirst: async () => bookedRow,
+        findFirstOrThrow: async () => baseRow({ status: AppointmentStatus.COMPLETED }),
         update: updateSpy,
       },
-    } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+      appointmentGroup: {
+        update: jest.fn(async () => ({})),
+      },
+    });
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
-    const result = await service.complete(NURSE_USER, APPT_ID);
+    const result = await service.complete(NURSE_USER, APPT_ID, { note: 'Nurse completed.' });
 
     expect(updateSpy).toHaveBeenCalledTimes(1);
     expect(result.status).toBe(AppointmentStatus.COMPLETED);
@@ -284,11 +306,12 @@ describe('AppointmentsService.refer', () => {
         });
       },
     } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     try {
       await service.refer(DOCTOR_USER, APPT_ID, {
         toDepartmentId: FOREIGN_DEPT_ID,
+        note: 'Refer note.',
       });
       fail('expected throw');
     } catch (err) {
@@ -315,11 +338,12 @@ describe('AppointmentsService.refer', () => {
         });
       },
     } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     try {
       await service.refer(DOCTOR_USER, APPT_ID, {
         toDepartmentId: FOREIGN_DEPT_ID,
+        note: 'Refer note.',
       });
       fail('expected throw');
     } catch (err) {
@@ -345,11 +369,12 @@ describe('AppointmentsService.refer', () => {
         });
       },
     } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     try {
       await service.refer(DOCTOR_USER, APPT_ID, {
         toDepartmentId: 'dept-missing',
+        note: 'Refer note.',
       });
       fail('expected throw');
     } catch (err) {
@@ -381,10 +406,11 @@ describe('AppointmentsService.refer', () => {
         });
       },
     } as unknown as PrismaService;
-    const service = new AppointmentsService(prisma);
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     const result = await service.refer(DOCTOR_USER, APPT_ID, {
       toDepartmentId: FOREIGN_DEPT_ID,
+      note: 'Refer note.',
     });
 
     expect(updateSpy).toHaveBeenCalledTimes(1);
@@ -536,7 +562,7 @@ describe('AppointmentsService.create — continuation validation', () => {
       },
       onCreate: createSpy,
     });
-    const service = new AppointmentsService(prisma);
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     const result = await service.create(DOCTOR_USER, {
       patientId: PATIENT_ID,
@@ -566,7 +592,7 @@ describe('AppointmentsService.create — continuation validation', () => {
         referralFulfilledByAppointmentId: null,
       },
     });
-    const service = new AppointmentsService(prisma);
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     try {
       await service.create(DOCTOR_USER, {
@@ -601,7 +627,7 @@ describe('AppointmentsService.create — continuation validation', () => {
         referralFulfilledByAppointmentId: null,
       },
     });
-    const service = new AppointmentsService(prisma);
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     try {
       await service.create(DOCTOR_USER, {
@@ -653,7 +679,7 @@ describe('AppointmentsService.create — continuation validation', () => {
       },
       onCreate: createSpy,
     });
-    const service = new AppointmentsService(prisma);
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
 
     const result = await service.create(DOCTOR_USER, {
       patientId: PATIENT_ID,

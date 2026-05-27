@@ -1,8 +1,5 @@
 import { applyDecorators } from '@nestjs/common';
 import {
-  ApiBadRequestResponse,
-  ApiConflictResponse,
-  ApiCreatedResponse,
   ApiExtraModels,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -25,29 +22,10 @@ const FORBIDDEN_READ_EXAMPLE = {
   details: { required: [PERMISSION.MEDICAL_RECORDS_READ_ALL], held: [] },
 };
 
-const FORBIDDEN_SCOPE_EXAMPLE = {
-  statusCode: 403,
-  code: ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
-  message: 'DOCTOR users may only update medical records they authored.',
-};
-
 const NOT_FOUND_EXAMPLE = {
   statusCode: 404,
   code: ErrorCode.NOT_FOUND,
   message: 'Medical record not found.',
-};
-
-const VALIDATION_EXAMPLE = {
-  statusCode: 400,
-  code: ErrorCode.VALIDATION_FAILED,
-  message: 'Request validation failed.',
-};
-
-const CONFLICT_DUPLICATE_EXAMPLE = {
-  statusCode: 409,
-  code: ErrorCode.MEDICAL_RECORD_ALREADY_EXISTS,
-  message: 'A medical record already exists for this appointment.',
-  details: { appointmentId: '7c8e2a10-1234-5678-9abc-deadbeefcafe' },
 };
 
 const PaginatedMedicalRecordDto = PaginatedDto(MedicalRecordResponseDto);
@@ -59,7 +37,8 @@ export function ApiListMedicalRecords(): MethodDecorator & ClassDecorator {
       summary: 'List medical records (paginated)',
       description:
         'Returns medical records ordered by `createdAt DESC`. ' +
-        'Filters: `?patientId=`, `?doctorId=`, `?appointmentId=`. ' +
+        'Filters: `?patientId=`, `?doctorId=`, `?appointmentId=`, ' +
+        '`?appointmentGroupId=` (F18 — visit-thread view). ' +
         'All filters are AND-combined; missing filters mean no constraint. ' +
         'Reads are scope-less — every caller holding ' +
         '`medical_records.read.all` sees the full result set.',
@@ -67,6 +46,13 @@ export function ApiListMedicalRecords(): MethodDecorator & ClassDecorator {
     ApiQuery({ name: 'patientId', required: false }),
     ApiQuery({ name: 'doctorId', required: false }),
     ApiQuery({ name: 'appointmentId', required: false }),
+    ApiQuery({
+      name: 'appointmentGroupId',
+      required: false,
+      description:
+        'F18 — Restrict to records whose linked appointment belongs to this group. ' +
+        'Use with `pageSize=all` for the visit-thread view.',
+    }),
     ApiOkResponse({
       description: 'Medical records page',
       type: PaginatedMedicalRecordDto,
@@ -89,71 +75,6 @@ export function ApiGetMedicalRecord(): MethodDecorator & ClassDecorator {
     ApiForbiddenResponse({
       description: 'Caller is missing `medical_records.read.all`.',
       schema: { example: FORBIDDEN_READ_EXAMPLE },
-    }),
-    ApiNotFoundResponse({
-      description: 'Medical record id is unknown.',
-      schema: { example: NOT_FOUND_EXAMPLE },
-    }),
-  );
-}
-
-export function ApiCreateMedicalRecord(): MethodDecorator & ClassDecorator {
-  return applyDecorators(
-    ApiOperation({
-      summary: 'Create a medical record (DOCTOR only)',
-      description:
-        '`doctorId` is read from the caller’s JWT (`caller.doctor.id`) — ' +
-        'never from the request body. `departmentId` is mirrored from the ' +
-        'referenced appointment’s doctor. The caller MUST be the doctor ' +
-        'assigned to the referenced appointment.',
-    }),
-    ApiCreatedResponse({
-      description: 'Medical record created',
-      type: MedicalRecordResponseDto,
-    }),
-    ApiBadRequestResponse({
-      description: 'DTO validation failed OR patientId does not match the referenced appointment.',
-      schema: { example: VALIDATION_EXAMPLE },
-    }),
-    ApiForbiddenResponse({
-      description:
-        'Missing `medical_records.create.own` OR caller is not the doctor on the appointment.',
-      schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
-    }),
-    ApiNotFoundResponse({
-      description: 'Referenced appointment is unknown.',
-      schema: { example: { ...NOT_FOUND_EXAMPLE, message: 'Appointment not found.' } },
-    }),
-    ApiConflictResponse({
-      description: 'A medical record already exists for this appointment.',
-      schema: { example: CONFLICT_DUPLICATE_EXAMPLE },
-    }),
-  );
-}
-
-export function ApiUpdateMedicalRecord(): MethodDecorator & ClassDecorator {
-  return applyDecorators(
-    ApiOperation({
-      summary: 'Update a medical record (partial)',
-      description:
-        'Patch body is a subset of `{ note, drug }`. `medical_records.update.own` ' +
-        '(DOCTOR) requires the record’s authoring doctor to be the caller; ' +
-        '`medical_records.update.all` (MEDICAL_RECORDS_OFFICER) skips that ' +
-        'check.',
-    }),
-    ApiParam({ name: 'id', description: 'Medical record id (uuid).' }),
-    ApiOkResponse({
-      description: 'Medical record updated',
-      type: MedicalRecordResponseDto,
-    }),
-    ApiBadRequestResponse({
-      description: 'DTO validation failed.',
-      schema: { example: VALIDATION_EXAMPLE },
-    }),
-    ApiForbiddenResponse({
-      description:
-        'Missing the per-verb update permission OR DOCTOR caller is not the authoring doctor.',
-      schema: { example: FORBIDDEN_SCOPE_EXAMPLE },
     }),
     ApiNotFoundResponse({
       description: 'Medical record id is unknown.',

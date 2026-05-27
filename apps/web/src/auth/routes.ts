@@ -34,6 +34,9 @@ export const FE_PATH = {
   REFERRALS: "/referrals",
   // F15 — dedicated slot finder screen (multi-doctor open-slot exploration).
   FIND_SLOT: "/find-slot",
+  // F18 — doctor workspace queue (upcoming BOOKED appointments for the
+  // caller's own doctor row). Gated on `doctor_workspace.read.own`.
+  WORKSPACE: "/workspace",
 } as const;
 
 export type FePath = (typeof FE_PATH)[keyof typeof FE_PATH];
@@ -48,6 +51,8 @@ export const FE_PATH_BUILDER = {
   // F14 — single-group case-lineage page.
   appointmentGroupDetail: (id: string) =>
     `${FE_PATH.APPOINTMENT_GROUPS}/${id}`,
+  // F18 — dedicated doctor workspace detail page for a single appointment.
+  workspaceDetail: (id: string) => `${FE_PATH.WORKSPACE}/${id}`,
 } as const;
 
 export const BE_PATH = {
@@ -86,6 +91,7 @@ export type BePath = (typeof BE_PATH)[keyof typeof BE_PATH];
  */
 export const BE_PATH_BUILDER = {
   doctorDetail: (doctorId: string) => `${BE_PATH.DOCTORS}/${doctorId}`,
+  patientDetail: (id: string) => `${BE_PATH.PATIENTS}/${id}`,
   medicalRecord: (id: string) => `${BE_PATH.MEDICAL_RECORDS}/${id}`,
   appointmentDetail: (id: string) => `${BE_PATH.APPOINTMENTS}/${id}`,
   appointmentCancel: (id: string) =>
@@ -113,4 +119,9 @@ export const BE_PATH_BUILDER = {
   // aren't the latest visit's doctor. No body.
   appointmentGroupClose: (id: string) =>
     `${BE_PATH.APPOINTMENT_GROUPS}/${id}/close`,
+  // F18 — doctor-only "follow up" action. Body `{ startAt, note, drug? }`.
+  // Atomically completes the current visit and creates a new FOLLOW_UP
+  // appointment in the same group.
+  appointmentFollowUp: (id: string) =>
+    `${BE_PATH.APPOINTMENTS}/${id}/follow-up`,
 } as const;

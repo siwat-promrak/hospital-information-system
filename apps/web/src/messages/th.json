@@ -133,7 +133,8 @@
       "patientsNew": "ลงทะเบียนผู้ป่วย",
       "appointmentGroups": "เคส",
       "referrals": "การส่งต่อ",
-      "findSlot": "ค้นหาช่วงเวลา"
+      "findSlot": "ค้นหาช่วงเวลา",
+      "workspace": "พื้นที่ทำงาน"
     }
   },
   "Breadcrumb": {
@@ -183,7 +184,8 @@
       "appointmentCancelled": "ยกเลิกนัดหมายแล้ว",
       "appointmentCompleted": "บันทึกนัดหมายว่าเสร็จสิ้นแล้ว",
       "appointmentReferred": "ส่งต่อนัดหมายไปยังแผนกอื่นแล้ว",
-      "appointmentGroupClosed": "ปิดเคสแล้ว"
+      "appointmentGroupClosed": "ปิดเคสแล้ว",
+      "appointmentFollowedUp": "จองนัดติดตามสำเร็จ"
     },
     "Errors": {
       "generic": "เกิดข้อผิดพลาด กรุณาลองอีกครั้ง",
@@ -215,7 +217,8 @@
       "appointmentGroupCloseForbidden": "เฉพาะแพทย์ของนัดหมายล่าสุดเท่านั้นที่สามารถปิดเคสนี้ได้",
       "appointmentNotBooked": "การกระทำนี้ใช้ได้กับนัดหมายที่อยู่ในสถานะจองเท่านั้น",
       "previousAppointmentNotCompleted": "การนัดต่อเนื่องต้องเชื่อมกับการเข้ารักษาครั้งก่อนที่เสร็จสิ้นแล้วเท่านั้น กรุณาเลือกครั้งที่เสร็จสิ้น หรือเริ่มเคสใหม่",
-      "continuationAppointmentTypeInvalid": "การนัดต่อเนื่องจองได้เฉพาะประเภทนัดติดตามหรือหัตถการเท่านั้น กรุณาเปลี่ยนประเภทนัดหมายหรือข้ามขั้นตอนการนัดต่อเนื่อง"
+      "continuationAppointmentTypeInvalid": "การนัดต่อเนื่องจองได้เฉพาะประเภทนัดติดตามหรือหัตถการเท่านั้น กรุณาเปลี่ยนประเภทนัดหมายหรือข้ามขั้นตอนการนัดต่อเนื่อง",
+      "medicalRecordAlreadyExists": "มีบันทึกทางคลินิกอยู่แล้วสำหรับนัดหมายนี้"
     }
   },
   "Directory": {
@@ -505,6 +508,19 @@
         "forbidden": "คุณไม่มีสิทธิ์ลงทะเบียนผู้ป่วย",
         "generic": "ลงทะเบียนผู้ป่วยไม่สำเร็จ กรุณาลองอีกครั้ง"
       }
+    },
+    "Detail": {
+      "title": "ข้อมูลผู้ป่วย",
+      "nameLabel": "ชื่อ",
+      "hnLabel": "HN",
+      "dobLabel": "วันเกิด",
+      "genderLabel": "เพศ",
+      "bloodGroupLabel": "หมู่โลหิต",
+      "phoneLabel": "โทรศัพท์",
+      "emergencyPersonNameLabel": "ผู้ติดต่อฉุกเฉิน",
+      "emergencyPersonRelationLabel": "ความสัมพันธ์",
+      "emergencyPersonPhoneLabel": "โทรศัพท์ฉุกเฉิน",
+      "addressLabel": "ที่อยู่"
     }
   },
   "BookingWizard": {
@@ -688,5 +704,42 @@
     "Errors": {
       "forbidden": "คุณไม่มีสิทธิ์ใช้ตัวค้นหาช่วงเวลา"
     }
+  },
+  "Workspace": {
+    "title": "พื้นที่ทำงาน",
+    "subtitle": "นัดหมายที่จองไว้ของคุณสำหรับวันนี้และต่อไป",
+    "empty": "ไม่มีนัดหมายที่จองไว้ในอนาคต",
+    "upcomingTitle": "นัดหมายที่กำลังจะมาถึง",
+    "historyTitle": "ประวัติการตรวจ",
+    "upcomingEmpty": "ไม่มีนัดหมายที่จองไว้ในอนาคต",
+    "historyEmpty": "ไม่มีประวัติการตรวจ",
+    "back": "กลับไปยังพื้นที่ทำงาน",
+    "openVisit": "เปิดการตรวจ"
+  },
+  "WorkspacePanel": {
+    "noteLabel": "บันทึกทางคลินิก",
+    "noteRequired": "จำเป็นต้องมีบันทึกก่อนส่ง",
+    "drugLabel": "ยา / ใบสั่งยา (ไม่บังคับ)",
+    "completeAction": "เสร็จสิ้นการตรวจ",
+    "followUpAction": "นัดติดตาม",
+    "referAction": "ส่งต่อไปแผนกอื่น"
+  },
+  "FollowUp": {
+    "dialogTitle": "นัดติดตาม",
+    "datePickerLabel": "วันที่นัดติดตาม",
+    "noSlots": "ไม่มีช่วงเวลาว่างในวันนี้",
+    "confirmAction": "ยืนยันการนัดติดตาม",
+    "dismiss": "ยกเลิก",
+    "successToast": "จองนัดติดตามสำเร็จ"
+  },
+  "VisitThread": {
+    "title": "ประวัติการเข้ารับบริการ",
+    "empty": "ไม่มีบันทึกก่อนหน้าในเคสนี้",
+    "byDoctor": "โดย นพ./พญ. {doctorName}",
+    "visitNumber": "การเข้ารับบริการครั้งที่ {number}",
+    "noteLabel": "บันทึก",
+    "drugLabel": "ยา",
+    "doctorLabel": "แพทย์",
+    "departmentLabel": "แผนก"
   }
 }

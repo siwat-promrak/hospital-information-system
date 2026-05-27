@@ -1,22 +1,53 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — Production deployment (pull from Docker Hub)
+#
+# Usage on EC2:
+#   1. Copy this file + .env.production to EC2
+#   2. docker compose pull
+#   3. docker compose up -d
+# ──────────────────────────────────────────────────────────────────────────────
 services:
+  # ── PostgreSQL 16 ───────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: his_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: his
-      POSTGRES_PASSWORD: his
-      POSTGRES_DB: his
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - '5434:5432'
+      - '${DB_PORT}:5432'
     volumes:
       - his-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U his -d his']
+      test: [ 'CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}' ]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - his-net
+
+  # ── NestJS API ──────────────────────────────────────────────────────────────
+  api:
+    # ⚠️ CHANGE THIS to your Docker Hub username
+    image: ${DOCKER_IMAGE}
+    container_name: his_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    ports:
+      - '${API_PORT:-3001}:3001'
+    networks:
+      - his-net
 
 volumes:
   his-pgdata:
     name: hospital-information-system_his-pgdata
+
+networks:
+  his-net:
+    driver: bridge

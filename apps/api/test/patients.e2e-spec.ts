@@ -15,6 +15,12 @@
  *  - GET /patients
  *    - Search by partial name returns the row.
  *    - Search by partial HN returns the row.
+ *  - GET /patients/:id
+ *    - NURSE fetches existing patient → 200 with expected fields.
+ *    - Unknown uuid → 404 PATIENT_NOT_FOUND.
+ *    - No JWT → 401.
+ *    - ADMIN (no `patient.read`) → 403 INSUFFICIENT_PERMISSION.
+ *    - Soft-deleted patient → 404 PATIENT_NOT_FOUND.
  */
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
@@ -38,6 +44,7 @@ const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? 'dev-nextauth-secret-chan
 
 const NURSE_EMAIL = 'patients-nurse-e2e@gmail.com';
 const DOCTOR_USER_EMAIL = 'patients-doctor-e2e@gmail.com';
+const ADMIN_USER_EMAIL = 'patients-admin-e2e@gmail.com';
 
 const DEPT_NAME = 'Patients E2E Dept';
 
@@ -57,6 +64,7 @@ interface UserWithRole {
 interface Fixtures {
   nurse: UserWithRole;
   doctorUser: UserWithRole;
+  adminUser: UserWithRole;
   superAdminId: string;
   scratchUniqueSuffix: string;
 }
@@ -100,11 +108,12 @@ async function tryConnect(prisma: PrismaService): Promise<boolean> {
 async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
   const nurseRole = await prisma.role.findUnique({ where: { code: ROLE.NURSE } });
   const doctorRole = await prisma.role.findUnique({ where: { code: ROLE.DOCTOR } });
+  const adminRole = await prisma.role.findUnique({ where: { code: ROLE.ADMIN } });
   const superAdmin = await prisma.user.findFirst({
     where: { email: 'superadmin@gmail.com' },
   });
 
-  if (!nurseRole || !doctorRole || !superAdmin) {
+  if (!nurseRole || !doctorRole || !adminRole || !superAdmin) {
     return null;
   }
 
@@ -146,16 +155,35 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
     roleCode: ROLE.DOCTOR,
   };
 
+  const adminUser: UserWithRole = {
+    user: await prisma.user.create({
+      data: {
+        email: normalizeEmail(ADMIN_USER_EMAIL),
+        firstNameEn: 'Patients',
+        lastNameEn: 'Admin',
+        roleId: adminRole.id,
+        departmentId: dept.id,
+        createdBy: superAdmin.id,
+      },
+    }),
+    roleCode: ROLE.ADMIN,
+  };
+
   return {
     nurse,
     doctorUser,
+    adminUser,
     superAdminId: superAdmin.id,
     scratchUniqueSuffix: Date.now().toString(36).slice(-6),
   };
 }
 
 async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
-  const emails = [normalizeEmail(NURSE_EMAIL), normalizeEmail(DOCTOR_USER_EMAIL)];
+  const emails = [
+    normalizeEmail(NURSE_EMAIL),
+    normalizeEmail(DOCTOR_USER_EMAIL),
+    normalizeEmail(ADMIN_USER_EMAIL),
+  ];
 
   const users = await prisma.user.findMany({
     where: { email: { in: emails } },
@@ -378,6 +406,124 @@ describe('F09 — patients e2e', () => {
       expect(res.status).toBe(200);
       const hns = res.body.data.map((p: { hn: string }) => p.hn);
       expect(hns).toContain(target.hn);
+    });
+  });
+
+  // ─── GET /patients/:id ─────────────────────────────────────────────────────
+
+  describe('GET /patients/:id', () => {
+    maybe('NURSE fetches existing patient → 200 with expected fields', async () => {
+      const jwt = await jwtFor(fixtures!.nurse);
+
+      // Fetch existing patient by email to get their ID
+      const all = await request(server)
+        .get('/api/v1/patients?q=praewa&pageSize=50')
+        .set('Authorization', `Bearer ${jwt}`);
+      const target = all.body.data.find(
+        (p: { email: string }) => p.email === SCRATCH_PATIENT_EMAIL,
+      );
+
+      if (!target) {
+        throw new Error('walk-in fixture missing — fix the happy-path test first');
+      }
+
+      const res = await request(server)
+        .get(`/api/v1/patients/${target.id}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe(target.id);
+      expect(res.body.firstNameEn).toBe('Praewa');
+      expect(res.body.lastNameEn).toBe('Boonmee');
+      expect(res.body.email).toBe(SCRATCH_PATIENT_EMAIL);
+    });
+
+    maybe('Unknown uuid → 404 PATIENT_NOT_FOUND', async () => {
+      const jwt = await jwtFor(fixtures!.nurse);
+      const randomUuid = '00000000-0000-0000-0000-000000000000';
+
+      const res = await request(server)
+        .get(`/api/v1/patients/${randomUuid}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe(ErrorCode.PATIENT_NOT_FOUND);
+    });
+
+    maybe('No JWT → 401', async () => {
+      const jwt = await jwtFor(fixtures!.nurse);
+
+      // Find an ID
+      const all = await request(server)
+        .get('/api/v1/patients?q=praewa&pageSize=50')
+        .set('Authorization', `Bearer ${jwt}`);
+      const target = all.body.data.find(
+        (p: { email: string }) => p.email === SCRATCH_PATIENT_EMAIL,
+      );
+
+      if (!target) {
+        throw new Error('walk-in fixture missing — fix the happy-path test first');
+      }
+
+      const res = await request(server).get(`/api/v1/patients/${target.id}`);
+
+      expect(res.status).toBe(401);
+    });
+
+    maybe('ADMIN (no patient.read) → 403 INSUFFICIENT_PERMISSION', async () => {
+      const nurseJwt = await jwtFor(fixtures!.nurse);
+      const adminJwt = await jwtFor(fixtures!.adminUser);
+
+      // Find an ID
+      const all = await request(server)
+        .get('/api/v1/patients?q=praewa&pageSize=50')
+        .set('Authorization', `Bearer ${nurseJwt}`);
+      const target = all.body.data.find(
+        (p: { email: string }) => p.email === SCRATCH_PATIENT_EMAIL,
+      );
+
+      if (!target) {
+        throw new Error('walk-in fixture missing — fix the happy-path test first');
+      }
+
+      const res = await request(server)
+        .get(`/api/v1/patients/${target.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION);
+    });
+
+    maybe('Soft-deleted patient → 404 PATIENT_NOT_FOUND', async () => {
+      const jwt = await jwtFor(fixtures!.nurse);
+
+      // Create a temporary patient to soft-delete
+      const payload = walkInPayload({
+        identificationNo: `${SCRATCH_PATIENT_ID_PREFIX}${fixtures!.scratchUniqueSuffix}-softdel`,
+        email: `soft-del-${fixtures!.scratchUniqueSuffix}@gmail.com`,
+      });
+
+      const createRes = await request(server)
+        .post('/api/v1/patients')
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(payload);
+
+      expect(createRes.status).toBe(201);
+      const patientId = createRes.body.id;
+
+      // Soft-delete the patient using prisma
+      await prisma.patient.update({
+        where: { id: patientId },
+        data: { deletedAt: new Date() },
+      });
+
+      // Try to fetch
+      const res = await request(server)
+        .get(`/api/v1/patients/${patientId}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe(ErrorCode.PATIENT_NOT_FOUND);
     });
   });
 });

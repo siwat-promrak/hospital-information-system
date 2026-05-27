@@ -9,6 +9,7 @@ import type { Paginated, PaginationParams } from "@/types/pagination.types";
 import { buildPaginationQuery } from "./pagination";
 import {
   PATIENT_API_PATH,
+  PATIENT_API_PATH_BUILDER,
   PATIENT_QUERY_PARAM,
 } from "./patient.const";
 import { userFetch } from "./server-fetch";
@@ -38,6 +39,10 @@ export function listPatients(
   return userFetch<Paginated<PatientResponse>>(
     `${PATIENT_API_PATH}${query}`,
   );
+}
+
+export function getPatient(id: string): Promise<PatientResponse> {
+  return userFetch<PatientResponse>(PATIENT_API_PATH_BUILDER.detail(id));
 }
 
 export function createPatient(

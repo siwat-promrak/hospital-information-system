@@ -1,10 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
-import {
-  resolveMedicalRecordsUpdateScope,
-  SCOPE,
-} from '../auth/scope';
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '../common/errors';
 import {
@@ -13,13 +9,13 @@ import {
   type Paginated,
 } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
-import type { AuthenticatedUser } from '../users/users.types';
 
-import type { CreateMedicalRecordDto } from './dto/create-medical-record.dto';
 import { MedicalRecordResponseDto } from './dto/medical-record.response.dto';
-import type { UpdateMedicalRecordDto } from './dto/update-medical-record.dto';
 import { MEDICAL_RECORD_DB_ORDER_BY } from './medical-records.const';
-import type { ListMedicalRecordsArgs } from './medical-records.types';
+import type {
+  CreateMedicalRecordInsideTxArgs,
+  ListMedicalRecordsArgs,
+} from './medical-records.types';
 
 /**
  * Shared `include` for the medical-record lookups. Defining it as a
@@ -60,18 +56,21 @@ type MedicalRecordRow = Prisma.MedicalRecordGetPayload<{
 }>;
 
 /**
- * F11-prep medical records service. The `medical_records` table is
- * permanent (no soft-delete column) — there is no `delete()` method by
- * design.
+ * F18-updated medical records service. The standalone `create()` and
+ * `update()` methods have been removed. Records are now write-once and
+ * authored exclusively via appointment-action endpoints (`complete`,
+ * `refer`, `followUp`) which call `createInsideTx` inside their own
+ * Serializable transaction.
  *
- * Scope semantics:
- *   - `medical_records.read.all`     → list / detail are unscoped.
- *   - `medical_records.create.own`   → DOCTOR-only; service writes
- *     `doctorId = caller.doctor.id` from the JWT, NOT the request body.
- *   - `medical_records.update.own`   → DOCTOR can only update records
- *     they authored.
- *   - `medical_records.update.all`   → MEDICAL_RECORDS_OFFICER may
- *     update any record.
+ * Remaining methods:
+ *   - `list(args)` — paginated read, scope-less (gated on
+ *     `medical_records.read.all`). Supports `appointmentGroupId` filter
+ *     (F18 visit-thread view).
+ *   - `getById(id)` — single-record detail.
+ *   - `createInsideTx(tx, args)` — write-side helper called inside a
+ *     caller-owned Prisma transaction; enforces the per-appointment
+ *     uniqueness invariant and throws `409 MEDICAL_RECORD_ALREADY_EXISTS`
+ *     on collision.
  */
 @Injectable()
 export class MedicalRecordsService {
@@ -82,6 +81,9 @@ export class MedicalRecordsService {
    * reads newest-first. Reads are scope-less (gated on
    * `medical_records.read.all`) so the optional filter axes simply pass
    * through.
+   *
+   * F18 adds `appointmentGroupId` filtering — when set, restricts to records
+   * whose linked appointment belongs to the given group (visit-thread view).
    */
   async list(args: ListMedicalRecordsArgs = {}): Promise<Paginated<MedicalRecordResponseDto>> {
     const where: Prisma.MedicalRecordWhereInput = {};
@@ -96,6 +98,10 @@ export class MedicalRecordsService {
 
     if (args.appointmentId) {
       where.appointmentId = args.appointmentId;
+    }
+
+    if (args.appointmentGroupId) {
+      where.appointment = { appointmentGroupId: args.appointmentGroupId };
     }
 
     const resolved = resolvePagination(args);
@@ -133,64 +139,25 @@ export class MedicalRecordsService {
   }
 
   /**
-   * Create. Pinned to a single doctor — `doctorId` is read from the
-   * caller's JWT (`caller.doctor.id`), NOT from the request body, so a
-   * DOCTOR cannot author a record as someone else.
+   * Create a medical record INSIDE an existing Prisma transaction. Called
+   * by the appointment-action service methods (`complete`, `refer`,
+   * `followUp`) so the record insert and the appointment state transition
+   * land in the same Serializable transaction.
    *
-   * The associated `appointment` is loaded so the service can:
-   *   1. assert the appointment exists (404 NOT_FOUND on miss), AND
-   *   2. mirror the appointment's `departmentId` onto the record (denorm
-   *      cache like `DoctorSchedule` / `Appointment`).
+   * Enforces the per-appointment uniqueness invariant with a pre-check
+   * (`findUnique`) before the insert so the error shape is consistent with
+   * the schedule-overlap convention. The DB UNIQUE constraint backs it up
+   * if a race slips through.
    *
-   * If the caller's `doctor.id` does not match the appointment's
-   * `doctorId`, reject with `403 INSUFFICIENT_PERMISSION_SCOPE` — the
-   * `.create.own` permission means "I am the authoring doctor", and the
-   * authoring doctor MUST be the doctor on the appointment.
+   * Does NOT return a DTO — callers serialise the appointment response
+   * themselves; they do not need the medical record in the response body.
    */
-  async create(
-    caller: AuthenticatedUser,
-    dto: CreateMedicalRecordDto,
-  ): Promise<MedicalRecordResponseDto> {
-    if (!caller.doctor) {
-      throw AppException.forbidden(
-        ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
-        'Only DOCTOR users may author medical records.',
-      );
-    }
-
-    const appointment = await this.prisma.appointment.findFirst({
-      where: { id: dto.appointmentId },
-      select: {
-        id: true,
-        doctorId: true,
-        departmentId: true,
-        patientId: true,
-      },
-    });
-
-    if (!appointment) {
-      throw AppException.notFound(ErrorCode.NOT_FOUND, 'Appointment not found.');
-    }
-
-    if (appointment.doctorId !== caller.doctor.id) {
-      throw AppException.forbidden(
-        ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
-        'DOCTOR users may only author medical records for their own appointments.',
-      );
-    }
-
-    if (appointment.patientId !== dto.patientId) {
-      throw AppException.badRequest(
-        ErrorCode.VALIDATION_FAILED,
-        'patientId must match the patient on the referenced appointment.',
-      );
-    }
-
-    // Pre-check the per-appointment uniqueness invariant so the error
-    // shape matches the schedule-overlap convention (the DB UNIQUE
-    // constraint backs it up if a race slips through — see catch below).
-    const existing = await this.prisma.medicalRecord.findUnique({
-      where: { appointmentId: appointment.id },
+  async createInsideTx(
+    tx: Prisma.TransactionClient,
+    args: CreateMedicalRecordInsideTxArgs,
+  ): Promise<void> {
+    const existing = await tx.medicalRecord.findUnique({
+      where: { appointmentId: args.appointmentId },
       select: { id: true },
     });
 
@@ -198,25 +165,25 @@ export class MedicalRecordsService {
       throw AppException.conflict(
         ErrorCode.MEDICAL_RECORD_ALREADY_EXISTS,
         'A medical record already exists for this appointment.',
-        { appointmentId: appointment.id, existingMedicalRecordId: existing.id },
+        {
+          appointmentId: args.appointmentId,
+          existingMedicalRecordId: existing.id,
+        },
       );
     }
 
     try {
-      const row = await this.prisma.medicalRecord.create({
+      await tx.medicalRecord.create({
         data: {
-          doctorId: caller.doctor.id,
-          patientId: dto.patientId,
-          departmentId: appointment.departmentId,
-          appointmentId: appointment.id,
-          note: dto.note,
-          drug: dto.drug ?? null,
-          createdBy: caller.id,
+          doctorId: args.doctorId,
+          patientId: args.patientId,
+          departmentId: args.departmentId,
+          appointmentId: args.appointmentId,
+          note: args.note,
+          drug: args.drug ?? null,
+          createdBy: args.createdBy,
         },
-        include: medicalRecordInclude,
       });
-
-      return this.toResponse(row);
     } catch (err) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -227,70 +194,12 @@ export class MedicalRecordsService {
         throw AppException.conflict(
           ErrorCode.MEDICAL_RECORD_ALREADY_EXISTS,
           'A medical record already exists for this appointment.',
-          { appointmentId: appointment.id },
+          { appointmentId: args.appointmentId },
         );
       }
 
       throw err;
     }
-  }
-
-  /**
-   * Partial update. Scope branches:
-   *   - `MEDICAL_RECORDS_UPDATE_ALL` → no further check, write through.
-   *   - `MEDICAL_RECORDS_UPDATE_OWN` → row's `doctorId` MUST equal the
-   *      caller's `caller.doctor.id`; otherwise 403
-   *      `INSUFFICIENT_PERMISSION_SCOPE`.
-   */
-  async update(
-    caller: AuthenticatedUser,
-    id: string,
-    dto: UpdateMedicalRecordDto,
-  ): Promise<MedicalRecordResponseDto> {
-    const existing = await this.prisma.medicalRecord.findFirst({
-      where: { id },
-      select: { id: true, doctorId: true },
-    });
-
-    if (!existing) {
-      throw AppException.notFound(ErrorCode.NOT_FOUND, 'Medical record not found.');
-    }
-
-    const scope = resolveMedicalRecordsUpdateScope(caller);
-
-    if (scope === SCOPE.OWN) {
-      if (!caller.doctor || caller.doctor.id !== existing.doctorId) {
-        throw AppException.forbidden(
-          ErrorCode.INSUFFICIENT_PERMISSION_SCOPE,
-          'DOCTOR users may only update medical records they authored.',
-        );
-      }
-    } else if (scope !== SCOPE.ALL) {
-      // Route guard already required one of the two perms — defensive
-      // fail-closed for an unexpected catalog gap.
-      throw AppException.forbidden(
-        ErrorCode.INSUFFICIENT_PERMISSION,
-        'Caller is missing the required permission(s).',
-      );
-    }
-
-    const data: Prisma.MedicalRecordUncheckedUpdateInput = { updatedBy: caller.id };
-
-    if (dto.note !== undefined) {
-      data.note = dto.note;
-    }
-
-    if (dto.drug !== undefined) {
-      data.drug = dto.drug;
-    }
-
-    const row = await this.prisma.medicalRecord.update({
-      where: { id },
-      data,
-      include: medicalRecordInclude,
-    });
-
-    return this.toResponse(row);
   }
 
   private toResponse(row: MedicalRecordRow): MedicalRecordResponseDto {

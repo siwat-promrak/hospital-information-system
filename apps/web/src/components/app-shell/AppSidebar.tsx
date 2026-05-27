@@ -11,6 +11,7 @@ import EventAvailableIcon from "@mui/icons-material/EventAvailable";
 import EventNoteIcon from "@mui/icons-material/EventNote";
 import FolderSharedIcon from "@mui/icons-material/FolderShared";
 import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
+import MedicalServicesIcon from "@mui/icons-material/MedicalServices";
 import PeopleIcon from "@mui/icons-material/People";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import Box from "@mui/material/Box";
@@ -347,5 +348,7 @@ const ICON_FOR: Readonly<
   [NAV_ICON.APPOINTMENT_GROUPS]: AccountTreeIcon,
   [NAV_ICON.REFERRALS]: CallSplitIcon,
   [NAV_ICON.FIND_SLOT]: EventAvailableIcon,
+  // F18 — doctor workspace queue.
+  [NAV_ICON.WORKSPACE]: MedicalServicesIcon,
 };
 

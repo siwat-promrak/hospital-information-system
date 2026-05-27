@@ -133,7 +133,8 @@
       "patientsNew": "Register patient",
       "appointmentGroups": "Cases",
       "referrals": "Referrals",
-      "findSlot": "Find slot"
+      "findSlot": "Find slot",
+      "workspace": "Workspace"
     }
   },
   "Breadcrumb": {
@@ -183,7 +184,8 @@
       "appointmentCancelled": "Appointment cancelled.",
       "appointmentCompleted": "Appointment marked as completed.",
       "appointmentReferred": "Appointment referred to another department.",
-      "appointmentGroupClosed": "Case closed."
+      "appointmentGroupClosed": "Case closed.",
+      "appointmentFollowedUp": "Follow-up appointment booked."
     },
     "Errors": {
       "generic": "Something went wrong. Please try again.",
@@ -215,7 +217,8 @@
       "appointmentGroupCloseForbidden": "Only the most recent visit's doctor can close this case.",
       "appointmentNotBooked": "Action only available on booked appointments.",
       "previousAppointmentNotCompleted": "Continuations can only link to a completed prior visit. Pick a completed visit or start a new case.",
-      "continuationAppointmentTypeInvalid": "Continuations can only be booked as follow-up or procedure. Change the appointment type or skip the continuation step."
+      "continuationAppointmentTypeInvalid": "Continuations can only be booked as follow-up or procedure. Change the appointment type or skip the continuation step.",
+      "medicalRecordAlreadyExists": "A clinical record already exists for this appointment."
     }
   },
   "Directory": {
@@ -505,6 +508,19 @@
         "forbidden": "You don't have permission to register patients.",
         "generic": "Failed to register the patient. Please try again."
       }
+    },
+    "Detail": {
+      "title": "Patient information",
+      "nameLabel": "Name",
+      "hnLabel": "HN",
+      "dobLabel": "Date of birth",
+      "genderLabel": "Gender",
+      "bloodGroupLabel": "Blood group",
+      "phoneLabel": "Phone",
+      "emergencyPersonNameLabel": "Emergency contact",
+      "emergencyPersonRelationLabel": "Relationship",
+      "emergencyPersonPhoneLabel": "Emergency phone",
+      "addressLabel": "Address"
     }
   },
   "BookingWizard": {
@@ -688,5 +704,42 @@
     "Errors": {
       "forbidden": "You don't have permission to use the slot finder."
     }
+  },
+  "Workspace": {
+    "title": "Workspace",
+    "subtitle": "Your upcoming appointments for today and beyond.",
+    "empty": "No upcoming booked appointments.",
+    "upcomingTitle": "Upcoming",
+    "historyTitle": "Past visits",
+    "upcomingEmpty": "No upcoming booked appointments.",
+    "historyEmpty": "No past visits.",
+    "back": "Back to workspace",
+    "openVisit": "Open visit"
+  },
+  "WorkspacePanel": {
+    "noteLabel": "Clinical note",
+    "noteRequired": "A note is required before submitting.",
+    "drugLabel": "Medications / prescriptions (optional)",
+    "completeAction": "Complete visit",
+    "followUpAction": "Follow up",
+    "referAction": "Refer to another department"
+  },
+  "FollowUp": {
+    "dialogTitle": "Schedule a follow-up",
+    "datePickerLabel": "Follow-up date",
+    "noSlots": "No available slots on this date.",
+    "confirmAction": "Confirm follow-up",
+    "dismiss": "Cancel",
+    "successToast": "Follow-up appointment booked."
+  },
+  "VisitThread": {
+    "title": "Visit history",
+    "empty": "No previous records in this case.",
+    "byDoctor": "By Dr. {doctorName}",
+    "visitNumber": "Visit {number}",
+    "noteLabel": "Note",
+    "drugLabel": "Medications",
+    "doctorLabel": "Doctor",
+    "departmentLabel": "Department"
   }
 }

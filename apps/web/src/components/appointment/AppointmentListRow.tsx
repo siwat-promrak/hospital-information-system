@@ -24,6 +24,13 @@ interface AppointmentListRowProps {
   appointment: AppointmentResponse;
   viewDetailLabel: string;
   locale: string;
+  /**
+   * Override the link target for the arrow button + patient name.
+   * Defaults to `FE_PATH_BUILDER.appointmentDetail(appointment.id)` so
+   * existing callers are unaffected. The workspace list passes
+   * `FE_PATH_BUILDER.workspaceDetail(id)` to point at the doctor view.
+   */
+  href?: string;
 }
 
 /**
@@ -39,12 +46,13 @@ export default function AppointmentListRow({
   appointment,
   viewDetailLabel,
   locale,
+  href: hrefProp,
 }: AppointmentListRowProps) {
   const tType = useTranslations(NS.CommonAppointmentType);
   const tStatus = useTranslations(NS.CommonAppointmentStatus);
   const tList = useTranslations(NS.AppointmentsList);
 
-  const href = FE_PATH_BUILDER.appointmentDetail(appointment.id);
+  const href = hrefProp ?? FE_PATH_BUILDER.appointmentDetail(appointment.id);
   const start = dayjs(appointment.startAt).locale(locale);
   const end = dayjs(appointment.endAt).locale(locale);
 

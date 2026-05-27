@@ -82,6 +82,22 @@ export class PatientsService {
   }
 
   /**
+   * Retrieve a single patient by id. Throws `404 PATIENT_NOT_FOUND` when the
+   * row is missing or soft-deleted.
+   */
+  async getById(id: string): Promise<PatientResponseDto> {
+    const row = await this.prisma.patient.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!row) {
+      throw AppException.notFound(ErrorCode.PATIENT_NOT_FOUND, 'Patient not found.');
+    }
+
+    return this.toResponse(row);
+  }
+
+  /**
    * Walk-in create. Generates `hn`, lowercases the optional email, and
    * inserts. Duplicate email → `409 PATIENT_EMAIL_EXISTS`. Audit:
    * `createdBy = caller.id`.

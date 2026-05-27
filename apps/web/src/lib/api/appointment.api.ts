@@ -5,9 +5,11 @@ import type {
   AppointmentResponse,
   AppointmentStatus,
   CancelAppointmentBody,
+  CompleteAppointmentBody,
   CreateAppointmentBody,
+  FollowUpAppointmentBody,
+  ReferAppointmentWithNoteBody,
 } from "@/types/appointment.types";
-import type { ReferAppointmentBody } from "@/types/appointment-group.types";
 import type { Paginated, PaginationParams } from "@/types/pagination.types";
 
 import {
@@ -100,34 +102,65 @@ export function cancelAppointment(
 }
 
 /**
- * F14 — mark an appointment as `COMPLETED`. Doctor-only on the BE side:
- * non-doctor callers get a 403, an already-completed/cancelled row gets
- * `APPOINTMENT_ALREADY_COMPLETED` / `APPOINTMENT_ALREADY_CANCELLED`.
+ * F18 — mark an appointment as `COMPLETED` and create a medical-records
+ * row in the same transaction. Doctor-only (the BE checks
+ * `appointment.update.own` + caller-is-the-appointment-doctor). Body
+ * carries the mandatory `note` + optional `drug` for the visit record.
+ *
+ * Error codes (non-exhaustive): `APPOINTMENT_NOT_BOOKED` (row not BOOKED),
+ * `MEDICAL_RECORD_ALREADY_EXISTS` (409, duplicate action — panel hides
+ * when status !== BOOKED so this is a race condition guard).
  */
 export function completeAppointment(
   id: string,
+  body: CompleteAppointmentBody,
 ): Promise<AppointmentResponse> {
   return userFetch<AppointmentResponse>(
     APPOINTMENT_API_PATH_BUILDER.complete(id),
-    { method: "POST" },
+    {
+      method: "POST",
+      body,
+    },
   );
 }
 
 /**
- * F14 — stamp a referral on an appointment. The BE writes
- * `referredToDepartmentId` + `referredAt`, opens (or extends) the
- * appointment-group lineage, and surfaces the row on the destination
- * department's pickup queue via `GET /appointments?pendingReferralToDepartmentId=`.
+ * F18 — stamp a referral on an appointment and create a medical-records row
+ * in the same transaction. The BE writes `referredToDepartmentId` +
+ * `referredAt`, opens (or extends) the appointment-group lineage, and
+ * surfaces the row on the destination department's pickup queue.
  *
+ * Body now includes `{ referredToDepartmentId, note, drug? }` (extended
+ * from the F14 `{ toDepartmentId }` shape — field renamed on the wire).
  * Non-doctor callers get a 403; an already-referred row 409s with
  * `APPOINTMENT_ALREADY_REFERRED`.
  */
 export function referAppointment(
   id: string,
-  body: ReferAppointmentBody,
+  body: ReferAppointmentWithNoteBody,
 ): Promise<AppointmentResponse> {
   return userFetch<AppointmentResponse>(
     APPOINTMENT_API_PATH_BUILDER.refer(id),
+    {
+      method: "POST",
+      body,
+    },
+  );
+}
+
+/**
+ * F18 — atomically complete the current visit and create a new FOLLOW_UP
+ * appointment in the same group. Body `{ startAt, note, drug? }`. The BE
+ * checks the slot against the doctor's schedule, creates the medical-records
+ * row, transitions the current appointment to COMPLETED, and creates the new
+ * BOOKED appointment in a single serializable transaction.
+ */
+export function followUpAppointment(
+  id: string,
+  body: FollowUpAppointmentBody,
+): Promise<AppointmentResponse> {
+  return userFetch<AppointmentResponse>(
+    APPOINTMENT_API_PATH_BUILDER.followUp(id),
     {
       method: "POST",
       body,

@@ -1686,6 +1686,277 @@ only thing left to choose is the patient.
 
 ---
 
+## E18 — Doctor workspace ✅ shipped (F18, `feat/doctor-workspace`)
+
+> **Delta from the original AC, captured during F18 implementation:**
+> The doctor surface landed as **two dedicated routes**, not an enhanced
+> appointment detail. (1) `/workspace` lists the doctor's visits split
+> into two sections — **Upcoming** (`BOOKED`) on top, **History**
+> (`COMPLETED` + `CANCELLED`) below. (2) Clicking a row opens a
+> **dedicated `/workspace/:id`** page (NOT `/appointments/:id`) that
+> hosts the patient panel, the medical-records history, and — for
+> `BOOKED` visits only — the note + actions panel. `/appointments/:id`
+> was reverted to its plain F09 read-only form for every role.
+> A new **`GET /patients/:id`** endpoint was added to feed the patient
+> panel. The medical-record cards show the **authoring doctor + department**
+> (the `GET /medical-records` response already carried both as nested
+> refs). The workspace list rows reuse `AppointmentListRow`; the row's
+> date/time is NOT a link — navigation is the patient-name link + the
+> right-edge arrow icon button.
+
+Today a doctor's only inbound surface is the generic `/appointments`
+list. Once they open an appointment, the page mixes patient demographics
+with three loosely-related action buttons (Complete / Refer / Close
+Case) and no clinical context — they can't see the rest of the visit
+thread (the patient's prior notes in the same case), and they can't
+write the visit's clinical note from this page (medical records had to
+be POSTed separately).
+
+E18 introduces a focused doctor surface: a dedicated **workspace** list
+page (`/workspace`) that separates upcoming BOOKED visits from past
+ones, and a **dedicated workspace detail page** (`/workspace/:id`,
+reachable only when the caller IS the appointment's doctor) that shows
+the patient panel, the **medical-records history for the case**, and —
+while the visit is still `BOOKED` — a **note-taking panel** whose note +
+drug ride along with the doctor's chosen end-of-visit action. The plain
+`/appointments/:id` detail page stays unchanged for every role (no
+doctor panels, no end-of-visit buttons; cancel only).
+
+The visit-ending actions collapse the prior `Complete` / `Close Case`
+pair into a single **Complete** (always closes the group) and add
+**Follow Up** (atomically: completes current visit + creates a new
+FOLLOW_UP appointment in the same group). **Refer** keeps its existing
+shape but now also absorbs the note + drug fields. Every action
+**always creates a `medical_records` row** in the same transaction —
+medical records are now write-once, immutable, and the only way to
+author one is via a workspace action.
+
+This epic also lands the **RBAC catalog delta** that the new flow
+allows: `medical_records.{create.own, update.own, update.all}` are
+deleted (creation moves inside the appointment action endpoints, and
+records become permanent), and a new `doctor_workspace.read.own`
+permission gates the workspace nav item + page on the FE. No new BE
+permission is introduced for writes — the workspace actions inherit
+existing `appointment.update.own` (Complete / Refer / Follow Up).
+
+### RBAC delta (catalog goes from 35 → 33 perms, 50 → 48 policies)
+
+| Action | Code | Effect |
+| --- | --- | --- |
+| ADD | `doctor_workspace.read.own` | DOCTOR-only. FE gate for the workspace nav item + `/workspace` page guard. BE does NOT check this code anywhere — workspace data reads continue to flow through `appointment.read.own` + `medical_records.read.all`. |
+| DEL | `medical_records.create.own` | Standalone `POST /medical-records` is removed; record creation moves inside the three appointment-action endpoints. |
+| DEL | `medical_records.update.own` | `PATCH /medical-records/:id` is removed; records become write-once. |
+| DEL | `medical_records.update.all` | Same — records become write-once. MRO becomes read-only on records. |
+
+Post-delta the `medical_records.*` family holds exactly one code
+(`medical_records.read.all`). Per-role baseline:
+- **DOCTOR** — 14 perms (was 15: −create.own −update.own +doctor_workspace.read.own).
+- **NURSE** — 14 perms (unchanged).
+- **MEDICAL_RECORDS_OFFICER** — 8 perms (was 9: −update.all). MRO keeps `medical_records.read.all` and full `patient.*`, but can no longer mutate any medical record.
+- **ADMIN** — 9 (unchanged), **PHARMACY** — 3 (unchanged).
+
+### US-18.1 — Doctor lands on a focused workspace
+
+**US-18.1** — As a DOCTOR holding `doctor_workspace.read.own`, I want a
+dedicated `/workspace` page listing my visits — upcoming ones first,
+past ones below — so that I can pick the next visit and review recent
+ones without filtering the generic `/appointments` list.
+
+**Acceptance criteria:**
+
+- `/workspace` is rendered by the doctor's app shell. The sidebar
+  exposes a "Workspace" nav item whose visibility is gated on
+  `doctor_workspace.read.own` (NURSE / MRO / PHARMACY / ADMIN do not
+  see it).
+- The page renders **two sections**:
+  - **Upcoming** — `GET /appointments?status=BOOKED&from=<today>&order=asc&doctorId=<caller.doctor.id>`.
+  - **History** — `COMPLETED` + `CANCELLED` visits, `order=desc`.
+    Because the BE list endpoint filters a single `status` at a time,
+    the FE issues two parallel calls (one per status) and merges +
+    sorts them by `startAt` descending. Each section paginates
+    independently via its own query param (`upcomingPage` /
+    `historyPage`).
+  - The BE narrows by `appointment.read.own` scope; **no new list
+    endpoint is introduced** for the workspace queue.
+- Rows reuse the shared `AppointmentListRow` component: patient full
+  name (linked) + HN, start–end time, doctor · department, and
+  type + status chips. Row navigation is the patient-name link plus a
+  right-edge **arrow icon button** — the date/time itself is NOT a
+  link. Each row links to **`/workspace/:id`** (not `/appointments/:id`).
+- Pagination, locale, and "today" boundaries follow the existing
+  `/appointments` conventions.
+- A DOCTOR direct-loading `/workspace` without `doctor_workspace.read.own`
+  hits the page guard and is shown the generic forbidden card; a
+  non-DOCTOR hitting the URL gets the same forbidden experience.
+
+### US-18.2 — Doctor sees the visit thread + patient panel
+
+**US-18.2** — As the appointment's doctor opening `/workspace/:id`,
+I want to see the patient demographics, the appointment metadata, and
+the **medical records for the case**, so that I have the visit's
+clinical context without paging through prior appointments.
+
+**Acceptance criteria:**
+
+- `/workspace/:id` is gated on `doctor_workspace.read.own` AND verifies
+  `me.doctor?.id === appointment.doctorId`; a caller who isn't this
+  appointment's doctor (or lacks the permission) gets the generic
+  not-found / forbidden card (no existence leak).
+- The page renders, below a "Back to workspace" button and the
+  appointment summary card:
+  1. **Patient panel** — name (en + th when present), HN, DOB,
+     gender, blood group, phone, emergency contact triplet, address.
+     The full patient row is fetched via the new **`GET /patients/:id`**
+     endpoint (added in this feature — gated on `patient.read`,
+     returns `404 PATIENT_NOT_FOUND` for unknown / soft-deleted ids).
+  2. **Medical-records history** — `MedicalRecord` rows rendered
+     read-only, each card showing the **authoring doctor (name +
+     `doctorCode`) + department**, the visit number, the timestamp,
+     the note, and the drug. Two fetch modes:
+     - Grouped visit → every record in the case via
+       `GET /medical-records?appointmentGroupId=<id>&pageSize=all`
+       (this feature adds the `appointmentGroupId` query filter).
+     - Standalone past visit (no group) → this appointment's own
+       record via `GET /medical-records?appointmentId=<id>&pageSize=all`,
+       so a completed one-off visit still surfaces its note.
+     The section renders whenever the visit is grouped OR is a past
+     (non-`BOOKED`) visit; a `BOOKED` standalone visit has no record
+     yet, so it is omitted there.
+  3. **Note panel** — see US-18.3. Rendered **only while `BOOKED`**;
+     `COMPLETED` / `CANCELLED` visits show a read-only status alert and
+     the records history with no action panel.
+- `/appointments/:id` is unchanged from F09 for every role (NURSE /
+  MRO / PHARMACY / DOCTOR alike): the plain read-only detail card, no
+  doctor panels, no end-of-visit buttons — cancel only. The F09
+  Complete / Refer / Close-Case buttons were removed from it; those
+  actions live exclusively in the workspace detail's note panel.
+
+### US-18.3 — Doctor writes a note that submits with the end-of-visit action
+
+**US-18.3** — As the appointment's doctor, I want a single note +
+drug input on the workspace detail page whose contents submit **along
+with whichever end-of-visit action I take**, so that I can never finish
+a visit without leaving a clinical record.
+
+**Acceptance criteria:**
+
+- The note panel renders a required textarea (`note`) and an optional
+  textarea (`drug`). Until `note` is non-empty, all three action
+  buttons (Complete / Follow Up / Refer) are disabled at the FE.
+- Submitting any action passes `{ note, drug? }` to the BE; the BE
+  validates `note` as `@IsNotEmpty() @IsString()` and returns
+  `400 VALIDATION_FAILED` on an empty body. The same DTO shape is
+  shared by the three endpoints (Complete / Refer / Follow Up).
+- The BE creates the `MedicalRecord` row in the **same transaction**
+  as the appointment state transition — the row carries:
+  `{ appointmentId, doctorId, patientId, departmentId, note, drug? }`,
+  with `departmentId` denormalised from the appointment (mirrors F08).
+- A duplicate workspace action on the same appointment returns
+  `409 MEDICAL_RECORD_ALREADY_EXISTS` (the existing
+  `medical_records.appointment_id @unique` invariant). The FE
+  prevents this by hiding the action panel once the appointment is no
+  longer `BOOKED`.
+
+### US-18.4 — Doctor completes the visit (closes the case)
+
+**US-18.4** — As the appointment's doctor, I want a single
+**Complete** action that ends the visit AND closes the appointment
+group, so that finishing a one-shot visit takes one click instead of
+two (the legacy F14 split of Complete vs. Close Case is gone).
+
+**Acceptance criteria:**
+
+- `POST /appointments/:id/complete` accepts `{ note: string, drug?: string }`.
+- Gate: `appointment.update.own`. Caller must be the appointment's
+  doctor (existing scope rule) — non-doctor of-the-row callers get
+  `403 INSUFFICIENT_PERMISSION_SCOPE`.
+- Inside a `$transaction(Serializable)` with single retry on `40001`,
+  the BE:
+  1. Validates the appointment is currently `BOOKED`; otherwise
+     returns `409 APPOINTMENT_NOT_BOOKED` (or
+     `APPOINTMENT_ALREADY_COMPLETED` / `APPOINTMENT_ALREADY_CANCELLED`
+     to match F14 messaging).
+  2. Inserts a `MedicalRecord` row (US-18.3 contract).
+  3. Updates the appointment: `status = COMPLETED`, `completedAt = now`,
+     `updatedBy = caller.userId`.
+  4. If `appointment.appointmentGroupId !== null`, updates the group:
+     `closedAt = now`, `updatedBy = caller.userId`. If null, the group
+     update step is skipped (standalone visit).
+- The legacy `POST /appointment-groups/:id/close` endpoint is removed
+  in this feature — Complete now does its job. Existing callers (FE
+  Close Case button) are removed alongside.
+
+### US-18.5 — Doctor books an in-thread follow-up
+
+**US-18.5** — As the appointment's doctor, I want a **Follow Up**
+action that ends this visit AND books the next FOLLOW_UP appointment
+inside the same appointment group in one atomic step, so that I never
+end up with a `COMPLETED` appointment and no booked continuation
+(or vice versa).
+
+**Acceptance criteria:**
+
+- `POST /appointments/:id/follow-up` accepts
+  `{ startAt: string, note: string, drug?: string }`. `startAt` is an
+  ISO UTC datetime (the slot the doctor picked in the dialog).
+- Gate: `appointment.update.own`. Caller must be the appointment's
+  doctor.
+- Inside a `$transaction(Serializable)` with single retry on `40001`,
+  the BE:
+  1. Validates the current appointment is `BOOKED` (same shape as
+     US-18.4).
+  2. Inserts a `MedicalRecord` row for the current appointment
+     (US-18.3 contract).
+  3. Marks the current appointment `status = COMPLETED`, `completedAt = now`.
+  4. Creates a new appointment with:
+     - `patientId`, `doctorId`, `departmentId` copied from the current
+       appointment;
+     - `appointmentType = FOLLOW_UP`;
+     - `startAt = body.startAt`, `endAt = startAt + durationMinutes`
+       (durationMinutes from `(departmentId, FOLLOW_UP)` row per F13);
+     - `scheduleId` resolved by finding the doctor's
+       `DoctorSchedule` covering `startAt`;
+     - `previousAppointmentId = <current appointment id>` — F14's
+       lazy group materialisation slots this into the same group and
+       sets `visitNumber`.
+  5. Returns the **new** follow-up appointment in the response body.
+- Slot conflicts, `(departmentId, FOLLOW_UP)` validation, and booking
+  window enforcement (F13) all reuse the existing
+  `AppointmentsService.create` logic — no duplicated rules.
+- The FE dialog drives the flow: date picker → fetch
+  `GET /slots?doctorId=&departmentId=&date=&type=FOLLOW_UP` → slot
+  grid → Confirm. The doctor cannot submit until both `note` is
+  non-empty and a slot is selected.
+- F16 invariant preserved: `previousAppointmentId` is set, so the
+  standalone-type guard (which would reject FOLLOW_UP without a
+  previous) does not fire.
+
+### US-18.6 — Doctor refers to another department
+
+**US-18.6** — As the appointment's doctor, I want **Refer** to keep
+its F14 shape (complete current + flag referral, group stays open)
+while also absorbing the note + drug fields, so that the referring
+doctor's clinical reasoning is captured in the visit record as part
+of the same action.
+
+**Acceptance criteria:**
+
+- `POST /appointments/:id/refer` body becomes
+  `{ referredToDepartmentId: string, note: string, drug?: string }`
+  (the previous body's `note`-less shape is retired in this feature).
+- Gate: `appointment.update.own`. Same scope rule as F14.
+- Inside the existing F14 transaction, the BE additionally inserts a
+  `MedicalRecord` row (US-18.3 contract) before stamping
+  `referredToDepartmentId` + `referredAt` on the row and transitioning
+  to `COMPLETED`.
+- All existing F14 invariants are preserved: `referredToDepartmentId`
+  cannot equal the appointment's own `departmentId`; the group is
+  **not** closed (destination NURSE picks up via the pending-referral
+  queue); the referral remains unfulfilled until a subsequent
+  continuation is booked.
+
+---
+
 ## Constraints reference
 
 DB-level CHECK constraints, all appended as raw SQL to the init migration

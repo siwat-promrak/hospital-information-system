@@ -7,13 +7,17 @@ import Typography from "@mui/material/Typography";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { PERMISSION_CODE } from "@/auth/permissions";
-import AppointmentCancelButton from "@/components/appointment/AppointmentCancelButton";
-import BackToAppointmentsButton from "@/components/appointment/BackToAppointmentsButton";
+import AppointmentPatientPanel from "@/components/appointment/AppointmentPatientPanel";
+import AppointmentVisitThread from "@/components/appointment/AppointmentVisitThread";
+import BackToWorkspaceButton from "@/components/appointment/BackToWorkspaceButton";
+import WorkspaceNotePanel from "@/components/appointment/WorkspaceNotePanel";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { getAppointment } from "@/lib/api/appointment.api";
 import { APPOINTMENT_ERROR_CODE } from "@/lib/api/appointment.const";
+import { getMe } from "@/lib/api/auth.api";
 import { listDepartments } from "@/lib/api/department.api";
+import { getPatient } from "@/lib/api/patient.api";
 import { DEFAULT_PAGE, MAX_PAGE_SIZE } from "@/lib/api/pagination.const";
 import { dayjs } from "@/lib/dayjs";
 import { hasPermission, requireSession } from "@/lib/server/session";
@@ -23,42 +27,48 @@ import {
   formatPatientFullName,
 } from "@/appointment/labels";
 
-interface AppointmentDetailPageProps {
+interface WorkspaceDetailPageProps {
   params: Promise<{ locale: AppLocale; id: string }>;
 }
 
 /**
- * F09 appointment detail page (`/appointments/:id`).
+ * F18 — dedicated doctor workspace detail page (`/workspace/:id`).
  *
- * Read-only summary usable by NURSE / MRO / PHARMACY / DOCTOR alike.
- * The doctor's actionable workspace panels have moved to
- * `/workspace/:id` (F18).
+ * Gated on `doctor_workspace.read.own`. After that gate, also verifies
+ * that `me.doctor.id === appointment.doctorId` — if not, renders a
+ * not-found card (no existence leak).
  *
- * The BE returns `404 APPOINTMENT_NOT_FOUND` for both unknown ids AND
- * for ids the caller's scope can't see (no existence leak). The detail
- * page treats both cases the same — a generic "not found" card.
+ * Renders:
+ * - "Back to workspace" button
+ * - Appointment summary card (patient name, chips, detail rows)
+ * - `AppointmentPatientPanel` (full demographics)
+ * - `AppointmentVisitThread` (read-only medical records) when the visit
+ *   is grouped (full case history) OR is a past visit (so a completed
+ *   standalone visit still surfaces its own record)
+ * - `WorkspaceNotePanel` (Complete / Follow Up / Refer) only when
+ *   `appointment.status === 'BOOKED'`; completed/cancelled show a
+ *   read-only status alert instead
  */
-export default async function AppointmentDetailPage({
+export default async function WorkspaceDetailPage({
   params,
-}: AppointmentDetailPageProps) {
+}: WorkspaceDetailPageProps) {
   const { locale, id } = await params;
 
   setRequestLocale(locale);
 
   const session = await requireSession();
-  const t = await getTranslations(NS.AppointmentsDetail);
+  const t = await getTranslations(NS.Workspace);
+  const tDetail = await getTranslations(NS.AppointmentsDetail);
   const tErrors = await getTranslations(NS.AppointmentsErrors);
   const tType = await getTranslations(NS.CommonAppointmentType);
   const tStatus = await getTranslations(NS.CommonAppointmentStatus);
 
-  const canRead = hasPermission(
+  const canAccess = hasPermission(
     session,
-    PERMISSION_CODE.APPOINTMENT_READ_OWN,
-    PERMISSION_CODE.APPOINTMENT_READ_OWN_DEPARTMENT,
-    PERMISSION_CODE.APPOINTMENT_READ_ALL,
+    PERMISSION_CODE.DOCTOR_WORKSPACE_READ_OWN,
   );
 
-  if (!canRead) {
+  if (!canAccess) {
     return (
       <Card variant="outlined" sx={{ p: 4, textAlign: "center" }}>
         <Typography variant="body2" color="text.secondary">
@@ -82,10 +92,10 @@ export default async function AppointmentDetailPage({
         <Card variant="outlined" sx={{ p: 4, textAlign: "center" }}>
           <Stack spacing={2} alignItems="center">
             <Typography variant="body2" color="text.secondary">
-              {t(K.Appointments.Detail.notFound)}
+              {tDetail(K.Appointments.Detail.notFound)}
             </Typography>
-            <BackToAppointmentsButton
-              label={t(K.Appointments.Detail.back)}
+            <BackToWorkspaceButton
+              label={t(K.Workspace.back)}
             />
           </Stack>
         </Card>
@@ -95,39 +105,57 @@ export default async function AppointmentDetailPage({
     throw err;
   }
 
-  const canCancel =
-    appointment.status === "BOOKED" &&
-    hasPermission(
-      session,
-      PERMISSION_CODE.APPOINTMENT_DELETE_OWN,
-      PERMISSION_CODE.APPOINTMENT_DELETE_OWN_DEPARTMENT,
-    );
+  // Verify the caller IS this appointment's doctor — no existence leak.
+  const me = await getMe();
+  const isCallerDoctor =
+    me.doctor?.id !== undefined && me.doctor.id === appointment.doctorId;
 
-  // The referred-to chip needs the department catalog to resolve the id
-  // to a display name. Skip the fetch when no referral is stamped.
-  const departmentsResult =
-    appointment.referredToDepartmentId !== null
-      ? await listDepartments({ page: DEFAULT_PAGE, pageSize: MAX_PAGE_SIZE })
-      : null;
+  if (!isCallerDoctor) {
+    return (
+      <Card variant="outlined" sx={{ p: 4, textAlign: "center" }}>
+        <Stack spacing={2} alignItems="center">
+          <Typography variant="body2" color="text.secondary">
+            {tDetail(K.Appointments.Detail.notFound)}
+          </Typography>
+          <BackToWorkspaceButton
+            label={t(K.Workspace.back)}
+          />
+        </Stack>
+      </Card>
+    );
+  }
+
+  const isBooked = appointment.status === "BOOKED";
+
+  // Full patient row for the demographics panel.
+  const patient = await getPatient(appointment.patientId);
+
+  // Department catalog — needed for the Refer modal (BOOKED) and the
+  // referred-to chip (any status when `referredToDepartmentId` is set).
+  const needsDeptCatalog =
+    isBooked || appointment.referredToDepartmentId !== null;
+  const departmentsResult = needsDeptCatalog
+    ? await listDepartments({ page: DEFAULT_PAGE, pageSize: MAX_PAGE_SIZE })
+    : null;
 
   const start = dayjs(appointment.startAt).locale(locale);
   const end = dayjs(appointment.endAt).locale(locale);
 
   return (
     <Stack spacing={3}>
-      <BackToAppointmentsButton
-        label={t(K.Appointments.Detail.back)}
+      <BackToWorkspaceButton
+        label={t(K.Workspace.back)}
         sx={{ alignSelf: "flex-start" }}
       />
 
       {appointment.status === "CANCELLED" ? (
         <Alert severity="warning">
-          {t(K.Appointments.Detail.alreadyCancelled)}
+          {tDetail(K.Appointments.Detail.alreadyCancelled)}
         </Alert>
       ) : null}
       {appointment.status === "COMPLETED" ? (
         <Alert severity="info">
-          {t(K.Appointments.Detail.alreadyCompleted)}
+          {tDetail(K.Appointments.Detail.alreadyCompleted)}
         </Alert>
       ) : null}
 
@@ -160,7 +188,7 @@ export default async function AppointmentDetailPage({
                 />
                 {appointment.referredToDepartmentId ? (
                   <Chip
-                    label={t(K.Appointments.Detail.referredBadge, {
+                    label={tDetail(K.Appointments.Detail.referredBadge, {
                       departmentName:
                         departmentsResult?.data.find(
                           (d) => d.id === appointment.referredToDepartmentId,
@@ -173,76 +201,73 @@ export default async function AppointmentDetailPage({
               </Stack>
             </Stack>
 
-            <DetailRow
-              label={t(K.Appointments.Detail.hnLabel)}
+            <WorkspaceDetailRow
+              label={tDetail(K.Appointments.Detail.hnLabel)}
               value={appointment.patient.hn}
             />
-            <DetailRow
-              label={t(K.Appointments.Detail.doctorLabel)}
+            <WorkspaceDetailRow
+              label={tDetail(K.Appointments.Detail.doctorLabel)}
               value={`${formatDoctorFullName(appointment.doctor)} (${appointment.doctor.doctorCode})`}
             />
-            <DetailRow
-              label={t(K.Appointments.Detail.departmentLabel)}
+            <WorkspaceDetailRow
+              label={tDetail(K.Appointments.Detail.departmentLabel)}
               value={appointment.department.name}
             />
-            <DetailRow
-              label={t(K.Appointments.Detail.startsAt)}
+            <WorkspaceDetailRow
+              label={tDetail(K.Appointments.Detail.startsAt)}
               value={start.format("dddd, D MMMM YYYY HH:mm")}
             />
-            <DetailRow
-              label={t(K.Appointments.Detail.endsAt)}
+            <WorkspaceDetailRow
+              label={tDetail(K.Appointments.Detail.endsAt)}
               value={end.format("dddd, D MMMM YYYY HH:mm")}
             />
-            <DetailRow
-              label={t(K.Appointments.Detail.reasonLabel)}
+            <WorkspaceDetailRow
+              label={tDetail(K.Appointments.Detail.reasonLabel)}
               value={
                 appointment.reason && appointment.reason.length > 0
                   ? appointment.reason
-                  : t(K.Appointments.Detail.noReason)
+                  : tDetail(K.Appointments.Detail.noReason)
               }
             />
-            <DetailRow
-              label={t(K.Appointments.Detail.createdAt)}
-              value={dayjs(appointment.createdAt)
-                .locale(locale)
-                .format("ddd, D MMM YYYY HH:mm")}
-            />
-            {appointment.cancelledAt ? (
-              <>
-                <DetailRow
-                  label={t(K.Appointments.Detail.cancelledAt)}
-                  value={dayjs(appointment.cancelledAt)
-                    .locale(locale)
-                    .format("ddd, D MMM YYYY HH:mm")}
-                />
-                <DetailRow
-                  label={t(K.Appointments.Detail.cancellationReason)}
-                  value={
-                    appointment.cancellationReason &&
-                    appointment.cancellationReason.length > 0
-                      ? appointment.cancellationReason
-                      : t(K.Appointments.Detail.noReason)
-                  }
-                />
-              </>
-            ) : null}
-
-            {canCancel ? (
-              <AppointmentCancelButton appointmentId={appointment.id} />
-            ) : null}
           </Stack>
         </CardContent>
       </Card>
+
+      <AppointmentPatientPanel patient={patient} locale={locale} />
+
+      {/* Read-only medical records. Rendered when the visit is grouped
+          (full case history) OR when it is a past visit (so a completed
+          standalone visit still surfaces its own record). A BOOKED
+          standalone visit has no record yet, so it's omitted there. */}
+      {appointment.appointmentGroupId || !isBooked ? (
+        <AppointmentVisitThread
+          appointmentId={appointment.id}
+          appointmentGroupId={appointment.appointmentGroupId}
+          locale={locale}
+        />
+      ) : null}
+
+      {isBooked ? (
+        <WorkspaceNotePanel
+          appointmentId={appointment.id}
+          doctorId={appointment.doctorId}
+          departmentId={appointment.departmentId}
+          sourceDepartmentId={appointment.departmentId}
+          departments={departmentsResult?.data ?? []}
+          appointmentGroupId={appointment.appointmentGroupId}
+          locale={locale}
+        />
+      ) : null}
     </Stack>
   );
 }
 
-interface DetailRowProps {
+interface WorkspaceDetailRowProps {
   label: string;
   value: string;
 }
 
-function DetailRow({ label, value }: DetailRowProps) {
+function WorkspaceDetailRow({ label, value }: WorkspaceDetailRowProps) {
   return (
     <Stack
       direction={{ xs: "column", sm: "row" }}

@@ -126,7 +126,7 @@ describe('AuthService', () => {
 
     expect(result.roleCode).toBe(ROLE.DOCTOR);
     expect(result.permissionCodes).toContain(PERMISSION.SCHEDULE_CREATE_OWN);
-    expect(result.permissionCodes).toContain(PERMISSION.MEDICAL_RECORDS_CREATE_OWN);
+    expect(result.permissionCodes).toContain(PERMISSION.DOCTOR_WORKSPACE_READ_OWN);
     expect(result.permissionCodes).toContain(PERMISSION.APPOINTMENT_CREATE_OWN);
     expect(result.permissionCodes).toContain(PERMISSION.PATIENT_READ);
   });
