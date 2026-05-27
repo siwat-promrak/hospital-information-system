@@ -726,10 +726,15 @@ export const K = {
     visitNumber: "visitNumber",
   },
   Workspace: {
+    back: "back",
     empty: "empty",
-    startVisit: "startVisit",
+    historyEmpty: "historyEmpty",
+    historyTitle: "historyTitle",
+    openVisit: "openVisit",
     subtitle: "subtitle",
     title: "title",
+    upcomingEmpty: "upcomingEmpty",
+    upcomingTitle: "upcomingTitle",
   },
   WorkspacePanel: {
     completeAction: "completeAction",

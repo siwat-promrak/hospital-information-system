@@ -51,6 +51,8 @@ export const FE_PATH_BUILDER = {
   // F14 — single-group case-lineage page.
   appointmentGroupDetail: (id: string) =>
     `${FE_PATH.APPOINTMENT_GROUPS}/${id}`,
+  // F17 — dedicated doctor workspace detail page for a single appointment.
+  workspaceDetail: (id: string) => `${FE_PATH.WORKSPACE}/${id}`,
 } as const;
 
 export const BE_PATH = {

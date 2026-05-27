@@ -709,7 +709,12 @@
     "title": "Workspace",
     "subtitle": "Your upcoming appointments for today and beyond.",
     "empty": "No upcoming booked appointments.",
-    "startVisit": "Start visit"
+    "upcomingTitle": "Upcoming",
+    "historyTitle": "Past visits",
+    "upcomingEmpty": "No upcoming booked appointments.",
+    "historyEmpty": "No past visits.",
+    "back": "Back to workspace",
+    "openVisit": "Open visit"
   },
   "WorkspacePanel": {
     "noteLabel": "Clinical note",

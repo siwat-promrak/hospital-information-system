@@ -25,9 +25,17 @@ interface PaginationControlProps {
   /**
    * Query params to preserve across page changes (e.g. `departmentId`).
    * Undefined values are dropped so cleared filters don't linger in the
-   * URL. The `page` key is reserved and managed by this component.
+   * URL. The page key (see `pageQueryParam`) is reserved and managed by
+   * this component.
    */
   preservedQuery?: Record<string, string | undefined>;
+  /**
+   * The query-parameter name this control writes when the user changes
+   * pages. Defaults to `PAGINATION_QUERY_PARAM.PAGE` (`"page"`). Pass a
+   * different name (e.g. `"upcomingPage"`, `"historyPage"`) when two
+   * independent pagination controls share the same page URL.
+   */
+  pageQueryParam?: string;
 }
 
 /**
@@ -43,6 +51,7 @@ export default function PaginationControl({
   totalPages,
   basePath,
   preservedQuery,
+  pageQueryParam = PAGINATION_QUERY_PARAM.PAGE,
 }: PaginationControlProps) {
   const tPagination = useTranslations(NS.Pagination);
   const router = useRouter();
@@ -63,7 +72,7 @@ export default function PaginationControl({
       }
     }
 
-    search.set(PAGINATION_QUERY_PARAM.PAGE, String(nextPage));
+    search.set(pageQueryParam, String(nextPage));
 
     startTransition(() => {
       router.replace(`${basePath}?${search.toString()}`);
