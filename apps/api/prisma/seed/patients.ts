@@ -1,16 +1,18 @@
 /**
- * Seeds 10 Patient rows as pure records (no User link in the post-RBAC
- * model — patients do not sign in in P0). Genders balanced 5 MALE +
- * 5 FEMALE; blood groups mix common types with UNKNOWN to exercise the
- * default.
+ * Seeds 1000 Patient rows as pure records (no User link in the post-RBAC
+ * model — patients do not sign in in P0). The first 10 (HN 26000001..
+ * 26000010) are hand-crafted; the remaining 990 (HN 26000011..26001000)
+ * are produced deterministically by `generateAdditionalSpecs` so re-runs
+ * yield identical data. The extra volume gives patient pagination +
+ * search filtering enough rows to stress.
  *
  * Schema notes:
  *   - `hn` is 8-digit numeric `<YY><sequence>` (e.g. `26000001`). The
  *     Postgres CHECK constraint added in the init migration enforces
  *     `^[0-9]{7,9}$`.
  *   - `firstNameEn` / `lastNameEn` are required; `firstNameTh` /
- *     `lastNameTh` are nullable and populated for about half the rows
- *     to exercise the optional Thai-name path.
+ *     `lastNameTh` are nullable and populated for about 70% of generated
+ *     rows (~30% with `null`) to exercise the optional Thai-name path.
  *   - `email` is optional in the schema; here every seeded patient has
  *     one (`patient<N>@mailsac.com`) so end-to-end notification flows can
  *     be exercised against mailsac without a real inbox.
@@ -18,6 +20,7 @@
  * `createdBy` is the super-admin so re-runs stay deterministic. Natural
  * key is `hn` (unique).
  */
+import dayjs from 'dayjs';
 import {
   BloodGroup,
   Gender,
@@ -27,6 +30,8 @@ import {
 } from '@prisma/client';
 
 import { normalizeEmail } from '../../src/common/normalize-email';
+
+import { getUniqueName } from './_name-pool';
 
 interface PatientSpec {
   hn: string;
@@ -46,7 +51,7 @@ interface PatientSpec {
   address: string;
 }
 
-const SPECS: PatientSpec[] = [
+const HANDCRAFTED_SPECS: PatientSpec[] = [
   {
     hn: '26000001',
     firstNameEn: 'Suda',
@@ -218,6 +223,118 @@ const SPECS: PatientSpec[] = [
     address: '55 Soi 10, Bang Sue, Bangkok 10800',
   },
 ];
+
+// --- Deterministic generator for HN 26000011..26001000 -------------------
+//
+// Names come from the shared pool in `_name-pool.ts` at indices
+// 300..1289 (reserved range for generated patients). The ID / phone /
+// HN walks are deterministic so re-running the seed reproduces the same
+// rows.
+
+const GENERATED_COUNT = 990;
+const FIRST_GENERATED_HN_SUFFIX = 11;
+const FIRST_GENERATED_EMAIL_NUMBER = 11;
+const PATIENT_NAME_POOL_OFFSET = 300;
+
+const BLOOD_GROUPS: BloodGroup[] = [
+  BloodGroup.A_POSITIVE,
+  BloodGroup.A_NEGATIVE,
+  BloodGroup.B_POSITIVE,
+  BloodGroup.B_NEGATIVE,
+  BloodGroup.AB_POSITIVE,
+  BloodGroup.AB_NEGATIVE,
+  BloodGroup.O_POSITIVE,
+  BloodGroup.O_NEGATIVE,
+  BloodGroup.UNKNOWN,
+];
+
+const RELATIONS = ['Father', 'Mother', 'Spouse', 'Sibling', 'Child'];
+
+const ROADS = [
+  'Sukhumvit Rd',
+  'Silom Rd',
+  'Sathorn Rd',
+  'Phaholyothin Rd',
+  'Ratchadaphisek Rd',
+  'Lat Phrao Rd',
+  'Rama 4 Rd',
+  'Rama 9 Rd',
+  'Asoke Rd',
+  'Charoen Krung Rd',
+];
+
+const POSTCODES = [
+  '10110',
+  '10120',
+  '10310',
+  '10400',
+  '10500',
+  '10600',
+  '10800',
+  '10230',
+  '10900',
+  '10260',
+];
+
+function pad(value: number, width: number): string {
+  return String(value).padStart(width, '0');
+}
+
+function generateAdditionalSpecs(): PatientSpec[] {
+  const specs: PatientSpec[] = [];
+  const dobBase = dayjs('1950-01-01');
+
+  for (let idx = 0; idx < GENERATED_COUNT; idx += 1) {
+    const hnSuffix = idx + FIRST_GENERATED_HN_SUFFIX;
+    const emailNumber = idx + FIRST_GENERATED_EMAIL_NUMBER;
+    const name = getUniqueName(PATIENT_NAME_POOL_OFFSET + idx);
+    // Offset the emergency-contact name in the same pool so it doesn't
+    // collide with the patient's own name (and stays disjoint from
+    // every hand-crafted row).
+    const contactName = getUniqueName(PATIENT_NAME_POOL_OFFSET + idx + 1500);
+    const gender = idx % 2 === 0 ? Gender.MALE : Gender.FEMALE;
+    const bloodGroup = BLOOD_GROUPS[idx % BLOOD_GROUPS.length]!;
+    const relation = RELATIONS[idx % RELATIONS.length]!;
+    const road = ROADS[idx % ROADS.length]!;
+    const postcode = POSTCODES[idx % POSTCODES.length]!;
+    const dateOfBirth = dobBase.add(idx * 17, 'day').toDate();
+
+    // `identificationNo` walks 13 digits starting from '1100500000000'.
+    // Distinct from every hand-crafted ID (those use the '110040...' or
+    // 'P########' prefix patterns) so no collision is possible.
+    const identificationNo = `1100${pad(500000 + idx, 9)}`;
+    // Phone walks `+66-81-NNN-NNNN` deterministically. Hand-crafted
+    // patients use `+66-81-000-####` so the '500'+ prefix here keeps
+    // every generated phone disjoint from the canonical 10.
+    const phoneSuffix = 500 + idx;
+    const phoneA = Math.floor(phoneSuffix / 10);
+    const phoneB = idx % 10;
+    const phone = `+66-81-${pad(phoneA, 3)}-${pad((phoneSuffix * 7) % 10000, 4)}`;
+    const emergencyPhone = `+66-82-${pad(phoneA, 3)}-${pad((phoneSuffix * 7 + phoneB) % 10000, 4)}`;
+
+    specs.push({
+      hn: `2600${pad(hnSuffix, 4)}`,
+      firstNameEn: name.firstNameEn,
+      lastNameEn: name.lastNameEn,
+      firstNameTh: name.firstNameTh,
+      lastNameTh: name.lastNameTh,
+      email: `patient${emailNumber}@mailsac.com`,
+      dateOfBirth,
+      gender,
+      bloodGroup,
+      identificationNo,
+      phone,
+      emergencyPersonName: `${contactName.firstNameEn} ${contactName.lastNameEn}`,
+      emergencyPersonRelation: relation,
+      emergencyPersonPhone: emergencyPhone,
+      address: `${idx + 1} Soi ${(idx % 50) + 1}, ${road}, Bangkok ${postcode}`,
+    });
+  }
+
+  return specs;
+}
+
+const SPECS: PatientSpec[] = [...HANDCRAFTED_SPECS, ...generateAdditionalSpecs()];
 
 export async function seedPatients(
   prisma: PrismaClient,

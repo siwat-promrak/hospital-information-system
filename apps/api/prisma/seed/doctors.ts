@@ -1,9 +1,9 @@
 /**
- * Seeds 75 DOCTOR-role users along with their `Doctor` row and one or
+ * Seeds 100 DOCTOR-role users along with their `Doctor` row and one or
  * more `DoctorDepartment` affiliations.
  *
  * The first 25 (MD-0001..MD-0025) are hand-crafted specs; the remaining
- * 50 (MD-0026..MD-0075) are produced deterministically by
+ * 75 (MD-0026..MD-0100) are produced deterministically by
  * `generateAdditionalSpecs` so re-runs yield identical data. The extra
  * volume gives pagination + directory filtering enough rows to stress.
  *
@@ -23,6 +23,7 @@ import { Gender, PrismaClient, type Department, type Doctor, type User } from '@
 
 import { normalizeEmail } from '../../src/common/normalize-email';
 
+import { getUniqueName } from './_name-pool';
 import type { SeededRoles } from './roles';
 
 export interface SeededDoctors {
@@ -398,107 +399,14 @@ const HANDCRAFTED_SPECS: DoctorSpec[] = [
   },
 ];
 
-// --- Deterministic generator for MD-0026..MD-0075 -------------------------
+// --- Deterministic generator for MD-0026..MD-0100 -------------------------
 //
-// Parallel EN / TH name pools, same length so index N pairs the matching
-// transliteration. Kept at module scope per CLAUDE.md rule 2a (module-level
-// constants live alongside their consumers).
-
-const EN_FIRST_NAMES = [
-  'Anan',
-  'Suchada',
-  'Niran',
-  'Praewa',
-  'Kittisak',
-  'Jirayu',
-  'Apirak',
-  'Nattaya',
-  'Wanida',
-  'Pakorn',
-  'Bua',
-  'Ratchaphol',
-  'Chayanan',
-  'Tanawat',
-  'Yuwadee',
-  'Somsak',
-  'Phimchanok',
-  'Worawit',
-  'Decha',
-  'Kanyarat',
-] as const;
-
-const TH_FIRST_NAMES = [
-  'อนันต์',
-  'สุชาดา',
-  'นิรันดร์',
-  'แพรวา',
-  'กิตติศักดิ์',
-  'จิรายุ',
-  'อภิรักษ์',
-  'ณัฐญา',
-  'วนิดา',
-  'ภากร',
-  'บัว',
-  'รัชพล',
-  'ชญานันท์',
-  'ธนาวัฒน์',
-  'ยุวดี',
-  'สมศักดิ์',
-  'พิมพ์ชนก',
-  'วรวิทย์',
-  'เดชา',
-  'กัญญารัตน์',
-] as const;
-
-const EN_LAST_NAMES = [
-  'Charoen',
-  'Wong',
-  'Saetang',
-  'Boonmee',
-  'Phromma',
-  'Suksawat',
-  'Thaweesin',
-  'Kemkrai',
-  'Inthorn',
-  'Liu',
-  'Phongphan',
-  'Srisuk',
-  'Khampheng',
-  'Phadungrat',
-  'Champa',
-  'Rattanakorn',
-  'Sutthichai',
-  'Chaiyaporn',
-  'Tantipong',
-  'Maneerat',
-] as const;
-
-const TH_LAST_NAMES = [
-  'เจริญ',
-  'วงศ์',
-  'แซ่ตั้ง',
-  'บุญมี',
-  'พรหมมา',
-  'สุขสวัสดิ์',
-  'ทวีศิลป์',
-  'เกมไกร',
-  'อินทร',
-  'หลิว',
-  'พงศ์พันธ์',
-  'ศรีสุข',
-  'คำเพ็ง',
-  'ผดุงรัตน์',
-  'จำปา',
-  'รัตนกร',
-  'สุทธิชัย',
-  'ชัยพร',
-  'ตันติพงศ์',
-  'มณีรัตน์',
-] as const;
+// Names come from the shared pool in `_name-pool.ts`. Generated doctors
+// reserve indices 0..74 in that pool.
 
 // Primary department rotation — order matches `departments.ts` so the 10
 // clinical departments receive an even baseline of doctors as the index
-// walks 0..49 (5 doctors per department from this generator).
+// walks 0..74 (~7.5 doctors per department from this generator).
 const PRIMARY_ROTATION = [
   'Cardiology',
   'Internal Medicine',
@@ -512,12 +420,9 @@ const PRIMARY_ROTATION = [
   'Emergency Medicine',
 ] as const;
 
-const GENERATED_COUNT = 50;
+const GENERATED_COUNT = 75;
 const FIRST_GENERATED_INDEX = 26;
-// Drop firstNameTh / lastNameTh on every 5th generated doctor (idx 0, 5,
-// 10, ...) so ~20% of the new rows have null Thai names — mirrors the
-// existing hand-crafted spread.
-const TH_NAME_DROP_MODULO = 5;
+const DOCTOR_NAME_POOL_OFFSET = 0;
 
 function pad(value: number, width: number): string {
   return String(value).padStart(width, '0');
@@ -566,17 +471,15 @@ function generateAdditionalSpecs(): DoctorSpec[] {
 
   for (let idx = 0; idx < GENERATED_COUNT; idx += 1) {
     const doctorNumber = idx + FIRST_GENERATED_INDEX;
-    const nameIdx = idx % EN_FIRST_NAMES.length;
-    const lastIdx = idx % EN_LAST_NAMES.length;
-    const includeTh = idx % TH_NAME_DROP_MODULO !== 0;
+    const name = getUniqueName(DOCTOR_NAME_POOL_OFFSET + idx);
     const primaryDepartmentName = PRIMARY_ROTATION[idx % PRIMARY_ROTATION.length]!;
 
     specs.push({
       email: `doctor${pad(doctorNumber, 2)}@gmail.com`,
-      firstNameEn: EN_FIRST_NAMES[nameIdx]!,
-      lastNameEn: EN_LAST_NAMES[lastIdx]!,
-      firstNameTh: includeTh ? TH_FIRST_NAMES[nameIdx]! : null,
-      lastNameTh: includeTh ? TH_LAST_NAMES[lastIdx]! : null,
+      firstNameEn: name.firstNameEn,
+      lastNameEn: name.lastNameEn,
+      firstNameTh: name.firstNameTh,
+      lastNameTh: name.lastNameTh,
       doctorCode: `MD-${pad(doctorNumber, 4)}`,
       gender: idx % 2 === 0 ? Gender.MALE : Gender.FEMALE,
       identificationNo: `1100000000${pad(doctorNumber, 3)}`,
