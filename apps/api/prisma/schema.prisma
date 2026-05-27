@@ -64,12 +64,11 @@ enum AppointmentStatus {
 }
 
 // `AppointmentType` is the schema-level enum for appointment categories. The
-// per-type slot duration AND optional booking window now live as columns on
-// `DepartmentAppointmentType` (F13) — each `(department, type)` pair carries
-// its own `durationMinutes` and nullable `bookingWindowStartMinute` /
-// `bookingWindowEndMinute` (wall-clock minute-of-day in `CLINIC_TIMEZONE`).
-// The previous global `APPOINTMENT_TYPE_DURATION_MINUTES` const map has
-// been retired.
+// per-type slot duration AND booking windows now live on `DepartmentAppointmentType`
+// (F13/F21) — each `(department, type)` pair carries its own `durationMinutes`
+// and a child table `department_appointment_type_windows` (wall-clock ranges in
+// `CLINIC_TIMEZONE`). The previous global `APPOINTMENT_TYPE_DURATION_MINUTES`
+// const map has been retired.
 enum AppointmentType {
   NEW_PATIENT_VISIT
   FOLLOW_UP
@@ -278,9 +277,12 @@ model User {
   createdPolicies                   Policy[]                    @relation("PolicyCreatedBy")
   updatedPolicies                   Policy[]                    @relation("PolicyUpdatedBy")
   deletedPolicies                   Policy[]                    @relation("PolicyDeletedBy")
-  createdDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeCreatedBy")
-  updatedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeUpdatedBy")
-  deletedDepartmentAppointmentTypes DepartmentAppointmentType[] @relation("DepartmentAppointmentTypeDeletedBy")
+  createdDepartmentAppointmentTypes DepartmentAppointmentType[]       @relation("DepartmentAppointmentTypeCreatedBy")
+  updatedDepartmentAppointmentTypes DepartmentAppointmentType[]       @relation("DepartmentAppointmentTypeUpdatedBy")
+  deletedDepartmentAppointmentTypes DepartmentAppointmentType[]       @relation("DepartmentAppointmentTypeDeletedBy")
+  createdDatWindows                 DepartmentAppointmentTypeWindow[] @relation("DatWindowCreatedBy")
+  updatedDatWindows                 DepartmentAppointmentTypeWindow[] @relation("DatWindowUpdatedBy")
+  deletedDatWindows                 DepartmentAppointmentTypeWindow[] @relation("DatWindowDeletedBy")
   createdMedicalRecords             MedicalRecord[]             @relation("MedicalRecordCreatedBy")
   updatedMedicalRecords             MedicalRecord[]             @relation("MedicalRecordUpdatedBy")
   createdAppointmentGroups          AppointmentGroup[]          @relation("AppointmentGroupCreatedBy")
@@ -368,25 +370,19 @@ model Department {
 }
 
 /// Join row declaring which `AppointmentType` values a given `Department`
-/// offers AND the per-pair booking rules (F13). Acts as:
+/// offers AND the per-pair booking rules (F13/F21). Acts as:
 ///  - the gate for appointment creation: the requested
 ///    `(departmentId, appointmentType)` pair must exist here.
 ///  - the per-pair slot duration (`durationMinutes`) — replaces the global
 ///    `APPOINTMENT_TYPE_DURATION_MINUTES` map so each department can size
 ///    a category to its own clinical reality (Orthopedics PROCEDURE = 90,
 ///    others 60, …).
-///  - the per-pair booking window (`bookingWindowStartMinute` /
-///    `bookingWindowEndMinute`) — nullable wall-clock minutes-of-day in
-///    the clinic's local timezone (`CLINIC_TIMEZONE`), per CLAUDE.md §9a.
-///    NULL on either side = open-ended on that side; both NULL = the type
-///    is bookable any time the doctor is working.
+///  - the per-pair booking windows — child table
+///    `department_appointment_type_windows` (F21). Zero rows = unrestricted
+///    (bookable any time the doctor is working).
 ///
 /// CHECK constraints live in raw SQL (Prisma 5 cannot express them):
 ///  - `_duration_positive` — 0 < duration_minutes <= 480.
-///  - `_window_bounds`     — each minute-of-day lies in its half-open
-///                           daily range (`start` in `[0, 1440)`, `end`
-///                           in `(0, 1440]`).
-///  - `_window_order`      — when both are set, `start < end`.
 ///
 /// Unique pair so each combination is at most one row.
 model DepartmentAppointmentType {
@@ -399,13 +395,42 @@ model DepartmentAppointmentType {
   /// global per-`AppointmentType` const map dropped in F13.
   durationMinutes Int @map("duration_minutes")
 
-  /// Inclusive lower bound (wall-clock minute-of-day in `CLINIC_TIMEZONE`)
-  /// for slots of this `(department, type)`. NULL = no lower bound.
-  bookingWindowStartMinute Int? @map("booking_window_start_minute")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy String    @map("created_by") @db.Uuid
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy String?   @map("deleted_by") @db.Uuid
 
-  /// Exclusive upper bound (wall-clock minute-of-day in `CLINIC_TIMEZONE`)
-  /// for slots of this `(department, type)`. NULL = no upper bound.
-  bookingWindowEndMinute Int? @map("booking_window_end_minute")
+  department    Department                        @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser User                              @relation("DepartmentAppointmentTypeCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser User?                             @relation("DepartmentAppointmentTypeUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedByUser User?                             @relation("DepartmentAppointmentTypeDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  windows       DepartmentAppointmentTypeWindow[]
+
+  @@unique([departmentId, appointmentType])
+  @@map("department_appointment_types")
+}
+
+/// One allowed booking-time range for a `(department, appointmentType)` pair
+/// (F21). A pair with zero rows is unrestricted (bookable any time the doctor
+/// is working). A pair with N rows is bookable only when the slot sits
+/// entirely inside any one range (whole-slot containment in ANY range, OR).
+///
+/// Wall-clock minute-of-day values are stored in `CLINIC_TIMEZONE`.
+///
+/// CHECK constraint in raw SQL: `start_minute >= 0 AND start_minute < end_minute AND end_minute <= 1440`.
+model DepartmentAppointmentTypeWindow {
+  id                          String @id @default(uuid()) @db.Uuid
+  departmentAppointmentTypeId String @map("department_appointment_type_id") @db.Uuid
+
+  /// Inclusive lower bound (wall-clock minute-of-day in `CLINIC_TIMEZONE`).
+  /// Must be in `[0, 1439]`.
+  startMinute Int @map("start_minute")
+
+  /// Exclusive upper bound (wall-clock minute-of-day in `CLINIC_TIMEZONE`).
+  /// Must be in `[1, 1440]`. Value 1440 means "until local midnight".
+  endMinute Int @map("end_minute")
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   createdBy String    @map("created_by") @db.Uuid
@@ -414,13 +439,12 @@ model DepartmentAppointmentType {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  department    Department @relation(fields: [departmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  createdByUser User       @relation("DepartmentAppointmentTypeCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  updatedByUser User?      @relation("DepartmentAppointmentTypeUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  deletedByUser User?      @relation("DepartmentAppointmentTypeDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  departmentAppointmentType DepartmentAppointmentType @relation(fields: [departmentAppointmentTypeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser             User                      @relation("DatWindowCreatedBy", fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedByUser             User?                     @relation("DatWindowUpdatedBy", fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedByUser             User?                     @relation("DatWindowDeletedBy", fields: [deletedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@unique([departmentId, appointmentType])
-  @@map("department_appointment_types")
+  @@map("department_appointment_type_windows")
 }
 
 /// Clinical record for a DOCTOR-role user. 1-1 with `User` via `user_id`.

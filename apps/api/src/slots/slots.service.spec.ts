@@ -99,8 +99,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -148,8 +147,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -173,8 +171,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 25,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -203,8 +200,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -235,8 +231,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [],
         now: dt('2026-06-15T09:30:00Z'),
       });
@@ -262,8 +257,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [],
         now: dt('2026-06-15T09:00:00Z'),
       });
@@ -286,8 +280,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [],
         now: dt('2026-06-15T00:00:00Z'),
       });
@@ -318,8 +311,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [
           {
             startAt: dt('2026-06-15T09:00:00Z'),
@@ -353,8 +345,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [
           {
             startAt: dt('2026-06-15T09:00:00Z'),
@@ -392,8 +383,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [],
         now: FAR_FUTURE_NOW,
       });
@@ -419,8 +409,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [
           {
             startAt: dt('2026-06-15T09:20:00Z'),
@@ -449,8 +438,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 20,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: null,
+        bookingWindows: [],
         blockingAppointments: [
           {
             startAt: dt('2026-06-15T09:20:00Z'),
@@ -477,8 +465,7 @@ describe('computeSchedulesSlots', () => {
         doctor: DOCTOR_REF,
       },
       durationMinutes: 20,
-      bookingWindowStartMinute: null,
-      bookingWindowEndMinute: null,
+      bookingWindows: [],
       blockingAppointments: [],
       now: FAR_FUTURE_NOW,
     });
@@ -498,8 +485,7 @@ describe('computeSchedulesSlots', () => {
         doctor: DOCTOR_REF,
       },
       durationMinutes: 20,
-      bookingWindowStartMinute: null,
-      bookingWindowEndMinute: null,
+      bookingWindows: [],
       blockingAppointments: [],
       now: FAR_FUTURE_NOW,
     });
@@ -521,8 +507,7 @@ describe('computeSchedulesSlots', () => {
         doctor: DOCTOR_REF,
       },
       durationMinutes: 20,
-      bookingWindowStartMinute: null,
-      bookingWindowEndMinute: null,
+      bookingWindows: [],
       blockingAppointments: [],
       now: FAR_FUTURE_NOW,
     });
@@ -567,14 +552,13 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: 660,
+        bookingWindows: [{ startMinute: 0, endMinute: 660 }],
         blockingAppointments: [],
         now: dt('2099-01-01T00:00:00Z'),
       });
 
       // 09:00 local = 02:00 UTC, 10:00 local = 03:00 UTC. 11:00 local
-      // (= 04:00 UTC) is dropped because localMin >= 660 → out-of-window.
+      // (= 04:00 UTC) is dropped because startMin >= 660 → outside window [0,660).
       expect(slots.map((s) => s.startAt)).toEqual([
         '2099-06-15T02:00:00.000Z',
         '2099-06-15T03:00:00.000Z',
@@ -595,8 +579,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
-        bookingWindowStartMinute: 600,
-        bookingWindowEndMinute: null,
+        bookingWindows: [{ startMinute: 600, endMinute: 1440 }],
         blockingAppointments: [],
         now: dt('2099-01-01T00:00:00Z'),
       });
@@ -627,8 +610,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 30,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: 660,
+        bookingWindows: [{ startMinute: 0, endMinute: 660 }],
         blockingAppointments: [
           {
             startAt: dt('2099-06-15T02:30:00Z'),
@@ -668,8 +650,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
-        bookingWindowStartMinute: 540,
-        bookingWindowEndMinute: 720,
+        bookingWindows: [{ startMinute: 540, endMinute: 720 }],
         blockingAppointments: [],
         now: dt('2099-01-01T00:00:00Z'),
       });
@@ -684,19 +665,20 @@ describe('computeSchedulesSlots', () => {
       ]);
     });
 
-    it('midnight-wrap regression: 16:00–00:00 local schedule returns NO slots when windowEndMinute = 660 (11:00 local)', () => {
-      // Repro from the bug report: a schedule that runs from 16:00 local to
-      // 00:00 local (midnight) with bookingWindowEndMinute = 660 (= 11:00
-      // local) should produce zero slots — the entire schedule is after 11:00.
+    it('matrix row 11 / midnight-wrap regression (PR #28 adapted): 16:00–00:00 local schedule returns NO slots for before-11 window [0,660)', () => {
+      // Matrix row 11: Ranges=[0,660) (before 11 only), Schedule=16:00–00:00
+      // local → all candidate slots are after 11:00 → zero slots.
       //
-      // Asia/Bangkok is UTC+7, so:
+      // Also the original F13 midnight-wrap regression (PR #28): the last
+      // slot is 23:30–00:00 local (16:30–17:00 UTC). A naive `minuteOfDay`
+      // impl returns slotEnd = 0 (midnight), which passes "0 <= 660" —
+      // incorrectly keeping the slot. The F21 day-rollover-aware predicate
+      // computes endMin = 0 + 1*1440 = 1440, which fails "1440 <= 660" →
+      // slot correctly excluded.
+      //
+      // Asia/Bangkok is UTC+7:
       //   16:00 local = 09:00 UTC
       //   00:00 local (next day) = 17:00 UTC same calendar day
-      //
-      // The bug: the last slot (23:30–00:00 local = 16:30–17:00 UTC) had
-      // slotEndMin = localMinuteOfDay('17:00 UTC') = 0 (midnight wraps to 0).
-      // The old check `0 > 660` was false, so the slot passed incorrectly.
-      // The fix normalises slotEndMin to 1440 when it wraps below slotStartMin.
       const slots = computeSchedulesSlots({
         schedule: {
           id: SCHEDULE_ID,
@@ -709,8 +691,7 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 30,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: 660, // 11:00 local
+        bookingWindows: [{ startMinute: 0, endMinute: 660 }], // before 11:00
         blockingAppointments: [],
         now: dt('2099-01-01T00:00:00Z'),
       });
@@ -718,14 +699,11 @@ describe('computeSchedulesSlots', () => {
       expect(slots).toEqual([]);
     });
 
-    it('midnight-wrap positive: pre-window slot in an early schedule is still returned', () => {
-      // Positive case: a schedule that runs from 08:00 to 11:00 local (just
-      // touching the window end) with bookingWindowEndMinute = 660 should
-      // still return the first two slots (08:00–09:00 and 09:00–10:00 local).
-      // The 10:00–11:00 local slot starts at minute 600 and ends at minute
-      // 660 — slotEndMin (660) is NOT less than slotStartMin (600), so no
-      // midnight-wrap normalisation applies, and the end-bound check is
-      // 660 > 660 → false → slot kept.
+    it('midnight-wrap positive (PR #28 adapted): pre-window slot in an early schedule is still returned', () => {
+      // Positive case adapted from PR #28 regression test. A schedule
+      // 08:00–11:00 local with window [0,660) should return three 60-min
+      // slots: 08:00, 09:00, 10:00 local. The 10:00–11:00 slot has
+      // endMin = 660, which satisfies "endMin <= 660" → kept.
       //
       // 08:00 local = 01:00 UTC; 11:00 local = 04:00 UTC.
       const slots = computeSchedulesSlots({
@@ -740,22 +718,84 @@ describe('computeSchedulesSlots', () => {
           doctor: DOCTOR_REF,
         },
         durationMinutes: 60,
-        bookingWindowStartMinute: null,
-        bookingWindowEndMinute: 660, // 11:00 local
+        bookingWindows: [{ startMinute: 0, endMinute: 660 }], // before 11:00
         blockingAppointments: [],
         now: dt('2099-01-01T00:00:00Z'),
       });
 
-      // 08:00 local (480 min) → end 09:00 (540 min): 540 ≤ 660 → kept.
-      // 09:00 local (540 min) → end 10:00 (600 min): 600 ≤ 660 → kept.
-      // 10:00 local (600 min) → end 11:00 (660 min): 660 ≤ 660 → kept
-      //   (end-bound check is `effectiveSlotEndMin > windowEndMin` = `660 > 660` = false).
+      // 08:00 local (480 min) → end 09:00 (540 min): 480 >= 0 && 540 <= 660 → kept.
+      // 09:00 local (540 min) → end 10:00 (600 min): 540 >= 0 && 600 <= 660 → kept.
+      // 10:00 local (600 min) → end 11:00 (660 min): 600 >= 0 && 660 <= 660 → kept.
       expect(slots.map((s) => s.startAt)).toEqual([
         '2099-06-15T01:00:00.000Z', // 08:00 local
         '2099-06-15T02:00:00.000Z', // 09:00 local
         '2099-06-15T03:00:00.000Z', // 10:00 local
       ]);
     });
+  });
+
+  it('matrix row 10: [00:00,660)∪[900,1440), 16:00–00:00 schedule, 23:30 slot → included (after-15 range)', () => {
+    // Row 10 from the E21 matrix: the slot 23:30–00:00 local fits the
+    // after-15 range [900,1440) because endMin = 1440 (day-rollover).
+    // Asia/Bangkok: 16:30 UTC = 23:30 local; 17:00 UTC = 00:00 local (+1 day).
+    const slots = computeSchedulesSlots({
+      schedule: {
+        id: SCHEDULE_ID,
+        departmentId: SCHEDULE_DEPT_ID,
+        startAt: dt('2099-06-15T09:00:00Z'), // 16:00 local
+        endAt: dt('2099-06-15T17:00:00Z'),   // 00:00 local (+1 day)
+        breakStartAt: null,
+        breakEndAt: null,
+        doctor: DOCTOR_REF,
+      },
+      durationMinutes: 30,
+      bookingWindows: [
+        { startMinute: 0, endMinute: 660 },   // before 11:00
+        { startMinute: 900, endMinute: 1440 }, // after 15:00
+      ],
+      blockingAppointments: [],
+      now: dt('2099-01-01T00:00:00Z'),
+    });
+
+    // All slots are at or after 16:00 local (startMin >= 960 >= 900), and the
+    // last slot 23:30–00:00 has endMin = 1440 <= 1440 → all kept.
+    const starts = slots.map((s) => s.startAt);
+
+    // 23:30 local (16:30 UTC) → endMin = 1440 → included (after-15 range).
+    expect(starts).toContain('2099-06-15T16:30:00.000Z');
+    // An earlier in-range slot also fits — 16:00 local (09:00 UTC), startMin=960,
+    // endMin=990, both inside [900,1440). Guards against the after-15 range
+    // silently matching ONLY the midnight-crossing slot.
+    expect(starts).toContain('2099-06-15T09:00:00.000Z');
+  });
+
+  it('matrix row 13: [900,1440) after-15, 23:00–01:00 schedule, 23:30 slot → included (endMin=1440)', () => {
+    // Row 13: schedule spans midnight, slot 23:30–00:00 has endMin = 1440
+    // which satisfies [900,1440): 1410 >= 900 && 1440 <= 1440 → included.
+    // The next slot 00:00–00:30 has startMin = 0 < 900 → excluded (row 14).
+    // Asia/Bangkok: 16:00 UTC = 23:00 local; 18:00 UTC = 01:00 local (+1 day).
+    const slots = computeSchedulesSlots({
+      schedule: {
+        id: SCHEDULE_ID,
+        departmentId: SCHEDULE_DEPT_ID,
+        startAt: dt('2099-06-15T16:00:00Z'), // 23:00 local
+        endAt: dt('2099-06-15T18:00:00Z'),   // 01:00 local (+1 day)
+        breakStartAt: null,
+        breakEndAt: null,
+        doctor: DOCTOR_REF,
+      },
+      durationMinutes: 30,
+      bookingWindows: [{ startMinute: 900, endMinute: 1440 }], // after 15:00
+      blockingAppointments: [],
+      now: dt('2099-01-01T00:00:00Z'),
+    });
+
+    const starts = slots.map((s) => s.startAt);
+
+    // 23:30 local (16:30 UTC) → endMin = 1440 → included.
+    expect(starts).toContain('2099-06-15T16:30:00.000Z');
+    // 00:00 local (+1, 17:00 UTC) → startMin = 0 < 900 → excluded (row 14).
+    expect(starts).not.toContain('2099-06-15T17:00:00.000Z');
   });
 });
 
@@ -959,12 +999,11 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
       },
       departmentAppointmentType: {
         // Default mock — 20-min CONSULTATION duration with no booking
-        // window. Tests that need a different duration override the
-        // whole mock; tests that need a window pass through here as well.
+        // windows (unrestricted). Tests that need a different duration
+        // or windows override the whole mock.
         findFirst: jest.fn().mockResolvedValue({
           durationMinutes: 20,
-          bookingWindowStartMinute: null,
-          bookingWindowEndMinute: null,
+          windows: [],
         }),
       },
       doctorSchedule: { findMany: jest.fn().mockResolvedValue([]) },
@@ -1132,8 +1171,7 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
       departmentAppointmentType: {
         findFirst: jest.fn().mockResolvedValue({
           durationMinutes: 60,
-          bookingWindowStartMinute: null,
-          bookingWindowEndMinute: null,
+          windows: [],
         }),
       },
       doctorSchedule: {
@@ -1272,8 +1310,7 @@ describe('SlotsService.findSlots — full pipeline (mocked Prisma)', () => {
       departmentAppointmentType: {
         findFirst: jest.fn().mockResolvedValue({
           durationMinutes: 60,
-          bookingWindowStartMinute: null,
-          bookingWindowEndMinute: null,
+          windows: [],
         }),
       },
     });

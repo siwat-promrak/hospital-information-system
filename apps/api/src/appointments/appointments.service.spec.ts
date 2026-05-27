@@ -516,8 +516,7 @@ describe('AppointmentsService.create — continuation validation', () => {
             findFirst: async () => ({
               id: 'dat-1',
               durationMinutes: 20,
-              bookingWindowStartMinute: null,
-              bookingWindowEndMinute: null,
+              windows: [],
             }),
           },
           doctor: {

@@ -1,5 +1,5 @@
 /**
- * Clinic-timezone helpers — F13.
+ * Clinic-timezone helpers — F13 / F21.
  *
  * Recurring daily business rules (booking windows) are stored as wall-clock
  * minute-of-day in the clinic's local timezone. The conversion from a UTC
@@ -40,8 +40,7 @@ export function getClinicTimezone(): string {
 
 /**
  * Convert a UTC instant to the local wall-clock minute-of-day in the
- * clinic timezone. Returned value is in `[0, 1440)` — the same domain
- * as `DepartmentAppointmentType.bookingWindowStartMinute`.
+ * clinic timezone. Returned value is in `[0, 1440)`.
  *
  * Inputs:
  *  - `instant`: a `Date` (Prisma row) or an ISO string (`dto.startAt`).
@@ -57,49 +56,55 @@ export function localMinuteOfDay(instant: Date | string): number {
 }
 
 /**
- * Half-open booking-window membership for a SLOT (not a single instant):
- * the whole interval `[slotStartMin, slotEndMin)` must fit inside
- * `[windowStartMin, windowEndMin)`. Either bound may be null =
- * open-ended on that side; both null = always inside.
+ * Day-rollover-aware booking-window membership for a SLOT across N ranges
+ * (F21 — supersedes the F13/PR-#28 single-window `isWithinBookingWindow`).
  *
- * Bug history (1): a previous single-minute-of-day variant only checked
- * `slotStart < windowEnd`, which let a 30-min slot at 10:40 local pass a
- * 11:00 window-end (the slot actually ends at 11:10 — past the window).
- * The two-bound check rejects that case.
+ * This is the SINGLE evaluation site for the booking-window rule. Both
+ * `SlotsService` (per candidate slot) and `AppointmentsService.create`
+ * (the proposed appointment back-stop) call it — guaranteeing the wizard
+ * filter and the BE constraint can never disagree.
  *
- * Bug history (2 — midnight wrap): `localMinuteOfDay` returns 0 when a
- * slot ends at exactly local midnight (00:00 local = minute 0). Without
- * special-casing, `0 > windowEndMin` is false for any realistic window,
- * so a slot like 23:30–00:00 local incorrectly passes a "before 11:00"
- * window. The fix: when `slotEndMin` wraps to a value strictly less than
- * `slotStartMin` (local midnight crossed), treat `slotEndMin` as 1440
- * (= full day) for the upper-bound comparison. 1440 > any realistic
- * `windowEndMin`, so the slot is correctly rejected.
+ * Algorithm:
+ *  - Empty `windows` → `true` (unrestricted; zero rows = any time is OK).
+ *  - `startMin` = local minute-of-day of `slotStart` in `CLINIC_TIMEZONE`.
+ *  - `endMin` is day-rollover-aware:
+ *      rawEndMin = localEnd.hour()*60 + localEnd.minute()
+ *      dayDiff   = localEnd.startOf('day').diff(localStart.startOf('day'), 'day')
+ *      endMin    = rawEndMin + dayDiff * 1440
+ *    A 23:30→00:00 slot yields `endMin = 1440`, NOT 0. Never calling
+ *    `minuteOfDay(slotEnd)` directly for the comparison is what prevents
+ *    the midnight-wrap class of bug.
+ *  - A slot fits a window when:
+ *      startMin >= window.startMinute && endMin <= window.endMinute
+ *    (whole-slot containment — the slot must sit entirely inside the range).
+ *  - Returns `true` when the slot fits ANY window (OR over all ranges).
  *
- * Pure function — exported so `SlotsService` (slot grid filter) and
- * `AppointmentsService.create` (create back-stop) call exactly the same
- * predicate.
+ * Pure function — relies only on its parameters and the clinic timezone
+ * env var. Tests can override the timezone via `process.env.CLINIC_TIMEZONE`.
  */
-export function isWithinBookingWindow(
-  slotStartMin: number,
-  slotEndMin: number,
-  windowStartMin: number | null,
-  windowEndMin: number | null,
+export function isSlotWithinBookingWindows(
+  slotStart: Date,
+  slotEnd: Date,
+  windows: ReadonlyArray<{ startMinute: number; endMinute: number }>,
 ): boolean {
-  if (windowStartMin !== null && slotStartMin < windowStartMin) {
-    return false;
+  if (windows.length === 0) {
+    return true;
   }
 
-  // Midnight-wrap normalisation: a slot that ends at exactly 00:00 local
-  // has slotEndMin === 0, which is numerically less than slotStartMin.
-  // Treat the wrapped value as 1440 so the upper-bound comparison is
-  // correct regardless of the windowEndMin value.
-  const effectiveSlotEndMin =
-    slotEndMin < slotStartMin ? MINUTES_PER_DAY : slotEndMin;
+  const tz = getClinicTimezone();
+  const localStart = dayjs.utc(slotStart).tz(tz);
+  const localEnd = dayjs.utc(slotEnd).tz(tz);
 
-  if (windowEndMin !== null && effectiveSlotEndMin > windowEndMin) {
-    return false;
-  }
+  const startMin = localStart.hour() * MINUTES_PER_HOUR + localStart.minute();
+  const rawEndMin = localEnd.hour() * MINUTES_PER_HOUR + localEnd.minute();
 
-  return true;
+  // Day-rollover-aware end minute. `startOf('day').diff(...)` gives the
+  // number of local calendar days the slot crosses. A 23:30→00:00 slot
+  // crosses into the next local day → dayDiff = 1 → endMin = 0 + 1440 = 1440.
+  const dayDiff = localEnd.startOf('day').diff(localStart.startOf('day'), 'day');
+  const endMin = rawEndMin + dayDiff * MINUTES_PER_DAY;
+
+  return windows.some(
+    (w) => startMin >= w.startMinute && endMin <= w.endMinute,
+  );
 }
