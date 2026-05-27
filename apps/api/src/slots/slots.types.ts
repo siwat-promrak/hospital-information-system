@@ -110,20 +110,18 @@ export interface SlotDoctorRef {
 
 /**
  * Per-(department, type) booking rule loaded from
- * `department_appointment_types` (F13). Returned by
+ * `department_appointment_types` (F13/F21). Returned by
  * `SlotsService#loadDepartmentTypeRule` and consumed by
  * `computeSchedulesSlots` for the slot-grid step + booking-window filter.
  *
  *  - `durationMinutes` — slot step (and slot length). Replaces the
  *    pre-F13 global `APPOINTMENT_TYPE_DURATION_MINUTES` map.
- *  - `bookingWindowStartMinute` / `bookingWindowEndMinute` — nullable
- *    wall-clock minutes-of-day in `CLINIC_TIMEZONE`. Either side may be
- *    null = open-ended on that side; both null = always inside.
+ *  - `bookingWindows` — list of allowed booking-time ranges (F21).
+ *    Empty = unrestricted (any time the doctor is working).
  */
 export interface DepartmentTypeRule {
   durationMinutes: number;
-  bookingWindowStartMinute: number | null;
-  bookingWindowEndMinute: number | null;
+  bookingWindows: ReadonlyArray<{ startMinute: number; endMinute: number }>;
 }
 
 /**
@@ -131,10 +129,9 @@ export interface DepartmentTypeRule {
  *
  *  - `schedule` — half-open working window + optional break window.
  *  - `durationMinutes` — slot step (and slot length).
- *  - `bookingWindowStartMinute` / `bookingWindowEndMinute` — per-pair
- *    booking window (F13). Slots whose local wall-clock minute-of-day
- *    falls outside `[start, end)` are dropped. Either side may be null
- *    (open-ended on that side); both null = no window filter.
+ *  - `bookingWindows` — per-pair allowed booking-time ranges (F21).
+ *    Empty list = no window filter. Slots that do not fit any range are
+ *    dropped. Evaluated via `isSlotWithinBookingWindows`.
  *  - `blockingAppointments` — every BOOKED + COMPLETED appointment on the
  *    same doctor that day. A slot is dropped if any blocker overlaps.
  *  - `now` — wall-clock cutoff. Slots whose `startAt <= now` are dropped.
@@ -142,8 +139,7 @@ export interface DepartmentTypeRule {
 export interface ComputeScheduleSlotsArgs {
   schedule: ScheduleWindow;
   durationMinutes: number;
-  bookingWindowStartMinute: number | null;
-  bookingWindowEndMinute: number | null;
+  bookingWindows: ReadonlyArray<{ startMinute: number; endMinute: number }>;
   blockingAppointments: ReadonlyArray<{ startAt: Date; endAt: Date }>;
   now: Date;
 }

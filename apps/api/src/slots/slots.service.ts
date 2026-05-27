@@ -12,10 +12,7 @@ import dayjs from 'dayjs';
 import { PERMISSION } from '../auth/permissions';
 import { SCOPE } from '../auth/scope';
 import { AppException } from '../common/app-exception';
-import {
-  isWithinBookingWindow,
-  localMinuteOfDay,
-} from '../common/clinic/clinic';
+import { isSlotWithinBookingWindows } from '../common/clinic/clinic';
 import { ErrorCode } from '../common/errors';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../users/users.types';
@@ -210,8 +207,7 @@ export class SlotsService {
           doctor: doctorRef,
         },
         durationMinutes: rule.durationMinutes,
-        bookingWindowStartMinute: rule.bookingWindowStartMinute,
-        bookingWindowEndMinute: rule.bookingWindowEndMinute,
+        bookingWindows: rule.bookingWindows,
         blockingAppointments: blockersByDoctor.get(schedule.doctorId) ?? [],
         now: now.toDate(),
       });
@@ -395,8 +391,14 @@ export class SlotsService {
       },
       select: {
         durationMinutes: true,
-        bookingWindowStartMinute: true,
-        bookingWindowEndMinute: true,
+        windows: {
+          where: { deletedAt: null },
+          select: {
+            startMinute: true,
+            endMinute: true,
+          },
+          orderBy: { startMinute: 'asc' },
+        },
       },
     });
 
@@ -410,8 +412,7 @@ export class SlotsService {
 
     return {
       durationMinutes: row.durationMinutes,
-      bookingWindowStartMinute: row.bookingWindowStartMinute,
-      bookingWindowEndMinute: row.bookingWindowEndMinute,
+      bookingWindows: row.windows,
     };
   }
 }
@@ -465,8 +466,7 @@ export function computeSchedulesSlots(
   const {
     schedule,
     durationMinutes,
-    bookingWindowStartMinute,
-    bookingWindowEndMinute,
+    bookingWindows,
     blockingAppointments,
     now,
   } = args;
@@ -507,13 +507,10 @@ export function computeSchedulesSlots(
       // Past-slot rule (strict `>`): a slot starting exactly at `now`
       // is excluded — mirrors the previous SCHEDULE_START_IN_PAST guard.
       if (slotStart.isAfter(nowUtc)) {
-        const slotStartLocalMin = localMinuteOfDay(slotStart.toDate());
-        const slotEndLocalMin = localMinuteOfDay(slotEnd.toDate());
-        const inWindow = isWithinBookingWindow(
-          slotStartLocalMin,
-          slotEndLocalMin,
-          bookingWindowStartMinute,
-          bookingWindowEndMinute,
+        const inWindow = isSlotWithinBookingWindows(
+          slotStart.toDate(),
+          slotEnd.toDate(),
+          bookingWindows,
         );
 
         if (inWindow) {

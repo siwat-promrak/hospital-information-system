@@ -22,10 +22,11 @@ export interface DepartmentRow {
 }
 
 /**
- * F13 — one row of the per-department appointment-type catalog returned
- * by `GET /departments/:id/appointment-types`. Replaces the global
- * `AppointmentTypeResponse.durationMinutes` (the global catalog no longer
- * carries duration) and adds the optional booking-window bounds.
+ * F13 + F21 — one row of the per-department appointment-type catalog
+ * returned by `GET /departments/:id/appointment-types`. Replaces the
+ * global `AppointmentTypeResponse.durationMinutes` (the global catalog
+ * no longer carries duration) and ships an ordered list of allowed
+ * booking-time ranges.
  *
  * Booking-window minutes are wall-clock minute-of-day in the clinic's
  * local timezone (BE-side `CLINIC_TIMEZONE`, default `Asia/Bangkok`).
@@ -38,13 +39,12 @@ export interface DepartmentAppointmentTypeRow {
   label: string;
   durationMinutes: number;
   /**
-   * Open-ended lower bound. `null` / `undefined` means no morning cutoff
-   * (slots earlier than the window start are allowed).
+   * Ordered list of allowed booking-time ranges (F21). Each range is a
+   * half-open `[startMinute, endMinute)` window of wall-clock
+   * minute-of-day in the clinic's local timezone. `endMinute = 1440`
+   * encodes "until local midnight". Empty array = unrestricted
+   * (bookable any time the doctor is working). A slot is bookable when
+   * it fits inside ANY one range.
    */
-  bookingWindowStartMinute?: number;
-  /**
-   * Open-ended upper bound. `null` / `undefined` means no afternoon
-   * cutoff (slots later than the window end are allowed).
-   */
-  bookingWindowEndMinute?: number;
+  bookingWindows: { startMinute: number; endMinute: number }[];
 }

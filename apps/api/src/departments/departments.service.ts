@@ -104,8 +104,11 @@ export class DepartmentsService {
           select: {
             appointmentType: true,
             durationMinutes: true,
-            bookingWindowStartMinute: true,
-            bookingWindowEndMinute: true,
+            windows: {
+              where: { deletedAt: null },
+              select: { startMinute: true, endMinute: true },
+              orderBy: { startMinute: 'asc' },
+            },
           },
         },
       },
@@ -134,8 +137,7 @@ export class DepartmentsService {
         code,
         label: APPOINTMENT_TYPE_LABEL[code],
         durationMinutes: row.durationMinutes,
-        bookingWindowStartMinute: row.bookingWindowStartMinute,
-        bookingWindowEndMinute: row.bookingWindowEndMinute,
+        bookingWindows: row.windows,
       });
     }
 

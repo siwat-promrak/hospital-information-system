@@ -55,7 +55,8 @@
     "AppointmentTypeWindow": {
       "range": "{start} – {end}",
       "beforeOnly": "Before {end} only",
-      "fromOnly": "From {start}"
+      "fromOnly": "From {start}",
+      "multiRangeJoin": " or "
     },
     "AppointmentStatus": {
       "BOOKED": "Booked",

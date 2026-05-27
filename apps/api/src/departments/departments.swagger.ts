@@ -12,7 +12,10 @@ import { PERMISSION } from '../auth/permissions';
 import { ErrorCode } from '../common/errors';
 import { PaginatedDto } from '../common/pagination';
 
-import { DepartmentAppointmentTypeResponseDto } from './dto/department-appointment-type.response.dto';
+import {
+  BookingWindowDto,
+  DepartmentAppointmentTypeResponseDto,
+} from './dto/department-appointment-type.response.dto';
 import { DepartmentResponseDto } from './dto/department.response.dto';
 
 const FORBIDDEN_LIST_EXAMPLE = {
@@ -68,17 +71,17 @@ export function ApiListDepartments(): MethodDecorator & ClassDecorator {
 
 export function ApiListDepartmentAppointmentTypes(): MethodDecorator & ClassDecorator {
   return applyDecorators(
-    ApiExtraModels(DepartmentAppointmentTypeResponseDto),
+    ApiExtraModels(BookingWindowDto, DepartmentAppointmentTypeResponseDto),
     ApiOperation({
       summary: 'List per-(department, type) booking rules for one department',
       description:
         'Returns one row per `department_appointment_types` entry for the ' +
         'chosen department with `code` + `label` + `durationMinutes` + ' +
-        'nullable `bookingWindowStartMinute` / `bookingWindowEndMinute` ' +
-        '(wall-clock minutes-of-day in `CLINIC_TIMEZONE`). Consumed by the ' +
-        'booking wizard after the user picks a department so the type chip ' +
-        'can render the window copy (e.g. "Before 11:00 only"). Gated on ' +
-        'any-of the `appointment.read.*` family.',
+        '`bookingWindows` (ordered array of wall-clock [startMinute,endMinute) ' +
+        'ranges in `CLINIC_TIMEZONE`; F21). Empty array = unrestricted. Consumed ' +
+        'by the booking wizard after the user picks a department so the type chip ' +
+        'can render multi-range copy (e.g. "09:00–11:00 or 14:00–16:00"). Gated ' +
+        'on any-of the `appointment.read.*` family.',
     }),
     ApiParam({
       name: 'id',

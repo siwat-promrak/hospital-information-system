@@ -2178,6 +2178,170 @@ without hunting for it in the sidebar.
 
 ---
 
+## E21 — Multi-range booking windows (P1, F21 `feat/multi-range-booking-windows`)
+
+F13 gave each `(department, appointmentType)` pair **one** contiguous
+booking window (`bookingWindowStartMinute` / `bookingWindowEndMinute`).
+That cannot express a type that is bookable in **two or more disjoint
+spans of a day** — e.g. "09:00–11:00 **or** 14:00–16:00" (a midday gap),
+or "before 11:00 **or** after 15:00" (a day-edge split). E21 replaces the
+single window with a **list of allowed ranges** per pair and makes both
+the slot finder AND the appointment-create back-stop accept a slot when
+it fits inside **any one** range.
+
+### Data model
+
+- New child table **`department_appointment_type_windows`**:
+  `{ id, departmentAppointmentTypeId (FK), startMinute, endMinute }` +
+  audit cluster. `startMinute` / `endMinute` are wall-clock
+  minute-of-day in `CLINIC_TIMEZONE` (CLAUDE.md §9a). Per-row CHECK:
+  `0 <= startMinute < endMinute <= 1440` (a range that ends at local
+  midnight is stored as `endMinute = 1440`, **never 0**).
+- The F13 columns `bookingWindowStartMinute` / `bookingWindowEndMinute`
+  are **dropped** from `department_appointment_types`. The forward
+  migration converts every existing row that had a window into exactly
+  one child range: `startMinute = COALESCE(old start, 0)`,
+  `endMinute = COALESCE(old end, 1440)`. Rows where both were NULL
+  produce **no** child rows (unrestricted).
+- **Zero ranges for a pair = unrestricted** (bookable any time the
+  doctor works) — the direct successor of F13's "both NULL".
+
+### The fit predicate (single source of truth)
+
+One pure helper is the ONLY place the window rule is evaluated; both
+`SlotsService` (per candidate slot) and `AppointmentsService.create`
+(the proposed appointment) call it, so they can never disagree:
+
+```
+isSlotWithinBookingWindows(slotStart: Date, slotEnd: Date,
+                           windows: {startMinute; endMinute}[]): boolean
+
+  if windows is empty            → return true            // unrestricted
+
+  localStart = dayjs.utc(slotStart).tz(CLINIC_TIMEZONE)
+  localEnd   = dayjs.utc(slotEnd).tz(CLINIC_TIMEZONE)
+
+  startMin = localStart.hour()*60 + localStart.minute()    // [0,1440)
+
+  // Day-rollover-aware END — do NOT use minute-of-day(slotEnd) directly,
+  // because a slot ending at local 00:00 wraps to 0 and underflows every
+  // comparison (this was the F13 midnight-wrap bug). Add a full day per
+  // local-calendar-day the slot crosses:
+  rawEndMin = localEnd.hour()*60 + localEnd.minute()
+  dayDiff   = localEnd.startOf('day').diff(localStart.startOf('day'), 'day')
+  endMin    = rawEndMin + dayDiff*1440        // 23:30→00:00 ⇒ 1440, not 0
+
+  // Fits if the WHOLE slot sits inside ANY single range (half-open).
+  return windows.some(w => startMin >= w.startMinute && endMin <= w.endMinute)
+```
+
+Key properties this guarantees:
+- **No mod-1440 wrap bug.** A 23:30–00:00 slot has `endMin = 1440`, so it
+  is rejected by a "before 11:00" range (`1440 <= 660` false) and
+  accepted by an "after 15:00" range (`1410 >= 900 && 1440 <= 1440`).
+- **Whole-slot containment.** A slot must both start at/after a range's
+  start AND end at/before that range's end. A slot straddling a range
+  boundary (e.g. 10:45–11:15 against `[09:00,11:00)`) fits no range →
+  rejected.
+- **Disjoint ranges via OR.** Ranges are independent; a slot need only
+  fit one. Adjacent ranges (`[09:00,11:00)` + `[11:00,13:00)`) do NOT
+  merge — a slot crossing 11:00 fits neither; configure one `[09:00,13:00)`
+  range if a contiguous span is wanted.
+- **Next-day slots are governed by their own day's rule.** A 00:00–00:30
+  slot has `startMin = 0`; an "after 15:00" range (`[900,1440)`) rejects
+  it (`0 >= 900` false) — correct, because midnight-and-after is "tomorrow
+  morning", not "after 15:00 today".
+
+### Wire + FE
+
+- `GET /departments/:id/appointment-types` returns
+  `[{ code, label, durationMinutes, bookingWindows: [{ startMinute, endMinute }] }]`
+  (the single `bookingWindow*` fields are replaced by the `bookingWindows`
+  array; empty array = unrestricted).
+- The booking wizard's type chip renders multi-range copy, e.g.
+  "09:00–11:00 or 14:00–16:00" / "Before 11:00 or after 15:00".
+
+### US-21.1 — Slot finder honours multiple ranges
+
+**US-21.1** — As a NURSE/DOCTOR, I want the slot grid for a
+`(department, type)` with multiple booking ranges to show only slots
+that fall entirely inside one of those ranges, so that I never offer a
+forbidden time.
+
+**Acceptance criteria:**
+
+- `SlotsService` loads the pair's `bookingWindows` (the same load it
+  already does for the `DEPARTMENT_TYPE_NOT_ALLOWED` check — no extra
+  round-trip) and filters each candidate slot through
+  `isSlotWithinBookingWindows`.
+- Composes with the existing past-time / booked / break-window
+  exclusions — those still apply; window filtering is an additional
+  AND.
+- Zero ranges → no window narrowing (only the other exclusions apply).
+
+### US-21.2 — Appointment create back-stops against the same ranges
+
+**US-21.2** — As the backend, I want `POST /appointments` to reject a
+booking whose `[startAt, endAt)` fits no allowed range, so a direct API
+caller can't bypass the wizard.
+
+**Acceptance criteria:**
+
+- After the `(departmentId, appointmentType)` existence check,
+  `AppointmentsService.create` calls the SAME
+  `isSlotWithinBookingWindows(startAt, endAt, windows)` and rejects with
+  `400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW` when it returns false.
+- Wizard and back-stop are guaranteed consistent because they share the
+  predicate.
+
+### US-21.3 — Admin/seed configures and validates ranges
+
+**US-21.3** — As the system, I want each range validated so an
+impossible window can't silently make a type unbookable.
+
+**Acceptance criteria:**
+
+- Each range enforces `0 <= startMinute < endMinute <= 1440` at BOTH the
+  DTO/seed layer and a DB CHECK. `startMinute >= endMinute` →
+  rejected (this kills the inverted `start=660,end=300` foot-gun).
+- Overlapping ranges are permitted (harmless under OR); no dedup is
+  required.
+- The seed includes at least one genuinely multi-range pair (e.g. a
+  department type configured `09:00–11:00` + `14:00–16:00`) so reviewers
+  can exercise the gap.
+
+### E21 test matrix (the e2e + unit suite MUST cover every row)
+
+`CLINIC_TIMEZONE = Asia/Bangkok` (UTC+7). "Schedule" times below are
+local; the fixtures store the equivalent UTC instants.
+
+| # | Ranges (local) | Schedule (local) | Candidate slot | Expected |
+| --- | --- | --- | --- | --- |
+| 1 | `[]` (none) | 09:00–12:00 | any in-schedule | **included** (unrestricted) |
+| 2 | `[09:00,11:00)` | 09:00–12:00 | 10:30–11:00 | included (ends ==11:00) |
+| 3 | `[09:00,11:00)` | 09:00–12:00 | 11:00–11:30 | excluded (starts ==end) |
+| 4 | `[09:00,11:00)` | 09:00–12:00 | 10:45–11:15 | excluded (straddles end) |
+| 5 | `[09:00,11:00) ∪ [14:00,16:00)` | 09:00–16:00 | 09:30–10:00 | included (range 1) |
+| 6 | same | 09:00–16:00 | 14:00–14:30 | included (range 2) |
+| 7 | same | 09:00–16:00 | 11:30–12:00 | excluded (midday gap) |
+| 8 | same | 09:00–16:00 | 13:30–14:00 | excluded (gap; ends ==14:00 but starts <14:00) |
+| 9 | same | 09:00–16:00 | 15:30–16:00 | included (ends ==16:00) |
+| 10 | `[00:00,660) ∪ [900,1440)` (before 11 / after 15) | 16:00–00:00 | 23:30–00:00 | **included** (after-15 range; endMin=1440) |
+| 11 | `[00:00,660)` (before 11 only) | 16:00–00:00 | 23:30–00:00 | **excluded** ← the F13 midnight-wrap regression |
+| 12 | `[00:00,660)` | 16:00–00:00 | every slot | excluded (whole schedule after 11:00) |
+| 13 | `[900,1440)` (after 15) | 23:00–01:00 (crosses midnight) | 23:30–00:00 | included (endMin=1440) |
+| 14 | `[900,1440)` | 23:00–01:00 | 00:00–00:30 (next local day) | excluded (startMin=0 < 900) |
+| 15 | migrated F13 row (`start=null,end=660`) | — | — | converts to one range `[0,660)` |
+| 16 | range with `start>=end` | — | — | rejected at DTO + DB CHECK |
+| 17 | range with `end=1440`, `start=0` | — | — | accepted (boundary) |
+
+Each slot-finder row (1–14) has a mirrored `POST /appointments` e2e
+assertion: an "included" slot → `201`, an "excluded" slot →
+`400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW` — proving the wizard filter and
+the create back-stop agree.
+
+---
+
 ## Constraints reference
 
 DB-level CHECK constraints, all appended as raw SQL to the init migration

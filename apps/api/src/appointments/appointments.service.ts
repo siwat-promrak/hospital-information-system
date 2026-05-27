@@ -18,10 +18,7 @@ import {
   SCOPE,
 } from '../auth/scope';
 import { AppException } from '../common/app-exception';
-import {
-  isWithinBookingWindow,
-  localMinuteOfDay,
-} from '../common/clinic/clinic';
+import { isSlotWithinBookingWindows } from '../common/clinic/clinic';
 import { ErrorCode } from '../common/errors';
 import {
   buildPaginatedResponse,
@@ -232,8 +229,11 @@ export class AppointmentsService {
           select: {
             id: true,
             durationMinutes: true,
-            bookingWindowStartMinute: true,
-            bookingWindowEndMinute: true,
+            windows: {
+              where: { deletedAt: null },
+              select: { startMinute: true, endMinute: true },
+              orderBy: { startMinute: 'asc' },
+            },
           },
         });
 
@@ -250,22 +250,16 @@ export class AppointmentsService {
 
         const endAt = startAt.add(allowed.durationMinutes, 'minute');
 
-        // F13 back-stop — the slot finder hides out-of-window slots in
+        // F21 back-stop — the slot finder hides out-of-window slots in
         // the wizard, but a direct API caller could still post one.
-        // Compute the local wall-clock minute-of-day at the check site
-        // (CLAUDE.md §9a) and reject when the WHOLE slot
-        // [startMin, endMin) doesn't fit inside the per-pair window.
-        // Checking only the start would let a 30-min slot at 10:40 pass
-        // a window-end of 11:00 even though it actually ends at 11:10.
-        const slotStartLocalMin = localMinuteOfDay(startAt.toDate());
-        const slotEndLocalMin = localMinuteOfDay(endAt.toDate());
-
+        // `isSlotWithinBookingWindows` checks whole-slot containment in
+        // any one of the pair's allowed ranges (day-rollover-aware; the
+        // F13 midnight-wrap class of bug cannot recur here).
         if (
-          !isWithinBookingWindow(
-            slotStartLocalMin,
-            slotEndLocalMin,
-            allowed.bookingWindowStartMinute,
-            allowed.bookingWindowEndMinute,
+          !isSlotWithinBookingWindows(
+            startAt.toDate(),
+            endAt.toDate(),
+            allowed.windows,
           )
         ) {
           throw AppException.badRequest(
@@ -276,10 +270,7 @@ export class AppointmentsService {
               appointmentType: dto.appointmentType,
               startAt: dto.startAt,
               endAt: endAt.toISOString(),
-              slotStartLocalMinute: slotStartLocalMin,
-              slotEndLocalMinute: slotEndLocalMin,
-              bookingWindowStartMinute: allowed.bookingWindowStartMinute,
-              bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+              bookingWindows: allowed.windows,
             },
           );
         }
@@ -446,8 +437,7 @@ export class AppointmentsService {
             doctor: { id: dto.doctorId, doctorCode: '', name: '' },
           },
           durationMinutes: allowed.durationMinutes,
-          bookingWindowStartMinute: allowed.bookingWindowStartMinute,
-          bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+          bookingWindows: allowed.windows,
           blockingAppointments: blockers,
           now: now.toDate(),
         });
@@ -1510,8 +1500,11 @@ export class AppointmentsService {
           select: {
             id: true,
             durationMinutes: true,
-            bookingWindowStartMinute: true,
-            bookingWindowEndMinute: true,
+            windows: {
+              where: { deletedAt: null },
+              select: { startMinute: true, endMinute: true },
+              orderBy: { startMinute: 'asc' },
+            },
           },
         });
 
@@ -1528,16 +1521,12 @@ export class AppointmentsService {
 
         const endAt = startAt.add(allowed.durationMinutes, 'minute');
 
-        // F13 booking-window back-stop.
-        const slotStartLocalMin = localMinuteOfDay(startAt.toDate());
-        const slotEndLocalMin = localMinuteOfDay(endAt.toDate());
-
+        // F21 booking-window back-stop.
         if (
-          !isWithinBookingWindow(
-            slotStartLocalMin,
-            slotEndLocalMin,
-            allowed.bookingWindowStartMinute,
-            allowed.bookingWindowEndMinute,
+          !isSlotWithinBookingWindows(
+            startAt.toDate(),
+            endAt.toDate(),
+            allowed.windows,
           )
         ) {
           throw AppException.badRequest(
@@ -1548,8 +1537,7 @@ export class AppointmentsService {
               appointmentType: followUpType,
               startAt: dto.startAt,
               endAt: endAt.toISOString(),
-              bookingWindowStartMinute: allowed.bookingWindowStartMinute,
-              bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+              bookingWindows: allowed.windows,
             },
           );
         }
@@ -1645,8 +1633,7 @@ export class AppointmentsService {
             doctor: { id: current.doctorId, doctorCode: '', name: '' },
           },
           durationMinutes: allowed.durationMinutes,
-          bookingWindowStartMinute: allowed.bookingWindowStartMinute,
-          bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+          bookingWindows: allowed.windows,
           blockingAppointments: blockers,
           now: now.toDate(),
         });

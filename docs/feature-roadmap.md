@@ -134,6 +134,7 @@ below live in `docs/user-stories.md`.
 | F18 ✅ | Doctor workspace + RBAC collapse of medical-records mutations | `feat/doctor-workspace` | Introduces a doctor-only workspace surface: a new `/workspace` page listing the caller's visits in two sections (upcoming `BOOKED` + history `COMPLETED`/`CANCELLED`) and a **dedicated `/workspace/:id`** detail page (NOT an enhanced `/appointments/:id` — that reverted to its plain F09 form) showing patient panel, medical-records history (new `?appointmentGroupId=` filter on `GET /medical-records`, with an `?appointmentId=` fallback for standalone past visits; each card shows the authoring doctor + department), and a required note/drug panel (only while `BOOKED`) that submits with the chosen end-of-visit action. Three RPC endpoints absorb the note + drug: `POST /appointments/:id/complete` (now also closes the group when one exists — replaces the legacy `POST /appointment-groups/:id/close`), `POST /appointments/:id/refer`, and the new `POST /appointments/:id/follow-up` (atomic: complete current + create FOLLOW_UP in same group + insert record). Also adds `GET /patients/:id` (gated on `patient.read`) to feed the patient panel. RBAC delta: ADD `doctor_workspace.read.own` (FE nav/page gate only, DOCTOR-only); DELETE `medical_records.{create.own, update.own, update.all}` (records become write-once, only the workspace actions can author one). `POST /medical-records` and `PATCH /medical-records/:id` controller routes are removed; `GET /medical-records` keeps reading. | US-18.1, US-18.2, US-18.3, US-18.4, US-18.5, US-18.6 | F09, F14 | DOCTOR opens `/workspace`, sees their BOOKED queue (top) + past visits (below); opens a visit at `/workspace/:id`, writes a note, clicks Complete → appointment is `COMPLETED`, `medical_records` row inserted, and (when grouped) `appointment_groups.closedAt` set — all in one transaction. Clicking Follow Up → date+slot dialog → confirms → current visit completed AND new FOLLOW_UP appointment created in the same group with `previousAppointmentId` set. Clicking Refer → existing F14 referral flow now also creates the record. Empty `note` on any action → `400 VALIDATION_FAILED`. Direct `POST /medical-records` returns `404` (route gone). MRO loses `medical_records.update.all` → all `PATCH` calls return `404`. | L | P1 |
 | F19 ✅ | Medical-records browse screen | `feat/medical-records-screen` | FE-only dedicated `/medical-records` browse page for DOCTOR / NURSE / MRO / PHARMACY (any-of `medical_records.read.all`). Patient-first workflow: typeahead patient picker at the top, paginated medical-records list below, list/grid view toggle. URL state: `?patientId=&view=list\|grid&page=N`. Consumes the existing F08/F18 `GET /medical-records?patientId=…&page=N` endpoint — no BE wire contract changes. Reuses the F09 `<PatientPicker>` typeahead and shared `<PaginationControl>`. List mode renders the F18 visit-card layout full-bleed (doctor + code, department, recorded date, full note, optional drug); grid mode is a 1/2/3-column responsive grid with note clamped to 3 lines + drug to 2. Also lifts the missing `patient: MedicalRecordPatientRef` nested ref into the FE `MedicalRecordResponse` type — the BE has always returned it, only the type was out of date. | US-19.1, US-19.2 | F08 (BE endpoint), F18 (medical-record card visuals) | DOCTOR / NURSE / MRO / PHARMACY opens `/medical-records`, sees the empty-state hint; types into the patient picker → list populates; toggles list ↔ grid → page count preserved, view persists in URL; paginates → patient + view survive; clears the patient → URL strips `patientId` + `page`. ADMIN (no `medical_records.read.all`) sees the forbidden card on direct URL navigation; sidebar entry is hidden. | M | P1 |
 | F20 | Patients directory (list + register CTA)             | `feat/patients-list`    | FE-only: `/patients` list page (paginated, free-text `?q=` filter, permission-gated "Register patient" CTA) built on the existing `GET /patients` + `POST /patients` BE from F09. `PatientListRow` shows name (en + th), HN, DOB, gender, phone. Sidebar nav entry gated on `patient.read`. No `/patients/:id` detail page in this feature. | US-20.1, US-20.2 | F09 | Sign in as NURSE → `/patients` renders the patient list with pagination; register CTA visible. Sign in as PHARMACY → `/patients` renders the list (read only, no register CTA). Sign in as ADMIN → forbidden card (ADMIN lacks `patient.read`). Search box filters by name/phone/ID/HN. | S | P1 |
+| F21 | Multi-range booking windows                          | `feat/multi-range-booking-windows` | Replace F13's single `bookingWindowStart/EndMinute` columns on `department_appointment_types` with a child table `department_appointment_type_windows` (`startMinute`, `endMinute`, per-row CHECK `0 <= start < end <= 1440`) so a `(department, type)` can be bookable in N disjoint daily ranges (e.g. `09:00–11:00` ∪ `14:00–16:00`, or `before 11:00` ∪ `after 15:00`). One shared pure predicate `isSlotWithinBookingWindows(slotStart, slotEnd, windows)` — day-rollover-aware (a 23:30–00:00 slot's local end is **1440, not 0**, killing the F13 midnight-wrap class of bug) — is used by BOTH `SlotsService` (grid filter) and `AppointmentsService.create` (`APPOINTMENT_OUTSIDE_BOOKING_WINDOW` back-stop), so they can never disagree. Forward migration converts existing single windows into one child range each (NULL bounds → `0` / `1440`; both NULL → no rows = unrestricted). `GET /departments/:id/appointment-types` returns a `bookingWindows: [{startMinute,endMinute}]` array; the booking wizard renders multi-range copy. | US-21.1, US-21.2, US-21.3 | F13, F09 | See the **E21 test matrix** (17 rows) — every slot-finder case has a mirrored `POST /appointments` assertion: included slot → 201, excluded slot → 400 `APPOINTMENT_OUTSIDE_BOOKING_WINDOW`. Critical rows: a `[09:00–11:00, 14:00–16:00]` pair excludes 11:30/13:30 (gap) and includes 09:30/14:30; a `before-11`-only window excludes the 23:30 slot of a 16:00–00:00 schedule (the F13 regression); an `after-15` window includes it. | L | P1 |
 
 > **F04, F10 were removed when patient sign-in / self-service was scoped out (2026-05-24).** The feature IDs are intentionally left as gaps — IDs stay stable so commit and PR references continue to resolve. F08 was repurposed for the medical records module and F09 absorbed the original "F08 staff booking" scope when the RBAC overhaul moved booking to NURSE (department-scoped) and DOCTOR (own-doctor) instead of a blanket STAFF role.
 
@@ -2166,6 +2167,117 @@ Frontend (`apps/web/src/`):
 6. Sidebar: NURSE / MRO / DOCTOR / PHARMACY all see a "Patients" entry
    between the existing "Register patient" entry and the nav ordering
    above it. ADMIN sidebar has no "Patients" entry.
+
+---
+
+### F21 — Multi-range booking windows (P1, L)
+
+**Why a standalone feature**
+
+F13 modelled a single contiguous booking window per `(department, type)`.
+Real clinics split a type across disjoint spans of a day — mornings AND
+late afternoons, with a clinic-closed lunch gap. A single
+`[start, end)` interval cannot express that, and the inverted-bounds
+work-around (`start > end`) silently makes a type unbookable. F21
+generalises the model to N ranges and, critically, re-derives the
+slot-fit math so the **midnight-wrap class of bug** (a slot ending at
+local 00:00 collapsing to minute 0) cannot recur. Landing it as its own
+PR keeps the schema migration + the shared predicate + the exhaustive
+e2e matrix reviewable in isolation.
+
+**The one rule that matters — `isSlotWithinBookingWindows`**
+
+Pure helper, the SINGLE evaluation site for the window rule (so
+`SlotsService` and `AppointmentsService.create` cannot drift):
+
+- Empty `windows` ⇒ `true` (unrestricted).
+- `startMin` = local minute-of-day of `slotStart` in `CLINIC_TIMEZONE`.
+- `endMin` is **day-rollover-aware**: `localEnd` minute-of-day **plus**
+  `1440 × (localEnd.startOf('day') − localStart.startOf('day') in days)`.
+  A 23:30→00:00 slot yields `endMin = 1440`, NOT `0`. Never call
+  `minuteOfDay(slotEnd)` directly for the comparison.
+- Fits ⇔ `windows.some(w => startMin >= w.startMinute && endMin <= w.endMinute)`
+  (whole-slot containment in ANY one range).
+
+See US-21 in `docs/user-stories.md` for the full pseudocode + the 17-row
+test matrix; that matrix is the acceptance bar for this feature.
+
+**Files expected to change**
+
+Backend (`apps/api/`):
+- `prisma/schema.prisma` — add `model DepartmentAppointmentTypeWindow`
+  (`departmentAppointmentTypeId` FK, `startMinute`, `endMinute`, audit
+  cluster). Drop `bookingWindowStartMinute` / `bookingWindowEndMinute`
+  from `DepartmentAppointmentType`; add the inverse relation. Remove the
+  F13 `_window_bounds` / `_window_order` CHECKs from the old columns.
+- `prisma/migrations/<ts>_f21_multi_range_booking_windows/migration.sql`
+  — create the child table + a raw-SQL CHECK
+  `0 <= start_minute AND start_minute < end_minute AND end_minute <= 1440`;
+  data-migrate each `department_appointment_types` row with a non-NULL
+  bound into one child range (`COALESCE(start,0)`, `COALESCE(end,1440)`);
+  drop the two old columns. Idempotent / forward-only.
+- `common/clinic/clinic.ts` — replace the F13/`#28` single-window
+  `isWithinBookingWindow` with the day-rollover-aware
+  `isSlotWithinBookingWindows(slotStart, slotEnd, windows)` above. (This
+  supersedes the `fix/slot-booking-window` midnight-wrap patch — see the
+  sequencing note.) Keep `localMinuteOfDay` for `startMin`.
+- `slots/slots.service.ts` — load the pair's window rows; filter each
+  candidate slot through the new predicate. Drop the old single-window
+  comparison.
+- `appointments/appointments.service.ts` — `create` loads the pair's
+  windows and back-stops with the same predicate →
+  `APPOINTMENT_OUTSIDE_BOOKING_WINDOW`.
+- `departments/` (or wherever `GET /departments/:id/appointment-types`
+  lives) — response DTO swaps `bookingWindow*` for
+  `bookingWindows: { startMinute, endMinute }[]`; service includes the
+  child rows ordered by `startMinute`.
+- DTO/validation for any range write path (seed at minimum): class-validator
+  `0 <= startMinute < endMinute <= 1440` per range, mirroring the CHECK.
+- `prisma/seed/department-appointment-types.ts` — seed the migrated
+  single windows AS ranges, and add ≥1 genuinely multi-range pair
+  (e.g. a department type with `09:00–11:00` + `14:00–16:00`).
+- Tests:
+  - `slots/slots.service.spec.ts` — unit-cover matrix rows 1–14 (+ the
+    boundary rows). Each must fail on a naive `minuteOfDay(slotEnd)`
+    implementation and pass on the day-rollover one.
+  - `test/appointments.e2e-spec.ts` (or a dedicated booking-window e2e) —
+    the mirrored `POST /appointments` 201/400 assertions for the matrix,
+    plus migration-conversion (row 15) and range-validation (rows 16–17).
+  - A focused unit spec for `isSlotWithinBookingWindows` exercising every
+    boundary directly.
+
+Frontend (`apps/web/`):
+- The appointment-type catalog client/types swap the single
+  `bookingWindow*` fields for the `bookingWindows` array.
+- The booking wizard's type chip renders multi-range copy
+  ("09:00–11:00 or 14:00–16:00" / "Before 11:00 or after 15:00") from the
+  array; empty array = no window note.
+
+**Migration / breaking-change notes**
+
+- Forward migration drops two columns and adds a table — reviewers on an
+  older schema run `pnpm --filter @hospital/api prisma migrate deploy`
+  then `db:seed`.
+- The wire shape of `GET /departments/:id/appointment-types` changes
+  (`bookingWindow*` → `bookingWindows[]`). The FE consumer is updated in
+  the same PR; any external caller must move to the array.
+
+**Manual smoke test**
+
+```bash
+# Seeded multi-range pair (09:00–11:00 + 14:00–16:00, Asia/Bangkok):
+curl -s "http://localhost:3001/api/v1/slots?doctorId=<id>&departmentId=<dept>&date=<today>&type=<TYPE>" \
+  -H "Cookie: next-auth.session-token=<jwt>" | jq
+# Expect: only slots fully inside 09:00–11:00 OR 14:00–16:00 local;
+# nothing in the 11:00–14:00 gap.
+
+# Back-stop a forbidden time directly:
+curl -i -X POST http://localhost:3001/api/v1/appointments \
+  -H "Cookie: next-auth.session-token=<jwt>" -H "Content-Type: application/json" \
+  -d '{ "patientId":"…","doctorId":"…","departmentId":"…","appointmentType":"<TYPE>",
+        "startAt":"<a 11:30 local instant in UTC>" }'
+# Expect: 400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW.
+```
 
 ---
 

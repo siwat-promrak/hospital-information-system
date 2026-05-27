@@ -449,6 +449,16 @@ async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
     },
   });
 
+  // F21: delete child windows before the parent DAT rows (FK constraint).
+  const datIds = await prisma.departmentAppointmentType.findMany({
+    where: { departmentId: { in: departmentIds } },
+    select: { id: true },
+  });
+
+  await prisma.departmentAppointmentTypeWindow.deleteMany({
+    where: { departmentAppointmentTypeId: { in: datIds.map((d) => d.id) } },
+  });
+
   await prisma.departmentAppointmentType.deleteMany({
     where: { departmentId: { in: departmentIds } },
   });

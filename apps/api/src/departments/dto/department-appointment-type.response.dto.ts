@@ -1,22 +1,40 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { AppointmentType } from '@prisma/client';
 
 /**
- * One row of `GET /departments/:id/appointment-types` (F13). Mirrors a
+ * One allowed booking-time range within `DepartmentAppointmentTypeResponseDto`
+ * (F21). Both bounds are wall-clock minute-of-day in `CLINIC_TIMEZONE`.
+ */
+export class BookingWindowDto {
+  @ApiProperty({
+    example: 540,
+    description:
+      'Inclusive lower bound (wall-clock minute-of-day in `CLINIC_TIMEZONE`). ' +
+      'Range: [0, 1439].',
+  })
+  startMinute!: number;
+
+  @ApiProperty({
+    example: 660,
+    description:
+      'Exclusive upper bound (wall-clock minute-of-day in `CLINIC_TIMEZONE`). ' +
+      'Value 1440 means "until local midnight". Range: [1, 1440].',
+  })
+  endMinute!: number;
+}
+
+/**
+ * One row of `GET /departments/:id/appointment-types` (F21). Mirrors a
  * `DepartmentAppointmentType` join row to the wire — `code` + `label`
  * (same shape the global `GET /appointment-types` had pre-F13) plus the
- * three per-pair fields the booking wizard needs to size and gate its
- * slot grid:
+ * per-pair fields the booking wizard needs to size and gate its slot grid:
  *
  *  - `durationMinutes` — slot length in minutes. Drives the F07 slot
  *    grid step AND the F09 `Appointment.endAt = startAt + duration` math.
- *  - `bookingWindowStartMinute` / `bookingWindowEndMinute` — optional
- *    wall-clock minutes-of-day in `CLINIC_TIMEZONE`. The booking wizard
- *    surfaces them as descriptive copy (e.g. "Before 11:00 only") so the
- *    user understands why later slots may be hidden.
- *
- * Either booking-window bound may be `null` = open-ended on that side;
- * both `null` = the pair is bookable any time the doctor is working.
+ *  - `bookingWindows` — ordered list of allowed wall-clock ranges in
+ *    `CLINIC_TIMEZONE` (F21). Empty = unrestricted (bookable any time the
+ *    doctor is working). The booking wizard renders these as descriptive
+ *    copy (e.g. "09:00–11:00 or 14:00–16:00").
  */
 export class DepartmentAppointmentTypeResponseDto {
   @ApiProperty({
@@ -42,23 +60,17 @@ export class DepartmentAppointmentTypeResponseDto {
   })
   durationMinutes!: number;
 
-  @ApiPropertyOptional({
-    example: null,
-    nullable: true,
+  @ApiProperty({
+    type: BookingWindowDto,
+    isArray: true,
     description:
-      'Wall-clock minute-of-day (in `CLINIC_TIMEZONE`) marking the inclusive ' +
-      'lower bound of when this (department, type) is bookable. `null` = no ' +
-      'lower bound.',
+      'Ordered list of allowed booking-time ranges (F21). Each range is a ' +
+      'wall-clock [startMinute, endMinute) window in `CLINIC_TIMEZONE`. ' +
+      'Empty array = unrestricted (bookable any time the doctor is working).',
+    example: [
+      { startMinute: 540, endMinute: 660 },
+      { startMinute: 840, endMinute: 960 },
+    ],
   })
-  bookingWindowStartMinute!: number | null;
-
-  @ApiPropertyOptional({
-    example: 660,
-    nullable: true,
-    description:
-      'Wall-clock minute-of-day (in `CLINIC_TIMEZONE`) marking the exclusive ' +
-      'upper bound of when this (department, type) is bookable. `null` = no ' +
-      'upper bound. Example `660` = "before 11:00 only".',
-  })
-  bookingWindowEndMinute!: number | null;
+  bookingWindows!: BookingWindowDto[];
 }

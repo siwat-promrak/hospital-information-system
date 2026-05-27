@@ -7,6 +7,10 @@ import ClearableSelect, {
   type ClearableSelectOption,
 } from "@/components/shared/select/ClearableSelect";
 import { K, NS } from "@/i18n/keys.generated";
+import {
+  MIDNIGHT_MINUTES,
+  MINUTES_PER_DAY,
+} from "@/lib/api/clinic.const";
 import { dayjs } from "@/lib/dayjs";
 import type { AppointmentType } from "@/types/appointment-type.types";
 import type { DepartmentAppointmentTypeRow } from "@/types/department.types";
@@ -65,15 +69,19 @@ function formatMinuteOfDay(minute: number): string {
 
 /**
  * Render the booking-window suffix for a department-scoped appointment
- * type. Returns `null` when both bounds are absent (the type is bookable
- * any time of day).
+ * type. Returns `null` when the row has zero booking-window ranges (the
+ * type is bookable any time the doctor works).
  *
- * Variants — keyed off which of the two bounds are set:
+ * Per-range copy — keyed off the day-edge anchoring of each range:
  *
- *  - Both set        → `"09:00 – 12:00"` (range)
- *  - End-only        → `"Before 11:00 only"` (afternoon-restricted type)
- *  - Start-only      → `"From 13:00"` (morning-restricted type)
- *  - Neither set     → `null`
+ *  - `[MIDNIGHT, end)`  → `"Before 11:00 only"` (afternoon-restricted)
+ *  - `[start, EOD)`     → `"From 13:00"`        (morning-restricted)
+ *  - `[start, end)`     → `"09:00 – 12:00"`     (interior range)
+ *
+ * Where the row carries multiple ranges, each is formatted via the same
+ * per-range rule above and joined with the locale's "or" connector —
+ * e.g. `"09:00 – 11:00 or 14:00 – 16:00"` (two interior ranges) or
+ * `"Before 11:00 only or From 15:00"` (day-edge split).
  */
 function useWindowSuffix(): (
   row: DepartmentAppointmentTypeRow,
@@ -81,31 +89,35 @@ function useWindowSuffix(): (
   const tWindow = useTranslations(NS.CommonAppointmentTypeWindow);
 
   return (row) => {
-    const start = row.bookingWindowStartMinute;
-    const end = row.bookingWindowEndMinute;
-    const hasStart = typeof start === "number";
-    const hasEnd = typeof end === "number";
+    if (row.bookingWindows.length === 0) {
+      return null;
+    }
 
-    if (hasStart && hasEnd) {
+    const joiner = tWindow(K.Common.AppointmentTypeWindow.multiRangeJoin);
+
+    const parts = row.bookingWindows.map((window) => {
+      const isAnchoredAtMidnight = window.startMinute === MIDNIGHT_MINUTES;
+      const isAnchoredAtEndOfDay = window.endMinute === MINUTES_PER_DAY;
+
+      if (isAnchoredAtMidnight && !isAnchoredAtEndOfDay) {
+        return tWindow(K.Common.AppointmentTypeWindow.beforeOnly, {
+          end: formatMinuteOfDay(window.endMinute),
+        });
+      }
+
+      if (isAnchoredAtEndOfDay && !isAnchoredAtMidnight) {
+        return tWindow(K.Common.AppointmentTypeWindow.fromOnly, {
+          start: formatMinuteOfDay(window.startMinute),
+        });
+      }
+
       return tWindow(K.Common.AppointmentTypeWindow.range, {
-        start: formatMinuteOfDay(start),
-        end: formatMinuteOfDay(end),
+        start: formatMinuteOfDay(window.startMinute),
+        end: formatMinuteOfDay(window.endMinute),
       });
-    }
+    });
 
-    if (hasEnd) {
-      return tWindow(K.Common.AppointmentTypeWindow.beforeOnly, {
-        end: formatMinuteOfDay(end),
-      });
-    }
-
-    if (hasStart) {
-      return tWindow(K.Common.AppointmentTypeWindow.fromOnly, {
-        start: formatMinuteOfDay(start),
-      });
-    }
-
-    return null;
+    return parts.join(joiner);
   };
 }
 

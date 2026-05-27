@@ -268,6 +268,7 @@ export const K = {
     AppointmentTypeWindow: {
       beforeOnly: "beforeOnly",
       fromOnly: "fromOnly",
+      multiRangeJoin: "multiRangeJoin",
       range: "range",
     },
     BloodGroup: {

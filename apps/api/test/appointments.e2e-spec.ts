@@ -217,17 +217,25 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
   // 09:00 UTC = 16:00 local (= 960 min). The F13 fixture below uses a
   // separate scratch day with a more permissive layout so the existing
   // tests stay green.
-  await prisma.departmentAppointmentType.create({
+  // F21 booking windows — only allow NEW_PATIENT_VISIT in the local
+  // 17:00–18:00 hour. With `CLINIC_TIMEZONE=Asia/Bangkok` (+7) that's
+  // 10:00–11:00 UTC. The day-1 schedule (09:00–12:00 UTC) overlaps part
+  // of that local window; 10:35 UTC = 17:35 local falls inside it.
+  const datNpv = await prisma.departmentAppointmentType.create({
     data: {
       departmentId: deptHome.id,
       appointmentType: AppointmentType.NEW_PATIENT_VISIT,
       durationMinutes: 30,
-      // F13 booking window — only allow NEW_PATIENT_VISIT in the local
-      // 17:00–18:00 hour. With `CLINIC_TIMEZONE=Asia/Bangkok` (+7) that's
-      // 10:00–11:00 UTC. The day-1 schedule (09:00–12:00 UTC) overlaps part
-      // of that local window; 10:35 UTC = 17:35 local falls inside it.
-      bookingWindowStartMinute: 17 * 60,
-      bookingWindowEndMinute: 18 * 60,
+      createdBy: superAdmin.id,
+    },
+    select: { id: true },
+  });
+
+  await prisma.departmentAppointmentTypeWindow.create({
+    data: {
+      departmentAppointmentTypeId: datNpv.id,
+      startMinute: 17 * 60,
+      endMinute: 18 * 60,
       createdBy: superAdmin.id,
     },
   });
@@ -566,6 +574,16 @@ async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
     },
   });
 
+  // F21: delete child windows before the parent DAT rows (FK constraint).
+  const datIds = await prisma.departmentAppointmentType.findMany({
+    where: { departmentId: { in: departmentIds } },
+    select: { id: true },
+  });
+
+  await prisma.departmentAppointmentTypeWindow.deleteMany({
+    where: { departmentAppointmentTypeId: { in: datIds.map((d) => d.id) } },
+  });
+
   await prisma.departmentAppointmentType.deleteMany({
     where: { departmentId: { in: departmentIds } },
   });
@@ -872,9 +890,9 @@ describe('F09 — appointments e2e', () => {
       // books 10:00 UTC on day-6 (scheduleHomeF13). The next on-grid slot
       // (30-min step re-anchored after 10:00–10:30) is 10:30 UTC = 17:30
       // local, end = 11:00 UTC = 18:00 local. slotEndMin = 1080 ≤
-      // windowEndMin = 1080 (isWithinBookingWindow uses `>` for rejection,
-      // so exactly-at-window-end passes). This confirms the window predicate
-      // accepts the boundary case.
+      // endMin = 1080 ≤ windowEndMinute = 1080 (the predicate uses `<=` for
+      // acceptance, so exactly-at-window-end passes). This confirms the
+      // F21 window predicate accepts the boundary case.
       const jwt = await jwtFor(fixtures!.nurseHome);
 
       const res = await request(server)

@@ -1,19 +1,23 @@
 /**
  * Seeds the per-department `(departmentId, appointmentType)` booking
  * rules. Each row declares that the department offers the category AND
- * carries the per-pair `durationMinutes` + optional booking window
- * (`bookingWindowStartMinute` / `bookingWindowEndMinute`).
+ * carries the per-pair `durationMinutes` + optional booking windows
+ * (F21 — child table `department_appointment_type_windows`).
  *
  * Depends on departments.ts (to resolve `departmentId` by name) and the
  * super-admin (for the `createdBy` audit column). Idempotent via upsert
  * keyed on the `(departmentId, appointmentType)` unique pair — the
  * `update` block re-applies the rule fields so re-seeding picks up
- * spec changes.
+ * spec changes. Windows are deleted and re-inserted on each seed run so
+ * multi-range specs stay current.
  *
- * F13 overrides (reviewers can spot-check these without grep):
+ * F13/F21 overrides (reviewers can spot-check these without grep):
  *  - Orthopedics `PROCEDURE` → 90 min (vs the 60-min default).
- *  - Cardiology `NEW_PATIENT_VISIT` → bookingWindowEndMinute = 660
- *    (= "before 11:00 local" — Asia/Bangkok wall clock).
+ *  - Cardiology `NEW_PATIENT_VISIT` → single window [0, 660) = before
+ *    11:00 local (migrated from the F13 bookingWindowEndMinute column).
+ *  - Internal Medicine `CONSULTATION` → multi-range [540, 660) ∪
+ *    [840, 960) = 09:00–11:00 OR 14:00–16:00 local (genuinely multi-range
+ *    pair required by F21 spec / US-21.3).
  */
 import {
   AppointmentType,
@@ -34,11 +38,15 @@ const DEFAULT_DURATION_MINUTES: Record<AppointmentType, number> = {
   [AppointmentType.PROCEDURE]: 60,
 };
 
+interface BookingWindowSpec {
+  startMinute: number;
+  endMinute: number;
+}
+
 interface AppointmentTypeRuleSpec {
   appointmentType: AppointmentType;
   durationMinutes?: number;
-  bookingWindowStartMinute?: number | null;
-  bookingWindowEndMinute?: number | null;
+  bookingWindows?: BookingWindowSpec[];
 }
 
 interface DepartmentTypeSpec {
@@ -52,10 +60,11 @@ const SPECS: DepartmentTypeSpec[] = [
     rules: [
       {
         appointmentType: AppointmentType.NEW_PATIENT_VISIT,
-        // F13 override — confine new-patient visits to before 11:00
-        // local (660 min after midnight in CLINIC_TIMEZONE) so the
-        // afternoon stays clear for follow-ups.
-        bookingWindowEndMinute: 660,
+        // F21 migration of the F13 single-window override — confine
+        // new-patient visits to before 11:00 local (660 min after
+        // midnight in CLINIC_TIMEZONE).  Converted from the old
+        // bookingWindowEndMinute=660 (both-NULL start → 0).
+        bookingWindows: [{ startMinute: 0, endMinute: 660 }],
       },
       { appointmentType: AppointmentType.FOLLOW_UP },
       { appointmentType: AppointmentType.CONSULTATION },
@@ -67,7 +76,17 @@ const SPECS: DepartmentTypeSpec[] = [
     rules: [
       { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
       { appointmentType: AppointmentType.FOLLOW_UP },
-      { appointmentType: AppointmentType.CONSULTATION },
+      {
+        appointmentType: AppointmentType.CONSULTATION,
+        // F21 genuinely multi-range pair (US-21.3) — 09:00–11:00 OR
+        // 14:00–16:00 local (Asia/Bangkok), leaving a midday gap.
+        //  09:00 local = 540 min; 11:00 local = 660 min.
+        //  14:00 local = 840 min; 16:00 local = 960 min.
+        bookingWindows: [
+          { startMinute: 540, endMinute: 660 },
+          { startMinute: 840, endMinute: 960 },
+        ],
+      },
     ],
   },
   {
@@ -168,10 +187,10 @@ export async function seedDepartmentAppointmentTypes(
     for (const rule of spec.rules) {
       const durationMinutes =
         rule.durationMinutes ?? DEFAULT_DURATION_MINUTES[rule.appointmentType];
-      const bookingWindowStartMinute = rule.bookingWindowStartMinute ?? null;
-      const bookingWindowEndMinute = rule.bookingWindowEndMinute ?? null;
+      const bookingWindows = rule.bookingWindows ?? [];
 
-      await prisma.departmentAppointmentType.upsert({
+      // Upsert the parent row.
+      const dat = await prisma.departmentAppointmentType.upsert({
         where: {
           departmentId_appointmentType: {
             departmentId: department.id,
@@ -180,19 +199,33 @@ export async function seedDepartmentAppointmentTypes(
         },
         update: {
           durationMinutes,
-          bookingWindowStartMinute,
-          bookingWindowEndMinute,
           updatedBy: superAdmin.id,
         },
         create: {
           departmentId: department.id,
           appointmentType: rule.appointmentType,
           durationMinutes,
-          bookingWindowStartMinute,
-          bookingWindowEndMinute,
           createdBy: superAdmin.id,
         },
+        select: { id: true },
       });
+
+      // Replace all window rows for this pair (delete + recreate is safe
+      // at seed time — no FK references from other tables point at windows).
+      await prisma.departmentAppointmentTypeWindow.deleteMany({
+        where: { departmentAppointmentTypeId: dat.id },
+      });
+
+      for (const win of bookingWindows) {
+        await prisma.departmentAppointmentTypeWindow.create({
+          data: {
+            departmentAppointmentTypeId: dat.id,
+            startMinute: win.startMinute,
+            endMinute: win.endMinute,
+            createdBy: superAdmin.id,
+          },
+        });
+      }
 
       count += 1;
     }
