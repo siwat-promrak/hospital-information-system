@@ -77,18 +77,3 @@ export const STANDALONE_APPOINTMENT_TYPES = [
 
 export type StandaloneAppointmentType =
   (typeof STANDALONE_APPOINTMENT_TYPES)[number];
-
-/**
- * F18 — fallback duration used by `POST /appointments/:id/follow-up`
- * when the doctor's department has no `(departmentId, FOLLOW_UP)` row
- * in `department_appointment_types`. A follow-up is a continuation of
- * an existing visit that the department already accepted, so a missing
- * catalog row must not block the action; we substitute this default and
- * use an open booking window. Standalone bookings remain strict and
- * still surface `DEPARTMENT_TYPE_NOT_ALLOWED` when the catalog row is
- * missing.
- *
- * Mirrors the seed default for FOLLOW_UP in
- * `apps/api/prisma/seed/department-appointment-types.ts`.
- */
-export const FOLLOW_UP_DEFAULT_DURATION_MINUTES = 15;
