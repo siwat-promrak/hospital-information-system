@@ -11,7 +11,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useTranslations } from "next-intl";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { K, NS } from "@/i18n/keys.generated";
 import { followUpAppointmentAction } from "@/lib/api/appointment.actions";
@@ -67,6 +67,21 @@ export default function FollowUpDialog({
   const [isLoadingSlots, startLoadTransition] = useTransition();
   const [isSubmitPending, startSubmitTransition] = useTransition();
 
+  // `useNotify()` returns a fresh object literal every render — listing
+  // `notify` in the effect's deps re-fires the effect every render, which
+  // calls `startLoadTransition(...)` → setSlots → re-render → loop, and
+  // the spinner never settles. Stash it behind a ref (mirroring
+  // `SlotPicker`) so the inner async callback can still reach `.error()`
+  // without subscribing to its identity.
+  const notifyRef = useRef(notify);
+
+  useEffect(() => {
+    notifyRef.current = notify;
+  });
+
+  // Sequence guard so out-of-order responses don't clobber fresher slots.
+  const requestSeq = useRef<number>(0);
+
   // Re-fetch slots whenever the date changes while the dialog is open.
   useEffect(() => {
     if (!open) {
@@ -74,6 +89,8 @@ export default function FollowUpDialog({
     }
 
     setSelectedSlot(null);
+
+    const seq = ++requestSeq.current;
 
     startLoadTransition(async () => {
       const result = await loadSlotsAction({
@@ -83,8 +100,12 @@ export default function FollowUpDialog({
         type: "FOLLOW_UP",
       });
 
+      if (seq !== requestSeq.current) {
+        return;
+      }
+
       if (!result.ok) {
-        notify.error(result.error.code);
+        notifyRef.current.error(result.error.code);
         setSlots([]);
 
         return;
@@ -92,7 +113,7 @@ export default function FollowUpDialog({
 
       setSlots(result.data);
     });
-  }, [date, open, doctorId, departmentId, notify]);
+  }, [date, open, doctorId, departmentId]);
 
   function handleClose() {
     setDate(today);
