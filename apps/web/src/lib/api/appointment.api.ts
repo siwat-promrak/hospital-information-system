@@ -130,8 +130,8 @@ export function completeAppointment(
  * `referredAt`, opens (or extends) the appointment-group lineage, and
  * surfaces the row on the destination department's pickup queue.
  *
- * Body now includes `{ referredToDepartmentId, note, drug? }` (extended
- * from the F14 `{ toDepartmentId }` shape — field renamed on the wire).
+ * Body is `{ toDepartmentId, note, drug? }` (the F14 `{ toDepartmentId }`
+ * shape extended with the mandatory workspace note fields).
  * Non-doctor callers get a 403; an already-referred row 409s with
  * `APPOINTMENT_ALREADY_REFERRED`.
  */

@@ -127,7 +127,7 @@ export default function WorkspaceNotePanel({
 
     startReferTransition(async () => {
       const result = await referAppointmentAction(appointmentId, {
-        referredToDepartmentId: referTarget,
+        toDepartmentId: referTarget,
         note: note.trim(),
         drug: drugValue ?? null,
       });
