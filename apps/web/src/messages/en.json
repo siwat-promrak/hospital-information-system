@@ -103,7 +103,6 @@
       "medicalRecords": "Medical records",
       "appointments": "Appointments",
       "appointmentsNew": "Book appointment",
-      "patientsNew": "Register patient",
       "appointmentGroups": "Cases",
       "referrals": "Referrals",
       "findSlot": "Find slot",
@@ -495,11 +494,13 @@
       "dobLabel": "Date of birth",
       "genderLabel": "Gender",
       "bloodGroupLabel": "Blood group",
+      "identificationNoLabel": "Identification number",
       "phoneLabel": "Phone",
       "emergencyPersonNameLabel": "Emergency contact",
       "emergencyPersonRelationLabel": "Relationship",
       "emergencyPersonPhoneLabel": "Emergency phone",
-      "addressLabel": "Address"
+      "addressLabel": "Address",
+      "dialogCloseLabel": "Close"
     },
     "List": {
       "title": "Patients",
@@ -511,7 +512,8 @@
       "genderLabel": "Gender",
       "phoneLabel": "Phone",
       "searchLabel": "Search patients",
-      "searchPlaceholder": "Name, phone, ID, or HN…"
+      "searchPlaceholder": "Name, phone, ID, or HN…",
+      "viewDetailsAriaLabel": "View {name} details"
     }
   },
   "BookingWizard": {

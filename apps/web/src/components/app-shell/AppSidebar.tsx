@@ -12,7 +12,6 @@ import FolderSharedIcon from "@mui/icons-material/FolderShared";
 import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
 import MedicalServicesIcon from "@mui/icons-material/MedicalServices";
 import PeopleIcon from "@mui/icons-material/People";
-import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import RecentActorsIcon from "@mui/icons-material/RecentActors";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
@@ -344,7 +343,6 @@ const ICON_FOR: Readonly<
   [NAV_ICON.APPOINTMENTS]: CalendarMonthIcon,
   [NAV_ICON.APPOINTMENTS_NEW]: AddBoxIcon,
   [NAV_ICON.PATIENTS]: RecentActorsIcon,
-  [NAV_ICON.PATIENTS_NEW]: PersonAddIcon,
   [NAV_ICON.APPOINTMENT_GROUPS]: AccountTreeIcon,
   [NAV_ICON.REFERRALS]: CallSplitIcon,
   [NAV_ICON.FIND_SLOT]: EventAvailableIcon,
