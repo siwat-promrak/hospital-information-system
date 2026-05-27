@@ -45,29 +45,28 @@ const CONTINUATION_PAGE_SIZE = 10;
  * appointments. Drives the F14 booking-wizard "Yes, continues a prior
  * visit" branch.
  *
- * Eligibility rules (corrective tightening of the original "non-cancelled
- * rows" filter — too loose):
+ * Eligibility rules:
  *   1. `status === 'COMPLETED'` — a `BOOKED` row hasn't happened yet so it
  *      can't be the source of a continuation; a `CANCELLED` row never did.
- *   2. (no group) OR (group is still open) — once a case is closed the
- *      patient's care thread for that diagnosis is done, so a new visit
- *      should open a fresh case rather than reach back into the closed one.
+ *   2. `appointmentGroupId !== null` AND group is still open
+ *      (`closedAt === null`). F18 collapsed Complete and Close-Case into
+ *      one action — hitting Complete on a one-off ungrouped visit IS the
+ *      doctor signalling "case is done" (there's just no group row to
+ *      stamp `closedAt` on). So ungrouped COMPLETED rows are NOT eligible
+ *      to continue from; they represent finished one-shot cases.
  *
  * Implementation:
- *   - The COMPLETED narrowing is applied as `?status=COMPLETED` on the
- *     existing `GET /appointments` call (the BE accepts it — see
- *     `list-appointments.query.dto.ts`'s `@IsEnum(AppointmentStatus)`
- *     field). This keeps the row count small even for patients with long
- *     histories of cancellations / future bookings.
- *   - The open-group narrowing is a client-side intersection: we fetch
+ *   - Rule 1 (COMPLETED) is the BE filter via `?status=COMPLETED` on
+ *     `GET /appointments`. Keeps the row count small even for patients
+ *     with long histories of cancellations / future bookings.
+ *   - Rule 2 (grouped + open) is a client-side intersection: we fetch
  *     the patient's open groups via `GET /appointment-groups?status=open`
  *     (one round-trip, `pageSize=all` — the open-case count per patient
  *     is bounded by the number of active threads, single digits in
- *     practice) and only keep rows whose `appointmentGroupId` is either
- *     `null` (ungrouped → eligible by rule 2) or in the open-groups set
- *     (`closedAt === null` → also eligible). Closed-group rows AND rows
- *     whose group state we couldn't fetch are filtered out.
- *   - The BE doesn't currently expose a "filter to (ungrouped OR
+ *     practice) and only keep rows whose `appointmentGroupId` is in the
+ *     open-groups set. Ungrouped rows AND closed-group rows are
+ *     filtered out.
+ *   - The BE doesn't currently expose a "filter to (grouped AND
  *     open-group)" parameter on `GET /appointments`; if a future BE
  *     revision adds one, drop the second fetch and the `useEffect` below
  *     in favour of a single narrowed call.
@@ -151,18 +150,19 @@ export default function ContinuationPicker({
   }, [patientId]);
 
   const filteredRows = useMemo(() => {
-    // Until the open-groups fetch resolves we conservatively show only
-    // ungrouped rows. Once it does, grouped rows whose group is in the
-    // open set surface as well. Belt-and-braces `status` recheck stays
-    // because the BE filter is the only guard against a future regression
-    // (and the cost of the membership test is trivial).
+    // Show only COMPLETED rows whose group is still open. Ungrouped
+    // COMPLETED rows are excluded because F18's Complete action is the
+    // universal "case is done" signal — a one-shot visit that was
+    // Completed has no follow-up to attach to. Belt-and-braces `status`
+    // recheck stays because the BE filter is the only guard against a
+    // future regression (and the cost of the membership test is trivial).
     return loaded.filter((a) => {
       if (a.status !== APPOINTMENT_STATUS.COMPLETED) {
         return false;
       }
 
       if (a.appointmentGroupId == null) {
-        return true;
+        return false;
       }
 
       if (openGroupIds == null) {
@@ -265,16 +265,14 @@ export default function ContinuationPicker({
             {filteredRows.map((a) => {
               const selected = value?.id === a.id;
               const start = dayjs(a.startAt).locale(locale);
-              const visitChipLabel = a.appointmentGroupId
-                ? t(K.BookingWizard.Continuation.rowVisitLabel, {
-                    // The wire doesn't carry a per-row `visitNumber` on
-                    // the list endpoint (only on the group-detail
-                    // payload); the chip just badges "in a case" until
-                    // the BE adds the field. The full timeline is one
-                    // click away on the appointment detail page.
-                    visitNumber: "•",
-                  })
-                : t(K.BookingWizard.Continuation.rowUngrouped);
+              // Every row reaching this point has `appointmentGroupId !== null`
+              // (the filter excludes ungrouped rows). The chip just badges
+              // "in a case" — the BE list endpoint doesn't carry per-row
+              // `visitNumber` (only the group-detail payload does), so the
+              // bullet stays as a placeholder until that field lands.
+              const visitChipLabel = t(K.BookingWizard.Continuation.rowVisitLabel, {
+                visitNumber: "•",
+              });
 
               return (
                 <ListItemButton

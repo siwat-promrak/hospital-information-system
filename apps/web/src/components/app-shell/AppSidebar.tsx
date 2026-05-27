@@ -6,7 +6,6 @@ import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import CallSplitIcon from "@mui/icons-material/CallSplit";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import DashboardIcon from "@mui/icons-material/Dashboard";
 import EventAvailableIcon from "@mui/icons-material/EventAvailable";
 import EventNoteIcon from "@mui/icons-material/EventNote";
 import FolderSharedIcon from "@mui/icons-material/FolderShared";
@@ -338,7 +337,6 @@ function isHrefMatch(href: string, pathname: string): boolean {
 const ICON_FOR: Readonly<
   Record<NavIconKey, ComponentType<{ fontSize?: "small" | "medium" | "large" }>>
 > = {
-  [NAV_ICON.DASHBOARD]: DashboardIcon,
   [NAV_ICON.DEPARTMENTS]: LocalHospitalIcon,
   [NAV_ICON.DOCTORS]: PeopleIcon,
   [NAV_ICON.SCHEDULES]: EventNoteIcon,

@@ -16,10 +16,6 @@
 export const FE_PATH = {
   HOME: "/",
   SIGNIN: "/signin",
-  ADMIN: "/admin",
-  NURSE: "/nurse",
-  MEDICAL_RECORDS_OFFICER: "/medical-records-officer",
-  PHARMACY: "/pharmacy",
   DEPARTMENTS: "/departments",
   DOCTORS: "/doctors",
   SCHEDULES: "/schedules",

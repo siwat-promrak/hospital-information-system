@@ -10,7 +10,6 @@ import type { NavItem } from "./nav-items.types";
  * module stays free of `@mui/icons-material` imports.
  */
 export const NAV_ICON = {
-  DASHBOARD: "dashboard",
   DEPARTMENTS: "departments",
   DOCTORS: "doctors",
   SCHEDULES: "schedules",
@@ -40,12 +39,6 @@ export const NAV_ICON = {
  * are the canonical gate post-consolidation.
  */
 export const NAV_ITEMS: readonly NavItem[] = [
-  {
-    id: "dashboard",
-    href: FE_PATH.HOME,
-    iconName: NAV_ICON.DASHBOARD,
-    i18nKey: K.Nav.items.dashboard,
-  },
   {
     id: "departments",
     href: FE_PATH.DEPARTMENTS,
