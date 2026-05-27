@@ -369,7 +369,8 @@
       "patient": "ผู้ป่วย",
       "type": "ประเภท",
       "status": "สถานะ",
-      "viewDetail": "ดู"
+      "viewDetail": "ดู",
+      "cancelledBy": "ยกเลิกโดย {name}"
     },
     "Detail": {
       "back": "ย้อนกลับไปยังรายการนัดหมาย",
@@ -389,11 +390,14 @@
       "cancelAction": "ยกเลิกนัดหมาย",
       "cancelDialogTitle": "ยกเลิกนัดหมายนี้?",
       "cancelDialogBody": "ช่วงเวลานี้จะถูกปล่อยให้จองใหม่ได้ทันที ระบบจะบันทึกผู้ยกเลิกและเวลาในประวัติ",
-      "cancelReasonLabel": "เหตุผลการยกเลิก (ไม่บังคับ)",
+      "cancelReasonLabel": "เหตุผลการยกเลิก",
       "cancelReasonPlaceholder": "เช่น ผู้ป่วยไม่มาตามนัด",
+      "cancelReasonRequired": "กรุณาระบุเหตุผลการยกเลิก",
       "cancelConfirm": "ยกเลิกนัดหมาย",
       "cancelDismiss": "เก็บนัดหมายไว้",
       "alreadyCancelled": "ถูกยกเลิกไปแล้ว — ไม่ต้องดำเนินการเพิ่ม",
+      "cancelledByLine": "ยกเลิกโดย {name}",
+      "cancelledByWithReasonLine": "ยกเลิกโดย {name} — {reason}",
       "alreadyCompleted": "เสร็จสิ้นแล้ว — ไม่สามารถยกเลิกได้",
       "notFound": "ไม่พบนัดหมาย",
       "completeAction": "ทำเครื่องหมายว่าเสร็จสิ้น",

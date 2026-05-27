@@ -122,7 +122,24 @@ export default async function AppointmentDetailPage({
 
       {appointment.status === "CANCELLED" ? (
         <Alert severity="warning">
-          {t(K.Appointments.Detail.alreadyCancelled)}
+          <Stack spacing={0.5}>
+            <Typography variant="body2">
+              {t(K.Appointments.Detail.alreadyCancelled)}
+            </Typography>
+            {appointment.cancelledByUser ? (
+              <Typography variant="caption" color="text.secondary">
+                {appointment.cancellationReason &&
+                appointment.cancellationReason.length > 0
+                  ? t(K.Appointments.Detail.cancelledByWithReasonLine, {
+                      name: `${appointment.cancelledByUser.firstNameEn} ${appointment.cancelledByUser.lastNameEn}`,
+                      reason: appointment.cancellationReason,
+                    })
+                  : t(K.Appointments.Detail.cancelledByLine, {
+                      name: `${appointment.cancelledByUser.firstNameEn} ${appointment.cancelledByUser.lastNameEn}`,
+                    })}
+              </Typography>
+            ) : null}
+          </Stack>
         </Alert>
       ) : null}
       {appointment.status === "COMPLETED" ? (

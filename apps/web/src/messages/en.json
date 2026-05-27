@@ -369,7 +369,8 @@
       "patient": "Patient",
       "type": "Type",
       "status": "Status",
-      "viewDetail": "View"
+      "viewDetail": "View",
+      "cancelledBy": "Cancelled by {name}"
     },
     "Detail": {
       "back": "Back to appointments",
@@ -389,11 +390,14 @@
       "cancelAction": "Cancel appointment",
       "cancelDialogTitle": "Cancel this appointment?",
       "cancelDialogBody": "The slot will be freed for re-booking immediately. The audit trail records who cancelled and when.",
-      "cancelReasonLabel": "Cancellation reason (optional)",
+      "cancelReasonLabel": "Cancellation reason",
       "cancelReasonPlaceholder": "e.g. Patient no-show",
+      "cancelReasonRequired": "A cancellation reason is required.",
       "cancelConfirm": "Cancel appointment",
       "cancelDismiss": "Keep appointment",
       "alreadyCancelled": "Already cancelled — no further action needed.",
+      "cancelledByLine": "Cancelled by {name}",
+      "cancelledByWithReasonLine": "Cancelled by {name} — {reason}",
       "alreadyCompleted": "Already completed — cannot be cancelled.",
       "notFound": "Appointment not found.",
       "completeAction": "Mark as completed",

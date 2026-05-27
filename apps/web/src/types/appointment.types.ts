@@ -62,6 +62,18 @@ export interface AppointmentDepartmentRef {
 }
 
 /**
+ * Thin user reference for the actor who cancelled the appointment.
+ * Populated by the BE alongside the existing scalar `cancelledBy` UUID;
+ * `null` for legacy rows from before the FK was tightened. Mirrors
+ * `AppointmentCancelledByUserRefDto`.
+ */
+export interface AppointmentCancelledByUserRef {
+  id: string;
+  firstNameEn: string;
+  lastNameEn: string;
+}
+
+/**
  * Returned by `POST /appointments` (201), `GET /appointments/:id` (200),
  * and rows in `GET /appointments` (200, paginated).
  *
@@ -86,6 +98,7 @@ export interface AppointmentResponse {
   cancelledAt: string | null;
   cancellationReason: string | null;
   cancelledBy: string | null;
+  cancelledByUser: AppointmentCancelledByUserRef | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -131,12 +144,14 @@ export interface CreateAppointmentBody {
 }
 
 /**
- * Request body for `POST /appointments/:id/cancel`. The cancellation
- * reason is optional — many cancellations are no-shows where the front
- * desk has nothing meaningful to type.
+ * Request body for `POST /appointments/:id/cancel`. The BE requires a
+ * non-empty `cancellationReason` (validated server-side with
+ * `400 VALIDATION_FAILED` on missing / empty / whitespace-only input);
+ * the cancel dialog enforces the same rule by disabling the Confirm
+ * button until the user types something.
  */
 export interface CancelAppointmentBody {
-  cancellationReason?: string | null;
+  cancellationReason: string;
 }
 
 /**

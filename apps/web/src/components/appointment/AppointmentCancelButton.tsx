@@ -24,10 +24,14 @@ interface AppointmentCancelButtonProps {
 
 /**
  * Cancel-appointment affordance for the F09 appointment detail page.
- * Opens a confirmation dialog with an optional free-text reason; on
+ * Opens a confirmation dialog with a REQUIRED free-text reason; on
  * confirm fires `cancelAppointmentAction` and refreshes the page so the
  * detail card flips into its CANCELLED state (the action also
  * `revalidatePath`s the list page).
+ *
+ * The BE rejects empty / whitespace-only reasons with
+ * `400 VALIDATION_FAILED`; the dialog mirrors that contract by disabling
+ * the Confirm button until the user types something non-empty.
  *
  * Specific BE error codes (`APPOINTMENT_ALREADY_CANCELLED`,
  * `APPOINTMENT_ALREADY_COMPLETED`) map to localised toasts via the
@@ -44,11 +48,13 @@ export default function AppointmentCancelButton({
   const [reason, setReason] = useState("");
   const [isPending, startTransition] = useTransition();
 
+  const trimmedReason = reason.trim();
+  const isReasonEmpty = trimmedReason.length === 0;
+
   function handleConfirm() {
     startTransition(async () => {
-      const trimmed = reason.trim();
       const result = await cancelAppointmentAction(appointmentId, {
-        cancellationReason: trimmed.length === 0 ? null : trimmed,
+        cancellationReason: trimmedReason,
       });
 
       if (!result.ok) {
@@ -95,6 +101,13 @@ export default function AppointmentCancelButton({
               value={reason}
               onChange={(event) => setReason(event.target.value)}
               fullWidth
+              required
+              error={isReasonEmpty}
+              helperText={
+                isReasonEmpty
+                  ? t(K.Appointments.Detail.cancelReasonRequired)
+                  : undefined
+              }
               disabled={isPending}
             />
           </Stack>
@@ -110,7 +123,7 @@ export default function AppointmentCancelButton({
             onClick={handleConfirm}
             variant="contained"
             color="error"
-            disabled={isPending}
+            disabled={isPending || isReasonEmpty}
             startIcon={
               isPending ? (
                 <CircularProgress size={16} color="inherit" />
