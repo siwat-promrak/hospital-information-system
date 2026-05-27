@@ -89,32 +89,6 @@
       "clearAriaLabel": "Clear"
     }
   },
-  "Dashboard": {
-    "welcome": "Welcome, {name}",
-    "roleLabel": "Role",
-    "permissionsLabel": "Permissions",
-    "comingSoonAdmin": "Admin dashboard — user, role, and policy management ships in F11.",
-    "comingSoonNurse": "Use the sidebar to register walk-in patients, book appointments, and review your department's schedule.",
-    "comingSoonMedicalRecordsOfficer": "Use the sidebar to browse appointments, patients, and medical records across the organization.",
-    "comingSoonPharmacy": "Pharmacy dashboard — org-wide appointment and patient lookups for medication dispensing ship in F08+.",
-    "comingSoonDoctor": "Doctor dashboard — own-schedule editor ships in F06.",
-    "noPermissions": "No permissions granted yet.",
-    "appointmentsCard": {
-      "title": "Appointments",
-      "description": "Browse, book, and cancel patient appointments.",
-      "action": "Open"
-    },
-    "bookCard": {
-      "title": "Book appointment",
-      "description": "Start a new booking with a patient and an open slot.",
-      "action": "New booking"
-    },
-    "patientsCard": {
-      "title": "Register patient",
-      "description": "Register a walk-in patient with their demographics and contact details.",
-      "action": "New patient"
-    }
-  },
   "Nav": {
     "brand": "HIS",
     "brandFull": "Hospital Information System",
@@ -123,7 +97,6 @@
     "openMenu": "Open navigation menu",
     "closeMenu": "Close navigation menu",
     "items": {
-      "dashboard": "Dashboard",
       "departments": "Departments",
       "doctors": "Doctors",
       "schedules": "Schedules",
@@ -139,10 +112,6 @@
   },
   "Breadcrumb": {
     "home": "Home",
-    "admin": "Admin",
-    "nurse": "Nurse",
-    "medicalRecordsOfficer": "Medical records",
-    "pharmacy": "Pharmacy",
     "schedules": "Schedules",
     "departments": "Departments",
     "doctors": "Doctors",

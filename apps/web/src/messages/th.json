@@ -89,32 +89,6 @@
       "clearAriaLabel": "ล้าง"
     }
   },
-  "Dashboard": {
-    "welcome": "ยินดีต้อนรับ, {name}",
-    "roleLabel": "บทบาท",
-    "permissionsLabel": "สิทธิ์",
-    "comingSoonAdmin": "แดชบอร์ดผู้ดูแลระบบ — การจัดการผู้ใช้, บทบาท, และนโยบายจะมาใน F11",
-    "comingSoonNurse": "ใช้เมนูด้านข้างเพื่อลงทะเบียนผู้ป่วยใหม่ จองนัดหมาย และดูตารางเวรของแผนกคุณ",
-    "comingSoonMedicalRecordsOfficer": "ใช้เมนูด้านข้างเพื่อค้นหานัดหมาย ข้อมูลผู้ป่วย และเวชระเบียนทั่วทั้งองค์กร",
-    "comingSoonPharmacy": "แดชบอร์ดเภสัชกร — การค้นหานัดหมายและคนไข้สำหรับการจ่ายยาจะมาใน F08 ขึ้นไป",
-    "comingSoonDoctor": "แดชบอร์ดแพทย์ — ตัวจัดการตารางของตนเองจะมาใน F06",
-    "noPermissions": "ยังไม่ได้รับสิทธิ์ใด ๆ",
-    "appointmentsCard": {
-      "title": "นัดหมาย",
-      "description": "ค้นหา จอง และยกเลิกนัดหมายผู้ป่วย",
-      "action": "เปิด"
-    },
-    "bookCard": {
-      "title": "จองนัดหมาย",
-      "description": "เริ่มจองนัดใหม่ด้วยผู้ป่วยและช่วงเวลาว่าง",
-      "action": "จองใหม่"
-    },
-    "patientsCard": {
-      "title": "ลงทะเบียนผู้ป่วย",
-      "description": "ลงทะเบียนผู้ป่วย walk-in พร้อมข้อมูลพื้นฐานและการติดต่อ",
-      "action": "ลงทะเบียน"
-    }
-  },
   "Nav": {
     "brand": "HIS",
     "brandFull": "ระบบสารสนเทศโรงพยาบาล",
@@ -123,7 +97,6 @@
     "openMenu": "เปิดเมนูนำทาง",
     "closeMenu": "ปิดเมนูนำทาง",
     "items": {
-      "dashboard": "แดชบอร์ด",
       "departments": "แผนก",
       "doctors": "แพทย์",
       "schedules": "ตารางเวร",
@@ -139,10 +112,6 @@
   },
   "Breadcrumb": {
     "home": "หน้าแรก",
-    "admin": "ผู้ดูแลระบบ",
-    "nurse": "พยาบาล",
-    "medicalRecordsOfficer": "เวชระเบียน",
-    "pharmacy": "เภสัชกรรม",
     "schedules": "ตารางเวร",
     "departments": "แผนก",
     "doctors": "แพทย์",
