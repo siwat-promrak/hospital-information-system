@@ -1,8 +1,8 @@
 "use client";
 
 import Avatar from "@mui/material/Avatar";
-import ListItem from "@mui/material/ListItem";
 import ListItemAvatar from "@mui/material/ListItemAvatar";
+import ListItemButton from "@mui/material/ListItemButton";
 import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
@@ -16,6 +16,7 @@ import { formatPatientFullName } from "@/appointment/labels";
 
 interface PatientListRowProps {
   patient: PatientResponse;
+  onClick: () => void;
 }
 
 /**
@@ -24,10 +25,15 @@ interface PatientListRowProps {
  * (locale-formatted via dayjs), gender (from the shared `Common.Gender`
  * catalog), and phone number.
  *
- * There is no `/patients/:id` FE detail page in F20, so rows are
- * display-only — no arrow icon or link to a detail view.
+ * The row is a `<ListItemButton>` whose `onClick` opens the read-only
+ * patient-info dialog owned by `PatientListClient`. The list-row stays
+ * presentational — open-state lives in the parent client wrapper so the
+ * dialog can be mounted once for the whole list.
  */
-export default function PatientListRow({ patient }: PatientListRowProps) {
+export default function PatientListRow({
+  patient,
+  onClick,
+}: PatientListRowProps) {
   const tList = useTranslations(NS.PatientsList);
   const tGender = useTranslations(NS.CommonGender);
   const locale = useLocale();
@@ -41,8 +47,16 @@ export default function PatientListRow({ patient }: PatientListRowProps) {
   const genderKey =
     patient.gender === "MALE" ? K.Common.Gender.MALE : K.Common.Gender.FEMALE;
 
+  const ariaLabel = tList(K.Patients.List.viewDetailsAriaLabel, {
+    name: fullName,
+  });
+
   return (
-    <ListItem sx={{ alignItems: "flex-start", py: 2 }}>
+    <ListItemButton
+      onClick={onClick}
+      aria-label={ariaLabel}
+      sx={{ alignItems: "flex-start", py: 2 }}
+    >
       <ListItemAvatar>
         <Avatar
           sx={{
@@ -88,6 +102,6 @@ export default function PatientListRow({ patient }: PatientListRowProps) {
           </Stack>
         }
       />
-    </ListItem>
+    </ListItemButton>
   );
 }

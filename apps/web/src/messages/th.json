@@ -103,7 +103,6 @@
       "medicalRecords": "เวชระเบียน",
       "appointments": "นัดหมาย",
       "appointmentsNew": "จองนัดหมาย",
-      "patientsNew": "ลงทะเบียนผู้ป่วย",
       "appointmentGroups": "เคส",
       "referrals": "การส่งต่อ",
       "findSlot": "ค้นหาช่วงเวลา",
@@ -495,11 +494,13 @@
       "dobLabel": "วันเกิด",
       "genderLabel": "เพศ",
       "bloodGroupLabel": "หมู่โลหิต",
+      "identificationNoLabel": "เลขประจำตัว",
       "phoneLabel": "โทรศัพท์",
       "emergencyPersonNameLabel": "ผู้ติดต่อฉุกเฉิน",
       "emergencyPersonRelationLabel": "ความสัมพันธ์",
       "emergencyPersonPhoneLabel": "โทรศัพท์ฉุกเฉิน",
-      "addressLabel": "ที่อยู่"
+      "addressLabel": "ที่อยู่",
+      "dialogCloseLabel": "ปิด"
     },
     "List": {
       "title": "ผู้ป่วย",
@@ -511,7 +512,8 @@
       "genderLabel": "เพศ",
       "phoneLabel": "โทรศัพท์",
       "searchLabel": "ค้นหาผู้ป่วย",
-      "searchPlaceholder": "ชื่อ, โทรศัพท์, เลขประจำตัว, หรือ HN…"
+      "searchPlaceholder": "ชื่อ, โทรศัพท์, เลขประจำตัว, หรือ HN…",
+      "viewDetailsAriaLabel": "ดูรายละเอียดของ {name}"
     }
   },
   "BookingWizard": {

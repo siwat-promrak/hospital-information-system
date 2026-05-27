@@ -17,7 +17,6 @@ export const NAV_ICON = {
   APPOINTMENTS: "appointments",
   APPOINTMENTS_NEW: "appointments_new",
   PATIENTS: "patients",
-  PATIENTS_NEW: "patients_new",
   // F14 — case timeline + referrals queue.
   APPOINTMENT_GROUPS: "appointment_groups",
   REFERRALS: "referrals",
@@ -114,14 +113,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
     // the entry: DOCTOR, NURSE, MRO, PHARMACY (per the seeded baseline).
     // ADMIN does not hold `patient.read` by default.
     permission: [PERMISSION_CODE.PATIENT_READ],
-  },
-  {
-    id: "patients-new",
-    href: FE_PATH.PATIENTS_NEW,
-    iconName: NAV_ICON.PATIENTS_NEW,
-    i18nKey: K.Nav.items.patientsNew,
-    // NURSE + MRO hold `patient.create` in the seeded baseline.
-    permission: [PERMISSION_CODE.PATIENT_CREATE],
   },
   {
     id: "referrals",

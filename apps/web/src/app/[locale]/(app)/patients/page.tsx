@@ -1,16 +1,14 @@
 import type { Metadata } from "next";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
-import Divider from "@mui/material/Divider";
-import List from "@mui/material/List";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { FE_PATH } from "@/auth/routes";
 import { PERMISSION_CODE } from "@/auth/permissions";
+import PatientListClient from "@/components/patient/PatientListClient";
 import PatientListFilter from "@/components/patient/PatientListFilter";
-import PatientListRow from "@/components/patient/PatientListRow";
 import PatientsNewButton from "@/components/patient/PatientsNewButton";
 import PaginationControl from "@/components/shared/PaginationControl";
 import { K, NS } from "@/i18n/keys.generated";
@@ -109,14 +107,10 @@ export default async function PatientsPage({
             </Typography>
           </Box>
         ) : (
-          <List sx={{ py: 0 }}>
-            {patientsResult.data.map((patient, index) => (
-              <Box key={patient.id}>
-                {index > 0 ? <Divider component="li" /> : null}
-                <PatientListRow patient={patient} />
-              </Box>
-            ))}
-          </List>
+          <PatientListClient
+            patients={patientsResult.data}
+            locale={locale}
+          />
         )}
       </Card>
       <PaginationControl
