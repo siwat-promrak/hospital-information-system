@@ -130,7 +130,7 @@ below live in `docs/user-stories.md`.
 | F15 ✅ | Slot finder                               | `feat/slot-finder`              | Dedicated `/find-slot` screen for ad-hoc availability search. Filters: department (visible only in ALL mode), doctor (scoped to effective dept), appointment type (required), date (single-date picker). View mode mirrors F06 — driven by `schedule.read.*` codes. Extends `GET /slots` to make `doctorId` optional (multi-doctor merge when omitted) and widens its permission gate to ALSO accept `schedule.read.all` so MRO can use it read-only. "Book this slot" CTA deep-links into the booking wizard with `doctorScheduleId` + `startAt` + `appointmentType` + `departmentId` pre-filled; CTA only renders when the caller holds `appointment.create.{own,own-department}`. | US-15.1, US-15.2, US-15.3, US-15.4 | F09 (booking wizard deep-link target), F13 (per-pair type catalog) | Manual: NURSE picks `FOLLOW_UP` + today, sees open slots across every doctor in their dept; clicks Book → wizard lands on patient picker with everything else locked. DOCTOR in OWN_PLUS_DEPT defaults to `mine` and sees only their own slots; flipping to `dept` reveals colleagues. MRO sees the slot list but no Book CTA. PHARMACY cannot reach `/find-slot` (no `schedule.read.*`). | M      | P1       |
 
 | F16 ✅ | Standalone-visit type guard + optional reason | `feat/booking-validation-rules` | Tighten the `POST /appointments` body: standalone bookings (no `previousAppointmentId`) MUST have `appointmentType=NEW_PATIENT_VISIT`; any other type returns `400 STANDALONE_APPOINTMENT_TYPE_INVALID`. Drop the `@ValidateIf(PROCEDURE) @IsNotEmpty()` decorator from `CreateAppointmentDto.reason` — `reason` is now optional for every type. FE booking wizard: the F14 continuation-type narrowing (memo + cascade `useEffect`) now short-circuits when `hasPrefilledSlot=true`, so a find-slot deep link carrying `NEW_PATIENT_VISIT` survives the filter instead of being cleared. | US-7.2 (amended) | F09, F14, F15 | Standalone `POST /appointments` with `FOLLOW_UP` → 400 STANDALONE_APPOINTMENT_TYPE_INVALID; standalone with `NEW_PATIENT_VISIT` → 201; PROCEDURE without `reason` → 201 (was 400); FE find-slot → booking deep link no longer clears the pre-filled `NEW_PATIENT_VISIT`. | S | P1 |
-| F17 | Doctor workspace + RBAC collapse of medical-records mutations | `feat/doctor-workspace` | Introduces a doctor-only workspace surface: a new `/workspace` page listing the caller's upcoming BOOKED appointments and an enhanced `/appointments/:id` view (rendered only when the caller IS the appointment's doctor) showing patient panel, visit-thread medical-records history (new `?appointmentGroupId=` filter on `GET /medical-records`), and a required note/drug panel that submits with the chosen end-of-visit action. Three RPC endpoints absorb the note + drug: `POST /appointments/:id/complete` (now also closes the group when one exists — replaces the legacy `POST /appointment-groups/:id/close`), `POST /appointments/:id/refer`, and the new `POST /appointments/:id/follow-up` (atomic: complete current + create FOLLOW_UP in same group + insert record). RBAC delta: ADD `doctor_workspace.read.own` (FE nav/page gate only, DOCTOR-only); DELETE `medical_records.{create.own, update.own, update.all}` (records become write-once, only the workspace actions can author one). `POST /medical-records` and `PATCH /medical-records/:id` controller routes are removed; `GET /medical-records` keeps reading. | US-17.1, US-17.2, US-17.3, US-17.4, US-17.5, US-17.6 | F09, F14 | DOCTOR opens `/workspace`, sees their BOOKED queue; opens an appointment, writes a note, clicks Complete → appointment is `COMPLETED`, `medical_records` row inserted, and (when grouped) `appointment_groups.closedAt` set — all in one transaction. Clicking Follow Up → date+slot dialog → confirms → current visit completed AND new FOLLOW_UP appointment created in the same group with `previousAppointmentId` set. Clicking Refer → existing F14 referral flow now also creates the record. Empty `note` on any action → `400 VALIDATION_FAILED`. Direct `POST /medical-records` returns `404` (route gone). MRO loses `medical_records.update.all` → all `PATCH` calls return `404`. | L | P1 |
+| F17 ✅ | Doctor workspace + RBAC collapse of medical-records mutations | `feat/doctor-workspace` | Introduces a doctor-only workspace surface: a new `/workspace` page listing the caller's visits in two sections (upcoming `BOOKED` + history `COMPLETED`/`CANCELLED`) and a **dedicated `/workspace/:id`** detail page (NOT an enhanced `/appointments/:id` — that reverted to its plain F09 form) showing patient panel, medical-records history (new `?appointmentGroupId=` filter on `GET /medical-records`, with an `?appointmentId=` fallback for standalone past visits; each card shows the authoring doctor + department), and a required note/drug panel (only while `BOOKED`) that submits with the chosen end-of-visit action. Three RPC endpoints absorb the note + drug: `POST /appointments/:id/complete` (now also closes the group when one exists — replaces the legacy `POST /appointment-groups/:id/close`), `POST /appointments/:id/refer`, and the new `POST /appointments/:id/follow-up` (atomic: complete current + create FOLLOW_UP in same group + insert record). Also adds `GET /patients/:id` (gated on `patient.read`) to feed the patient panel. RBAC delta: ADD `doctor_workspace.read.own` (FE nav/page gate only, DOCTOR-only); DELETE `medical_records.{create.own, update.own, update.all}` (records become write-once, only the workspace actions can author one). `POST /medical-records` and `PATCH /medical-records/:id` controller routes are removed; `GET /medical-records` keeps reading. | US-17.1, US-17.2, US-17.3, US-17.4, US-17.5, US-17.6 | F09, F14 | DOCTOR opens `/workspace`, sees their BOOKED queue (top) + past visits (below); opens a visit at `/workspace/:id`, writes a note, clicks Complete → appointment is `COMPLETED`, `medical_records` row inserted, and (when grouped) `appointment_groups.closedAt` set — all in one transaction. Clicking Follow Up → date+slot dialog → confirms → current visit completed AND new FOLLOW_UP appointment created in the same group with `previousAppointmentId` set. Clicking Refer → existing F14 referral flow now also creates the record. Empty `note` on any action → `400 VALIDATION_FAILED`. Direct `POST /medical-records` returns `404` (route gone). MRO loses `medical_records.update.all` → all `PATCH` calls return `404`. | L | P1 |
 
 > **F04, F10 were removed when patient sign-in / self-service was scoped out (2026-05-24).** The feature IDs are intentionally left as gaps — IDs stay stable so commit and PR references continue to resolve. F08 was repurposed for the medical records module and F09 absorbed the original "F08 staff booking" scope when the RBAC overhaul moved booking to NURSE (department-scoped) and DOCTOR (own-doctor) instead of a blanket STAFF role.
 
@@ -1877,7 +1877,41 @@ In the browser:
 
 ---
 
-### F17 — Doctor workspace + RBAC collapse of medical-records mutations (P1, L)
+### F17 — Doctor workspace + RBAC collapse of medical-records mutations (P1, L) ✅ shipped
+
+**What actually shipped (delta from the brief below)**
+
+The "Files expected to change" plan below is the original brief; the FE
+landed differently after review feedback. The shipped shape:
+
+- **The doctor surface is two dedicated routes, not an enhanced
+  appointment detail.** `/appointments/:id` was reverted to its plain
+  F09 read-only form (no doctor panels, no end-of-visit buttons — cancel
+  only, for every role). The doctor's actionable view lives at a new
+  **`/workspace/:id`** page, gated on `doctor_workspace.read.own` + a
+  caller-is-the-doctor check, hosting the summary card, patient panel,
+  medical-records history, and (while `BOOKED`) the note + actions panel.
+- **`/workspace` lists two sections** — Upcoming (`BOOKED`, `from=today`,
+  asc) and History (`COMPLETED` + `CANCELLED`, desc). Because the BE list
+  endpoint filters one `status` at a time, History is two parallel calls
+  merged + sorted client-side; each section paginates via its own query
+  param (`upcomingPage` / `historyPage`). Rows reuse `AppointmentListRow`
+  (arrow icon button + linked patient name; the date is NOT a link) and
+  link to `/workspace/:id`.
+- **`GET /patients/:id` was added** (gated on `patient.read`, `404
+  PATIENT_NOT_FOUND` for unknown / soft-deleted) to feed the patient
+  panel — the F09 patients controller only had `list` + `create`.
+- **Medical-record cards show the authoring doctor + department.** The
+  `GET /medical-records` response already returned both as nested refs;
+  only the FE type was dropping them.
+- **Past visits surface their records read-only.** The history component
+  fetches by `appointmentGroupId` when grouped, else by `appointmentId`
+  so a completed standalone visit still shows its own note.
+- **Component naming:** the workspace note panel is `WorkspaceNotePanel`
+  and the records list is `AppointmentVisitThread`; there is no separate
+  `ReferDialog` — the refer modal is inlined in `WorkspaceNotePanel`. The
+  legacy `AppointmentCompleteButton` / `AppointmentReferButton` /
+  `AppointmentCloseCaseButton` components were deleted.
 
 **Why a standalone feature**
 
@@ -1947,11 +1981,12 @@ Backend (`apps/api/src/`):
   `medical-record-note.dto.ts` exporting `{ note: string; drug?: string }`
   if a base feels worth its weight; otherwise inline the two fields.
 - `prisma/migrations/<timestamp>_f17_workspace_permissions/migration.sql`
-  — forward migration: insert the new permission row, delete the three
-  retired permission rows (cascade-deleting their policy rows via the
-  existing `policies.permission_id` FK), insert the new DOCTOR policy,
-  delete the retired MRO policy. The migration is idempotent (re-run
-  safely after restore).
+  — forward migration: insert the new permission row + the new DOCTOR
+  policy, then delete the dependent policy rows for the three retired
+  permissions BEFORE deleting the permission rows themselves (the
+  `policies.permission_id` FK is `ON DELETE NO ACTION`, so the policies
+  must go first). The migration is idempotent (guards on `code` /
+  `NOT EXISTS`; re-run safely after restore).
 - `test/` — extend the appointment e2e suite with three new specs
   (`complete-with-note`, `refer-with-note`, `follow-up`) and a
   permission-catalog spec verifying the 33-perm / 48-policy totals.
@@ -2007,11 +2042,11 @@ Frontend (`apps/web/src/`):
 
 **Migration / breaking-change notes**
 
-- One forward migration adds the new permission + policies and
-  deletes the three retired permission rows. The deletes cascade
-  through the `policies.permission_id` FK (`ON DELETE CASCADE`), so
-  any orphan DOCTOR / MRO policy rows pointing at the retired
-  permissions disappear in the same step. Apply with
+- One forward migration adds the new permission + DOCTOR policy and
+  deletes the three retired permission rows. Because the
+  `policies.permission_id` FK is `ON DELETE NO ACTION`, the migration
+  deletes the dependent DOCTOR / MRO policy rows explicitly first, then
+  the permission rows. Apply with
   `pnpm --filter @hospital/api prisma migrate deploy`.
 - `POST /medical-records` and `PATCH /medical-records/:id` are
   removed. No other in-tree consumer exists (the F08 e2e specs and

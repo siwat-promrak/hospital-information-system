@@ -1681,7 +1681,23 @@ only thing left to choose is the patient.
 
 ---
 
-## E17 — Doctor workspace (P1, F17 `feat/doctor-workspace`)
+## E17 — Doctor workspace ✅ shipped (F17, `feat/doctor-workspace`)
+
+> **Delta from the original AC, captured during F17 implementation:**
+> The doctor surface landed as **two dedicated routes**, not an enhanced
+> appointment detail. (1) `/workspace` lists the doctor's visits split
+> into two sections — **Upcoming** (`BOOKED`) on top, **History**
+> (`COMPLETED` + `CANCELLED`) below. (2) Clicking a row opens a
+> **dedicated `/workspace/:id`** page (NOT `/appointments/:id`) that
+> hosts the patient panel, the medical-records history, and — for
+> `BOOKED` visits only — the note + actions panel. `/appointments/:id`
+> was reverted to its plain F09 read-only form for every role.
+> A new **`GET /patients/:id`** endpoint was added to feed the patient
+> panel. The medical-record cards show the **authoring doctor + department**
+> (the `GET /medical-records` response already carried both as nested
+> refs). The workspace list rows reuse `AppointmentListRow`; the row's
+> date/time is NOT a link — navigation is the patient-name link + the
+> right-edge arrow icon button.
 
 Today a doctor's only inbound surface is the generic `/appointments`
 list. Once they open an appointment, the page mixes patient demographics
@@ -1691,12 +1707,15 @@ thread (the patient's prior notes in the same case), and they can't
 write the visit's clinical note from this page (medical records had to
 be POSTed separately).
 
-E17 introduces a focused doctor surface: a dedicated **workspace** page
-listing the doctor's upcoming BOOKED appointments, and an enhanced
-appointment-detail view (rendered when the caller IS the appointment's
-doctor) that shows the patient panel, the **previous medical records
-in the same appointment group**, and a **note-taking panel** whose
-note + drug ride along with the doctor's chosen end-of-visit action.
+E17 introduces a focused doctor surface: a dedicated **workspace** list
+page (`/workspace`) that separates upcoming BOOKED visits from past
+ones, and a **dedicated workspace detail page** (`/workspace/:id`,
+reachable only when the caller IS the appointment's doctor) that shows
+the patient panel, the **medical-records history for the case**, and —
+while the visit is still `BOOKED` — a **note-taking panel** whose note +
+drug ride along with the doctor's chosen end-of-visit action. The plain
+`/appointments/:id` detail page stays unchanged for every role (no
+doctor panels, no end-of-visit buttons; cancel only).
 
 The visit-ending actions collapse the prior `Complete` / `Close Case`
 pair into a single **Complete** (always closes the group) and add
@@ -1734,9 +1753,9 @@ Post-delta the `medical_records.*` family holds exactly one code
 ### US-17.1 — Doctor lands on a focused workspace
 
 **US-17.1** — As a DOCTOR holding `doctor_workspace.read.own`, I want a
-dedicated `/workspace` page listing my own upcoming BOOKED
-appointments sorted by start time, so that I can pick the next visit
-without filtering the generic `/appointments` list.
+dedicated `/workspace` page listing my visits — upcoming ones first,
+past ones below — so that I can pick the next visit and review recent
+ones without filtering the generic `/appointments` list.
 
 **Acceptance criteria:**
 
@@ -1744,12 +1763,21 @@ without filtering the generic `/appointments` list.
   exposes a "Workspace" nav item whose visibility is gated on
   `doctor_workspace.read.own` (NURSE / MRO / PHARMACY / ADMIN do not
   see it).
-- The page server-fetches `GET /appointments?status=BOOKED&from=<today>&order=asc&doctorId=<caller.doctor.id>`
-  via the existing list endpoint. The BE narrows by `appointment.read.own`
-  scope; no new BE endpoint is introduced.
-- Each row shows: start time (locale-aware), patient full name + HN,
-  appointment type chip, department name, and a "Start visit" link to
-  `/appointments/:id`.
+- The page renders **two sections**:
+  - **Upcoming** — `GET /appointments?status=BOOKED&from=<today>&order=asc&doctorId=<caller.doctor.id>`.
+  - **History** — `COMPLETED` + `CANCELLED` visits, `order=desc`.
+    Because the BE list endpoint filters a single `status` at a time,
+    the FE issues two parallel calls (one per status) and merges +
+    sorts them by `startAt` descending. Each section paginates
+    independently via its own query param (`upcomingPage` /
+    `historyPage`).
+  - The BE narrows by `appointment.read.own` scope; **no new list
+    endpoint is introduced** for the workspace queue.
+- Rows reuse the shared `AppointmentListRow` component: patient full
+  name (linked) + HN, start–end time, doctor · department, and
+  type + status chips. Row navigation is the patient-name link plus a
+  right-edge **arrow icon button** — the date/time itself is NOT a
+  link. Each row links to **`/workspace/:id`** (not `/appointments/:id`).
 - Pagination, locale, and "today" boundaries follow the existing
   `/appointments` conventions.
 - A DOCTOR direct-loading `/workspace` without `doctor_workspace.read.own`
@@ -1758,42 +1786,52 @@ without filtering the generic `/appointments` list.
 
 ### US-17.2 — Doctor sees the visit thread + patient panel
 
-**US-17.2** — As the appointment's doctor opening `/appointments/:id`,
-I want to see the patient demographics, the appointment metadata
-(already there), and **every previous medical record in the same
-appointment group**, so that I have the visit's clinical context
-without paging through prior appointments.
+**US-17.2** — As the appointment's doctor opening `/workspace/:id`,
+I want to see the patient demographics, the appointment metadata, and
+the **medical records for the case**, so that I have the visit's
+clinical context without paging through prior appointments.
 
 **Acceptance criteria:**
 
-- The doctor view of `/appointments/:id` (rendered when
-  `me.doctor?.id === appointment.doctorId`) shows three new sections in
-  addition to the existing detail card:
+- `/workspace/:id` is gated on `doctor_workspace.read.own` AND verifies
+  `me.doctor?.id === appointment.doctorId`; a caller who isn't this
+  appointment's doctor (or lacks the permission) gets the generic
+  not-found / forbidden card (no existence leak).
+- The page renders, below a "Back to workspace" button and the
+  appointment summary card:
   1. **Patient panel** — name (en + th when present), HN, DOB,
      gender, blood group, phone, emergency contact triplet, address.
-  2. **Visit thread** — every `MedicalRecord` row belonging to the
-     same `appointment_group_id`, sorted by `createdAt ASC`, rendered
-     read-only with the authoring doctor name + the visit number
-     stamped on the row. Empty state when there are no previous
-     records (first visit of the thread).
-  3. **Note panel** — see US-17.3.
-- The thread is fetched via
-  `GET /medical-records?appointmentGroupId=<id>&pageSize=all`. This
-  feature adds the new `appointmentGroupId` query filter; everything
-  else on the endpoint is unchanged.
-- For appointments **without** an `appointment_group_id` (standalone
-  visit not yet continued), the Visit thread section is omitted.
-- The non-doctor view (NURSE / MRO / PHARMACY) of the same URL is
-  unchanged from F09 — they see the existing detail card with no
-  panels and no action buttons (the F09 Complete / Refer / Close
-  buttons are removed for everyone in this feature; cancel stays).
+     The full patient row is fetched via the new **`GET /patients/:id`**
+     endpoint (added in this feature — gated on `patient.read`,
+     returns `404 PATIENT_NOT_FOUND` for unknown / soft-deleted ids).
+  2. **Medical-records history** — `MedicalRecord` rows rendered
+     read-only, each card showing the **authoring doctor (name +
+     `doctorCode`) + department**, the visit number, the timestamp,
+     the note, and the drug. Two fetch modes:
+     - Grouped visit → every record in the case via
+       `GET /medical-records?appointmentGroupId=<id>&pageSize=all`
+       (this feature adds the `appointmentGroupId` query filter).
+     - Standalone past visit (no group) → this appointment's own
+       record via `GET /medical-records?appointmentId=<id>&pageSize=all`,
+       so a completed one-off visit still surfaces its note.
+     The section renders whenever the visit is grouped OR is a past
+     (non-`BOOKED`) visit; a `BOOKED` standalone visit has no record
+     yet, so it is omitted there.
+  3. **Note panel** — see US-17.3. Rendered **only while `BOOKED`**;
+     `COMPLETED` / `CANCELLED` visits show a read-only status alert and
+     the records history with no action panel.
+- `/appointments/:id` is unchanged from F09 for every role (NURSE /
+  MRO / PHARMACY / DOCTOR alike): the plain read-only detail card, no
+  doctor panels, no end-of-visit buttons — cancel only. The F09
+  Complete / Refer / Close-Case buttons were removed from it; those
+  actions live exclusively in the workspace detail's note panel.
 
 ### US-17.3 — Doctor writes a note that submits with the end-of-visit action
 
 **US-17.3** — As the appointment's doctor, I want a single note +
-drug input on the appointment page whose contents submit **along with
-whichever end-of-visit action I take**, so that I can never finish a
-visit without leaving a clinical record.
+drug input on the workspace detail page whose contents submit **along
+with whichever end-of-visit action I take**, so that I can never finish
+a visit without leaving a clinical record.
 
 **Acceptance criteria:**
 
