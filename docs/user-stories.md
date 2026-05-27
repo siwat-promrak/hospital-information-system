@@ -876,18 +876,23 @@ slot, so that the patient is scheduled.
   iff `appointmentType=PROCEDURE`; the `@ValidateIf` was removed in F16
   — clinical narrative belongs on the visit's medical record, not on
   the appointment row). Stored as Postgres `text` (no length cap).
-- **Standalone vs. continuation partition** (F14 + F16) — the
-  `(previousAppointmentId, appointmentType)` pair forms a clean split:
+- **Standalone vs. continuation partition** (F14 + F16 + F17) — the
+  `(previousAppointmentId, appointmentType)` pair forms a complementary
+  partition of `AppointmentType`:
   - Standalone booking (`previousAppointmentId` absent): `appointmentType`
     MUST equal `NEW_PATIENT_VISIT`; any other type returns
     `400 STANDALONE_APPOINTMENT_TYPE_INVALID`.
   - Continuation booking (`previousAppointmentId` set): `appointmentType`
-    MUST be `FOLLOW_UP` or `PROCEDURE`; otherwise
+    MUST be one of `FOLLOW_UP` / `PROCEDURE` / `CONSULTATION` (i.e.
+    every type EXCEPT `NEW_PATIENT_VISIT`); otherwise
     `400 CONTINUATION_APPOINTMENT_TYPE_INVALID`.
   - A clinical thread therefore starts with one `NEW_PATIENT_VISIT` and
-    continues with `FOLLOW_UP` / `PROCEDURE` visits. `CONSULTATION` is
-    currently unreachable through this endpoint — it stays in the
-    `AppointmentType` enum for future use.
+    continues with `FOLLOW_UP` / `PROCEDURE` / `CONSULTATION` visits.
+  - The booking wizard's appointment-type select mirrors this partition
+    (F17): standalone flow → only `NEW_PATIENT_VISIT`; continuation
+    flow → every type the department offers except `NEW_PATIENT_VISIT`.
+    A pre-filled type from the `/find-slot` deep link bypasses the
+    filter so a slot-finder choice survives intact.
 - Endpoint requires any `appointment.create.{own|own-department}`.
   Scope enforcement (via `resolveAppointmentCreateScope`):
   - NURSE (`.own-department`): `departmentId` MUST equal
