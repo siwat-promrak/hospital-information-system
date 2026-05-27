@@ -30,13 +30,14 @@
  *   - 48 policies (9 ADMIN + 14 DOCTOR + 14 NURSE +
  *     8 MEDICAL_RECORDS_OFFICER + 3 PHARMACY; F18 removes 2 from DOCTOR +
  *     1 from MRO)
- *   - 81 users — 1 super-admin + 2 ADMIN + 1 NURSE +
- *     1 MEDICAL_RECORDS_OFFICER + 1 PHARMACY + 75 DOCTOR
+ *   - 225 users — 1 super-admin + 2 ADMIN + 100 NURSE (1 hand-crafted +
+ *     99 generated) + 1 MEDICAL_RECORDS_OFFICER + 20 PHARMACY (1 hand-
+ *     crafted + 19 generated) + 100 DOCTOR (25 hand-crafted + 75 generated)
  *   - 10 departments
  *   - ~35 department_appointment_types (per-department allowed types)
- *   - 10 patients (5 MALE + 5 FEMALE)
- *   - 75 doctors each anchored in a single department
- *   - 2700 doctor_schedules across the past 8 + next 4 weeks (12-week window)
+ *   - 1000 patients (10 hand-crafted + 990 generated)
+ *   - 100 doctors each anchored in a single department
+ *   - 3600 doctor_schedules across the past 8 + next 4 weeks (12-week window)
  *
  * Appointment + medical_records rows are NOT seeded — they are created via
  * application workflows in later features.
@@ -47,8 +48,10 @@ import { seedDepartmentAppointmentTypes } from './department-appointment-types';
 import { seedDepartments } from './departments';
 import { seedDoctorSchedules } from './doctor-schedules';
 import { seedDoctors } from './doctors';
+import { seedNurses } from './nurses';
 import { seedPatients } from './patients';
 import { seedPermissions } from './permissions';
+import { seedPharmacies } from './pharmacies';
 import { seedPolicies } from './policies';
 import { seedRoles } from './roles';
 import { assignSuperAdminRole, seedSuperAdmin } from './super-admin';
@@ -67,6 +70,8 @@ async function main(): Promise<void> {
   // departmentId to anchor in.
   const departments = await seedDepartments(prisma, superAdmin);
   const users = await seedUsers(prisma, roles, departments, superAdmin);
+  const generatedNurses = await seedNurses(prisma, roles, departments, superAdmin);
+  const generatedPharmacies = await seedPharmacies(prisma, roles, superAdmin);
   const departmentAppointmentTypeCount = await seedDepartmentAppointmentTypes(
     prisma,
     departments,
@@ -82,11 +87,13 @@ async function main(): Promise<void> {
     permissions: 33,
     policies: policyCount,
     users:
-      1 +
+      1 + // super-admin
       users.admins.length +
-      1 + // NURSE
+      1 + // NURSE (hand-crafted)
+      generatedNurses.length +
       1 + // MEDICAL_RECORDS_OFFICER
-      1 + // PHARMACY
+      1 + // PHARMACY (hand-crafted)
+      generatedPharmacies.length +
       seededDoctors.users.length,
     departments: departments.length,
     departmentAppointmentTypes: departmentAppointmentTypeCount,

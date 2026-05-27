@@ -1979,6 +1979,26 @@ end up with a `COMPLETED` appointment and no booked continuation
   standalone-type guard (which would reject FOLLOW_UP without a
   previous) does not fire.
 
+> **Amendment 2026-05-27 (`fix/follow-up-strict-be-hide-fe-button`,
+> supersedes `fix/follow-up-department-type-relaxation`):**
+> the original AC routed every step through the `(departmentId, FOLLOW_UP)`
+> row in `department_appointment_types` for the slot duration + booking
+> window. Two seed departments (General Surgery, Emergency Medicine)
+> didn't carry that row and the Follow Up action surfaced
+> `400 DEPARTMENT_TYPE_NOT_ALLOWED`. The seed now defines `FOLLOW_UP`
+> on those two departments (single source of truth restored), and the
+> doctor workspace's Follow Up button is conditionally rendered: the
+> FE pre-checks the appointment department's allowed types via
+> `GET /departments/:id/appointment-types` and hides the button when
+> `FOLLOW_UP` isn't offered, so the doctor never sees a dead click. The
+> BE follow-up endpoint stays strict and continues to throw
+> `400 DEPARTMENT_TYPE_NOT_ALLOWED` when the catalog row is missing —
+> the catalog remains the canonical gate for every booking flow. A
+> previous iteration of this branch (`fix/follow-up-department-type-relaxation`,
+> PR #32) introduced a BE fallback to a 15-minute default; that
+> fallback was rolled back in favour of FE-side button hiding so the
+> catalog stays authoritative.
+
 ### US-18.6 — Doctor refers to another department
 
 **US-18.6** — As the appointment's doctor, I want **Refer** to keep

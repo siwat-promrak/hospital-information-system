@@ -132,6 +132,7 @@ const SPECS: DepartmentTypeSpec[] = [
     departmentName: 'General Surgery',
     rules: [
       { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
       { appointmentType: AppointmentType.CONSULTATION },
       { appointmentType: AppointmentType.PROCEDURE },
     ],
@@ -140,6 +141,7 @@ const SPECS: DepartmentTypeSpec[] = [
     departmentName: 'Emergency Medicine',
     rules: [
       { appointmentType: AppointmentType.NEW_PATIENT_VISIT },
+      { appointmentType: AppointmentType.FOLLOW_UP },
       { appointmentType: AppointmentType.CONSULTATION },
     ],
   },

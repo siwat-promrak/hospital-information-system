@@ -14,9 +14,15 @@ import WorkspaceNotePanel from "@/components/appointment/WorkspaceNotePanel";
 import { K, NS } from "@/i18n/keys.generated";
 import type { AppLocale } from "@/i18n/routing";
 import { getAppointment } from "@/lib/api/appointment.api";
-import { APPOINTMENT_ERROR_CODE } from "@/lib/api/appointment.const";
+import {
+  APPOINTMENT_ERROR_CODE,
+  FOLLOW_UP_APPOINTMENT_TYPE,
+} from "@/lib/api/appointment.const";
 import { getMe } from "@/lib/api/auth.api";
-import { listDepartments } from "@/lib/api/department.api";
+import {
+  getDepartmentAppointmentTypes,
+  listDepartments,
+} from "@/lib/api/department.api";
 import { getPatient } from "@/lib/api/patient.api";
 import { DEFAULT_PAGE, MAX_PAGE_SIZE } from "@/lib/api/pagination.const";
 import { dayjs } from "@/lib/dayjs";
@@ -137,6 +143,18 @@ export default async function WorkspaceDetailPage({
   const departmentsResult = needsDeptCatalog
     ? await listDepartments({ page: DEFAULT_PAGE, pageSize: MAX_PAGE_SIZE })
     : null;
+
+  // F18 — pre-check whether this appointment's department offers
+  // FOLLOW_UP. The BE rejects with `DEPARTMENT_TYPE_NOT_ALLOWED` when it
+  // doesn't, so the workspace hides the Follow Up button entirely instead
+  // of letting the doctor land on a dead click. Only needed for BOOKED
+  // (the only state that renders the note panel + buttons).
+  const departmentTypes = isBooked
+    ? await getDepartmentAppointmentTypes(appointment.departmentId)
+    : null;
+  const canFollowUp =
+    departmentTypes?.some((t) => t.code === FOLLOW_UP_APPOINTMENT_TYPE) ??
+    false;
 
   const start = dayjs(appointment.startAt).locale(locale);
   const end = dayjs(appointment.endAt).locale(locale);
@@ -272,6 +290,7 @@ export default async function WorkspaceDetailPage({
           sourceDepartmentId={appointment.departmentId}
           departments={departmentsResult?.data ?? []}
           appointmentGroupId={appointment.appointmentGroupId}
+          canFollowUp={canFollowUp}
           locale={locale}
         />
       ) : null}

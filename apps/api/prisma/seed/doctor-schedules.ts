@@ -8,7 +8,7 @@
  * for the seeded doctors first, then re-insert. This is safe because no
  * other seeder touches `DoctorSchedule`.
  *
- * Volume: 75 doctors × 3 weekdays × 12 weeks = 2700 schedules.
+ * Volume: 100 doctors × 3 weekdays × 12 weeks = 3600 schedules.
  *
  * Post the Item-3 centralisation, the doctor's home department lives on
  * `User.departmentId` (Doctor no longer carries its own column). The seed
