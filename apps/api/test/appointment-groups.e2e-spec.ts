@@ -485,6 +485,16 @@ async function teardownFixturesByNames(prisma: PrismaService): Promise<void> {
     },
   });
 
+  // F21: delete child windows before the parent DAT rows (FK constraint).
+  const datIds = await prisma.departmentAppointmentType.findMany({
+    where: { departmentId: { in: departmentIds } },
+    select: { id: true },
+  });
+
+  await prisma.departmentAppointmentTypeWindow.deleteMany({
+    where: { departmentAppointmentTypeId: { in: datIds.map((d) => d.id) } },
+  });
+
   await prisma.departmentAppointmentType.deleteMany({
     where: { departmentId: { in: departmentIds } },
   });
@@ -1093,7 +1103,8 @@ describe('F14 — appointment groups + referrals e2e', () => {
 
     const completeRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/complete`)
-      .set('Authorization', `Bearer ${doctorBJwt}`);
+      .set('Authorization', `Bearer ${doctorBJwt}`)
+      .send({ note: 'Complete note' });
     expect(completeRes.status).toBe(200);
 
     // NEW_PATIENT_VISIT is the only type that cannot be used as a
