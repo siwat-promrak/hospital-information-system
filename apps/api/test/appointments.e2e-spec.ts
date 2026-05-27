@@ -32,6 +32,9 @@
  *    - Out-of-scope row → 404 APPOINTMENT_NOT_FOUND.
  *  - POST /appointments/:id/cancel
  *    - Happy cancel → slot is freed (re-book same slot returns 201).
+ *      Response carries `cancelledByUser` populated with the caller name.
+ *    - Empty cancellationReason → 400 VALIDATION_FAILED.
+ *    - Whitespace-only cancellationReason → 400 VALIDATION_FAILED.
  *    - Already-cancelled → 409 APPOINTMENT_ALREADY_CANCELLED.
  *    - Scope violation (NURSE on foreign dept) → 403.
  *
@@ -1162,6 +1165,12 @@ describe('F09 — appointments e2e', () => {
       expect(cancelRes.body.status).toBe('CANCELLED');
       expect(cancelRes.body.cancellationReason).toBe('Patient no-show');
       expect(cancelRes.body.cancelledAt).toEqual(expect.any(String));
+      expect(cancelRes.body.cancelledBy).toBe(fixtures!.nurseHome.user.id);
+      expect(cancelRes.body.cancelledByUser).toEqual({
+        id: fixtures!.nurseHome.user.id,
+        firstNameEn: fixtures!.nurseHome.user.firstNameEn,
+        lastNameEn: fixtures!.nurseHome.user.lastNameEn,
+      });
 
       // Now re-book the same slot via API — must succeed since CANCELLED
       // rows do NOT block. NEW_PATIENT_VISIT is the standalone type.
@@ -1180,12 +1189,34 @@ describe('F09 — appointments e2e', () => {
       expect(rebookRes.status).toBe(201);
     });
 
+    maybe('Empty cancellationReason → 400 VALIDATION_FAILED', async () => {
+      const jwt = await jwtFor(fixtures!.nurseHome);
+      const res = await request(server)
+        .post(`/api/v1/appointments/${cancellableId}/cancel`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ cancellationReason: '' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe(ErrorCode.VALIDATION_FAILED);
+    });
+
+    maybe('Whitespace-only cancellationReason → 400 VALIDATION_FAILED', async () => {
+      const jwt = await jwtFor(fixtures!.nurseHome);
+      const res = await request(server)
+        .post(`/api/v1/appointments/${cancellableId}/cancel`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ cancellationReason: '   ' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe(ErrorCode.VALIDATION_FAILED);
+    });
+
     maybe('Already-cancelled → 409 APPOINTMENT_ALREADY_CANCELLED', async () => {
       const jwt = await jwtFor(fixtures!.nurseHome);
       const res = await request(server)
         .post(`/api/v1/appointments/${cancellableId}/cancel`)
         .set('Authorization', `Bearer ${jwt}`)
-        .send({});
+        .send({ cancellationReason: 'Already cancelled retry' });
 
       expect(res.status).toBe(409);
       expect(res.body.code).toBe(ErrorCode.APPOINTMENT_ALREADY_CANCELLED);
@@ -1205,7 +1236,7 @@ describe('F09 — appointments e2e', () => {
       const res = await request(server)
         .post(`/api/v1/appointments/${foreignRow.id}/cancel`)
         .set('Authorization', `Bearer ${jwt}`)
-        .send({});
+        .send({ cancellationReason: 'Scope check' });
 
       expect(res.status).toBe(403);
       expect(res.body.code).toBe(ErrorCode.INSUFFICIENT_PERMISSION_SCOPE);

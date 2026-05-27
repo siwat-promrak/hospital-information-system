@@ -811,7 +811,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const cancelRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/cancel`)
       .set('Authorization', `Bearer ${nurseAJwt}`)
-      .send({});
+      .send({ cancellationReason: 'Cancelled for test setup' });
     expect(cancelRes.status).toBe(200);
 
     const completeRes = await request(server)
@@ -920,7 +920,7 @@ describe('F14 — appointment groups + referrals e2e', () => {
     const cancelRes = await request(server)
       .post(`/api/v1/appointments/${apptRes.body.id}/cancel`)
       .set('Authorization', `Bearer ${nurseAJwt}`)
-      .send({});
+      .send({ cancellationReason: 'Cancelled for test setup' });
     expect(cancelRes.status).toBe(200);
 
     const continueRes = await request(server)

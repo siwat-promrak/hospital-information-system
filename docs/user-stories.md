@@ -1028,8 +1028,17 @@ appointment, so that the slot becomes free for reuse.
 **Acceptance criteria:**
 
 - `POST /appointments/:id/cancel` sets `status=CANCELLED`,
-  `cancelledBy=<session.userId>`, `cancelledAt=now`, and optional
-  `cancellationReason` from the request body.
+  `cancelledBy=<session.userId>`, `cancelledAt=now`, and the required
+  `cancellationReason` from the request body. The reason MUST be a
+  non-empty string; the BE trims surrounding whitespace before
+  validating, so a body of `{ cancellationReason: "   " }` is rejected
+  with `400 VALIDATION_FAILED`.
+- The response carries a nested `cancelledByUser` ref
+  (`{ id, firstNameEn, lastNameEn }`) populated from the
+  `AppointmentsCancelledBy` Prisma relation so the FE can render
+  "Cancelled by &lt;Name&gt;" without an extra lookup. The scalar
+  `cancelledBy: string | null` (the cancelling user's UUID) stays on the
+  response for backward compatibility / direct UUID lookups.
 - Endpoint requires any `appointment.delete.{own|own-department}`.
   Scope enforcement (via `resolveAppointmentDeleteScope`):
   - DOCTOR (`.own`): `appointment.doctorId === caller.doctor.id`.
@@ -1041,6 +1050,16 @@ appointment, so that the slot becomes free for reuse.
   (verified by re-running US-6.2). Appointments do NOT carry
   `deletedAt` / `deletedBy` — `status=CANCELLED` replaces soft-delete.
 - UI shows a confirm dialog before calling the endpoint.
+
+**Amendment — 2026-05-27 (branch `feat/appointment-cancellation`):**
+
+- `cancellationReason` is now REQUIRED (previously optional). The BE
+  trims input and rejects empty / whitespace-only values with
+  `400 VALIDATION_FAILED`. The FE's cancel confirm dialog now requires
+  the user to type a reason before submission.
+- The response gained a `cancelledByUser` nested ref so the FE can
+  render the cancelling user's name on the appointment detail view; the
+  scalar `cancelledBy` UUID stays for compatibility.
 
 ---
 

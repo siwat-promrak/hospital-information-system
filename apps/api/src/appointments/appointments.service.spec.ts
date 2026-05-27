@@ -104,6 +104,11 @@ interface MockApptRow {
     user: { firstNameEn: string; lastNameEn: string };
   };
   department: { id: string; name: string };
+  cancelledByUser: {
+    id: string;
+    firstNameEn: string;
+    lastNameEn: string;
+  } | null;
 }
 
 function baseRow(overrides: Partial<MockApptRow> = {}): MockApptRow {
@@ -143,6 +148,7 @@ function baseRow(overrides: Partial<MockApptRow> = {}): MockApptRow {
       user: { firstNameEn: 'Doc', lastNameEn: 'Home' },
     },
     department: { id: HOME_DEPT_ID, name: 'Home' },
+    cancelledByUser: null,
     ...overrides,
   };
 }
@@ -694,5 +700,104 @@ describe('AppointmentsService.create — continuation validation', () => {
     expect(createSpy).toHaveBeenCalledTimes(1);
     expect(result.appointmentGroupId).toBe('group-new');
     expect(result.visitNumber).toBe(2);
+  });
+});
+
+/**
+ * Coverage for `cancel()` — happy path stamps the cancel audit cluster
+ * (status, cancelledAt, cancelledBy, cancellationReason, updatedBy) and
+ * the response carries the nested `cancelledByUser` ref so the FE can
+ * render "Cancelled by <Name>" without an extra lookup.
+ *
+ * The DTO-level validation cases (empty / whitespace-only reason →
+ * 400 VALIDATION_FAILED) live in `cancel-appointment.dto.spec.ts`
+ * because the ValidationPipe rejects the body before the service runs.
+ */
+describe('AppointmentsService.cancel', () => {
+  it('stamps the cancel audit cluster and exposes cancelledByUser on the response', async () => {
+    const bookedRow = baseRow();
+    const cancelledRow = baseRow({
+      status: AppointmentStatus.CANCELLED,
+      cancelledAt: new Date('2026-06-01T08:30:00.000Z'),
+      cancelledBy: NURSE_USER.id,
+      cancellationReason: 'Patient no-show',
+      cancelledByUser: {
+        id: NURSE_USER.id,
+        firstNameEn: NURSE_USER.firstNameEn,
+        lastNameEn: NURSE_USER.lastNameEn,
+      },
+    });
+    const updateSpy = jest.fn(async () => cancelledRow);
+
+    const prisma = {
+      appointment: {
+        findFirst: async () => ({
+          id: bookedRow.id,
+          doctorId: bookedRow.doctorId,
+          departmentId: bookedRow.departmentId,
+          status: bookedRow.status,
+        }),
+        update: updateSpy,
+      },
+    } as unknown as PrismaService;
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
+
+    const result = await service.cancel(NURSE_USER, APPT_ID, {
+      cancellationReason: 'Patient no-show',
+    });
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+
+    const callArgs = (updateSpy.mock.calls[0] as unknown as [unknown])[0] as {
+      data: {
+        status: AppointmentStatus;
+        cancelledAt: Date;
+        cancelledBy: string;
+        cancellationReason: string;
+        updatedBy: string;
+      };
+    };
+
+    expect(callArgs.data.status).toBe(AppointmentStatus.CANCELLED);
+    expect(callArgs.data.cancelledAt).toBeInstanceOf(Date);
+    expect(callArgs.data.cancelledBy).toBe(NURSE_USER.id);
+    expect(callArgs.data.cancellationReason).toBe('Patient no-show');
+    expect(callArgs.data.updatedBy).toBe(NURSE_USER.id);
+
+    expect(result.status).toBe(AppointmentStatus.CANCELLED);
+    expect(result.cancellationReason).toBe('Patient no-show');
+    expect(result.cancelledBy).toBe(NURSE_USER.id);
+    expect(result.cancelledByUser).toEqual({
+      id: NURSE_USER.id,
+      firstNameEn: NURSE_USER.firstNameEn,
+      lastNameEn: NURSE_USER.lastNameEn,
+    });
+  });
+
+  it('returns null cancelledByUser when the row has no cancelling user (BOOKED row mapper)', async () => {
+    const bookedRow = baseRow();
+    // toResponse is private but the mapper runs implicitly via cancel() —
+    // simulate by having the update return an un-cancelled row (defensive:
+    // proves the mapper preserves null when the relation is absent).
+    const updateSpy = jest.fn(async () => bookedRow);
+
+    const prisma = {
+      appointment: {
+        findFirst: async () => ({
+          id: bookedRow.id,
+          doctorId: bookedRow.doctorId,
+          departmentId: bookedRow.departmentId,
+          status: bookedRow.status,
+        }),
+        update: updateSpy,
+      },
+    } as unknown as PrismaService;
+    const service = new AppointmentsService(prisma, medicalRecordsStub);
+
+    const result = await service.cancel(NURSE_USER, APPT_ID, {
+      cancellationReason: 'Patient no-show',
+    });
+
+    expect(result.cancelledByUser).toBeNull();
   });
 });
