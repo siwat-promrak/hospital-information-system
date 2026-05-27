@@ -151,7 +151,7 @@ export default function ClearableSelect<V extends string | number>({
       return undefined;
     }
 
-    return (selected: V | "") => {
+    function renderSelected(selected: V | "") {
       if (selected === "") {
         return (
           <span style={{ opacity: 0.6 }}>{placeholder}</span>
@@ -161,7 +161,9 @@ export default function ClearableSelect<V extends string | number>({
       const match = options.find((opt) => opt.value === selected);
 
       return match ? match.label : String(selected);
-    };
+    }
+
+    return renderSelected;
   }, [showPlaceholder, placeholder, options]);
 
   const handleChange = useCallback(
