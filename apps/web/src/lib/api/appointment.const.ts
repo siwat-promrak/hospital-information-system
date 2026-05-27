@@ -112,12 +112,11 @@ export const APPOINTMENT_ERROR_CODE = {
   DEPARTMENT_TYPE_NOT_ALLOWED: "DEPARTMENT_TYPE_NOT_ALLOWED",
   DOCTOR_DEPARTMENT_MISMATCH: "DOCTOR_DEPARTMENT_MISMATCH",
   /**
-   * F13 — the proposed `startAt` falls outside the
-   * `(department, type)` row's `bookingWindowStartMinute` /
-   * `bookingWindowEndMinute` bounds. Surfaces when a direct API caller
-   * bypasses the wizard's window filter on `GET /slots`; the wizard's
-   * slot grid already hides forbidden slots so the user shouldn't hit
-   * this through normal flow.
+   * F13 + F21 — the proposed `startAt` / `endAt` slot does not fit
+   * inside any range in the `(department, type)` row's `bookingWindows`
+   * array. Surfaces when a direct API caller bypasses the wizard's
+   * window filter on `GET /slots`; the wizard's slot grid already hides
+   * forbidden slots so the user shouldn't hit this through normal flow.
    */
   APPOINTMENT_OUTSIDE_BOOKING_WINDOW: "APPOINTMENT_OUTSIDE_BOOKING_WINDOW",
   /**

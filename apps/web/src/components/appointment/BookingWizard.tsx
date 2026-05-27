@@ -354,15 +354,16 @@ export default function BookingWizard({
     }
   }, [doctor, departmentId]);
 
-  // F13 per-(department, type) booking-rule catalog. Once the user
-  // picks a department, we fetch `GET /departments/:id/appointment-types`
+  // F13 + F21 per-(department, type) booking-rule catalog. Once the
+  // user picks a department, we fetch `GET /departments/:id/appointment-types`
   // through the server action — each row carries the department-scoped
-  // `durationMinutes` plus the optional `bookingWindowStartMinute` /
-  // `bookingWindowEndMinute` bounds that drive both the type Select's
-  // window chip copy ("Before 11:00 only" / "From 13:00" / "09:00 –
-  // 11:00") AND the confirm-step duration summary. Before any
-  // department is picked the type Select is disabled, so an empty list
-  // is the correct skeleton state.
+  // `durationMinutes` plus a `bookingWindows` array (F21) of allowed
+  // wall-clock `[startMinute, endMinute)` ranges that drives both the
+  // type Select's window chip copy ("Before 11:00 only" / "From 13:00"
+  // / "09:00 – 11:00" / "09:00 – 11:00 or 14:00 – 16:00") AND the
+  // confirm-step duration summary. An empty array means unrestricted.
+  // Before any department is picked the type Select is disabled, so an
+  // empty list is the correct skeleton state.
   const [departmentTypes, setDepartmentTypes] = useState<
     readonly DepartmentAppointmentTypeRow[]
   >([]);

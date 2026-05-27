@@ -55,7 +55,8 @@
     "AppointmentTypeWindow": {
       "range": "{start} – {end}",
       "beforeOnly": "ก่อน {end} เท่านั้น",
-      "fromOnly": "ตั้งแต่ {start}"
+      "fromOnly": "ตั้งแต่ {start}",
+      "multiRangeJoin": " หรือ "
     },
     "AppointmentStatus": {
       "BOOKED": "นัดแล้ว",
