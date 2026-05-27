@@ -661,10 +661,32 @@
       "sourceDoctor": "By",
       "hnLabel": "HN",
       "viewAppointment": "Open source visit",
-      "bookFollowUp": "Book follow-up"
+      "bookFollowUp": "Book"
     },
     "Errors": {
       "forbidden": "You don't have permission to view referrals."
+    },
+    "BookDialog": {
+      "title": "Book referral",
+      "subtitle": "Pick a doctor, appointment type, date, then a slot for {patientName}.",
+      "doctorLabel": "Doctor",
+      "doctorPlaceholder": "Select a doctor",
+      "doctorLockedHelper": "Locked to your own doctor profile.",
+      "typeLabel": "Appointment type",
+      "dateLabel": "Date",
+      "dateHelper": "Pick a date — slots refresh below.",
+      "slotsTitle": "Open slots",
+      "selectDoctorFirst": "Pick doctor, type, and date to see open slots.",
+      "loadingSlots": "Loading slots…",
+      "emptySlots": "No open slots for this combination.",
+      "cancel": "Cancel",
+      "submit": "Confirm booking",
+      "missingDoctor": "Pick a doctor first.",
+      "missingType": "Pick an appointment type.",
+      "missingDate": "Pick a date.",
+      "missingSlot": "Pick a slot.",
+      "successToast": "Referral booking created.",
+      "genericError": "Could not book the referral. Please try again."
     }
   },
   "FindSlot": {

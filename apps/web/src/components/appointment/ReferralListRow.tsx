@@ -1,81 +1,81 @@
 "use client";
 
-import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Divider from "@mui/material/Divider";
-import IconButton from "@mui/material/IconButton";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 
-import { FE_PATH, FE_PATH_BUILDER } from "@/auth/routes";
+import ReferralBookDialog from "@/components/appointment/ReferralBookDialog";
 import {
   formatDoctorFullName,
   formatPatientFullName,
 } from "@/appointment/labels";
 import { K, NS } from "@/i18n/keys.generated";
-import { Link } from "@/i18n/navigation";
-import { APPOINTMENT_QUERY_PARAM } from "@/lib/api/appointment.const";
 import { dayjs } from "@/lib/dayjs";
+import type { PaginatedListInitial } from "@/lib/hooks/use-paginated-list";
 import type { AppointmentResponse } from "@/types/appointment.types";
+import type { DoctorListRow } from "@/types/doctor.types";
 
 interface ReferralListRowProps {
   appointment: AppointmentResponse;
   locale: string;
+  /**
+   * Whether the caller can book new appointments at all. When `false` the
+   * Book button hides — the row degrades to a read-only summary.
+   */
+  canBook: boolean;
+  /** Doctor picker SSR seed scoped to the caller's department. */
+  doctorSeed?: PaginatedListInitial<DoctorListRow>;
+  /** Doctor picker filter — caller's department for `.own-department`. */
+  doctorScopeDepartmentId?: string;
+  /** Caller's own doctor row when DOCTOR-with-`.own`-only — locks the picker. */
+  lockedDoctor?: DoctorListRow;
 }
 
 /**
  * One row on the F14 referrals pickup queue. Shows the patient, the
  * source department + doctor, the referred-at timestamp, and a primary
- * "Book follow-up" CTA that deep-links to the booking wizard with the
- * source appointment pre-filled via
- * `?previousAppointmentId=<id>`.
- *
- * A secondary "Open source visit" link surfaces the appointment detail
- * page for the source row so the receiving department can read up
- * before booking.
+ * "Book" CTA that opens an inline booking dialog (doctor + appointment
+ * type + date + slot) without leaving the queue. Submitting the dialog
+ * routes to the new appointment's detail page on success.
  */
 export default function ReferralListRow({
   appointment,
   locale,
+  canBook,
+  doctorSeed,
+  doctorScopeDepartmentId,
+  lockedDoctor,
 }: ReferralListRowProps) {
   const tList = useTranslations(NS.ReferralsList);
+  const [dialogOpen, setDialogOpen] = useState<boolean>(false);
 
   const referredAt = appointment.referredAt
     ? dayjs(appointment.referredAt).locale(locale)
     : null;
-  const sourceHref = FE_PATH_BUILDER.appointmentDetail(appointment.id);
-  const bookFollowUpHref = `${FE_PATH.APPOINTMENTS_NEW}?${APPOINTMENT_QUERY_PARAM.PREVIOUS_APPOINTMENT_ID}=${appointment.id}`;
 
   return (
     <>
       <Divider component="li" />
       <ListItem
         secondaryAction={
-          <Stack direction="row" spacing={1} alignItems="center">
+          canBook ? (
             <Button
-              component={Link}
-              href={bookFollowUpHref}
               variant="contained"
               color="primary"
               size="small"
+              onClick={() => setDialogOpen(true)}
             >
               {tList(K.Referrals.List.bookFollowUp)}
             </Button>
-            <IconButton
-              component={Link}
-              href={sourceHref}
-              edge="end"
-              aria-label={tList(K.Referrals.List.viewAppointment)}
-            >
-              <ArrowForwardIcon />
-            </IconButton>
-          </Stack>
+          ) : null
         }
-        sx={{ alignItems: "flex-start", py: 2, pr: { sm: 24 } }}
+        sx={{ alignItems: "flex-start", py: 2, pr: { sm: 16 } }}
       >
         <ListItemText
           slotProps={{
@@ -89,16 +89,7 @@ export default function ReferralListRow({
               alignItems={{ xs: "flex-start", sm: "baseline" }}
               flexWrap="wrap"
             >
-              <Typography
-                component={Link}
-                href={sourceHref}
-                sx={{
-                  color: "text.primary",
-                  textDecoration: "none",
-                  fontWeight: 600,
-                  "&:hover": { color: "primary.main" },
-                }}
-              >
+              <Typography sx={{ fontWeight: 600 }}>
                 {formatPatientFullName(appointment.patient)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
@@ -134,6 +125,16 @@ export default function ReferralListRow({
           }
         />
       </ListItem>
+      {canBook ? (
+        <ReferralBookDialog
+          open={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          referral={appointment}
+          lockedDoctor={lockedDoctor}
+          doctorSeed={doctorSeed}
+          doctorScopeDepartmentId={doctorScopeDepartmentId}
+        />
+      ) : null}
     </>
   );
 }

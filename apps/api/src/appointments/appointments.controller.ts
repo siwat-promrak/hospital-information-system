@@ -75,6 +75,7 @@ export class AppointmentsController {
       status: query.status,
       order: query.order,
       pendingReferralOnly: query.pendingReferralOnly,
+      includeReferralsToOwnDepartment: query.includeReferralsToOwnDepartment,
     });
   }
 

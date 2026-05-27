@@ -787,6 +787,15 @@ export class AppointmentsService {
     // `referredToDepartmentId = ownDept`. MRO (`.all`) sees referrals
     // to every destination department.
     const pickupQueueRequested = args.pendingReferralOnly === true;
+    // Continuation-picker widening (see `includeReferralsToOwnDepartment`
+    // on `ListAppointmentsArgs`). Only meaningful for scopes that
+    // narrow by department/doctor — `.all` already sees every row, and
+    // the pickup queue mode already widens by destination so stacking
+    // would be redundant. Requires the caller to have a department.
+    const widenByDestinationDept =
+      args.includeReferralsToOwnDepartment === true &&
+      !pickupQueueRequested &&
+      caller.departmentId !== null;
 
     if (scope === SCOPE.OWN) {
       if (!caller.doctor) {
@@ -803,7 +812,14 @@ export class AppointmentsService {
         );
       }
 
-      where.doctorId = caller.doctor.id;
+      if (widenByDestinationDept) {
+        where.OR = [
+          { doctorId: caller.doctor.id },
+          { referredToDepartmentId: caller.departmentId },
+        ];
+      } else {
+        where.doctorId = caller.doctor.id;
+      }
     } else if (scope === SCOPE.OWN_DEPARTMENT) {
       if (caller.departmentId === null) {
         throw AppException.forbidden(
@@ -828,6 +844,11 @@ export class AppointmentsService {
         // caller's own department — the user cannot peek into another
         // dept's queue.
         where.referredToDepartmentId = caller.departmentId;
+      } else if (widenByDestinationDept) {
+        where.OR = [
+          { departmentId: caller.departmentId },
+          { referredToDepartmentId: caller.departmentId },
+        ];
       } else {
         where.departmentId = caller.departmentId;
       }

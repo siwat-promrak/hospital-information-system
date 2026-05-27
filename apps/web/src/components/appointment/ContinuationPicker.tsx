@@ -95,6 +95,14 @@ export default function ContinuationPicker({
         // Rule-1 narrowing — see eligibility rules above. The BE filter
         // keeps the row count small even for patients with long histories.
         status: APPOINTMENT_STATUS.COMPLETED,
+        // Cross-department referrals — when the patient was referred FROM
+        // another department TO the caller's, the source (prior) visit
+        // lives in the foreign department and standard `.own` /
+        // `.own-department` scope filters it out. Widening here keeps the
+        // continuation picker honest: the referred-in patient's prior
+        // visit must surface so the caller can pick it as the continuation
+        // source.
+        includeReferralsToOwnDepartment: true,
       });
     },
     [patientId],

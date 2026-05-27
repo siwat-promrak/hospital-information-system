@@ -135,6 +135,7 @@ below live in `docs/user-stories.md`.
 | F19 ✅ | Medical-records browse screen | `feat/medical-records-screen` | FE-only dedicated `/medical-records` browse page for DOCTOR / NURSE / MRO / PHARMACY (any-of `medical_records.read.all`). Patient-first workflow: typeahead patient picker at the top, paginated medical-records list below, list/grid view toggle. URL state: `?patientId=&view=list\|grid&page=N`. Consumes the existing F08/F18 `GET /medical-records?patientId=…&page=N` endpoint — no BE wire contract changes. Reuses the F09 `<PatientPicker>` typeahead and shared `<PaginationControl>`. List mode renders the F18 visit-card layout full-bleed (doctor + code, department, recorded date, full note, optional drug); grid mode is a 1/2/3-column responsive grid with note clamped to 3 lines + drug to 2. Also lifts the missing `patient: MedicalRecordPatientRef` nested ref into the FE `MedicalRecordResponse` type — the BE has always returned it, only the type was out of date. | US-19.1, US-19.2 | F08 (BE endpoint), F18 (medical-record card visuals) | DOCTOR / NURSE / MRO / PHARMACY opens `/medical-records`, sees the empty-state hint; types into the patient picker → list populates; toggles list ↔ grid → page count preserved, view persists in URL; paginates → patient + view survive; clears the patient → URL strips `patientId` + `page`. ADMIN (no `medical_records.read.all`) sees the forbidden card on direct URL navigation; sidebar entry is hidden. | M | P1 |
 | F20 | Patients directory (list + register CTA)             | `feat/patients-list`    | FE-only: `/patients` list page (paginated, free-text `?q=` filter, permission-gated "Register patient" CTA) built on the existing `GET /patients` + `POST /patients` BE from F09. `PatientListRow` shows name (en + th), HN, DOB, gender, phone. Sidebar nav entry gated on `patient.read`. No `/patients/:id` detail page in this feature. | US-20.1, US-20.2 | F09 | Sign in as NURSE → `/patients` renders the patient list with pagination; register CTA visible. Sign in as PHARMACY → `/patients` renders the list (read only, no register CTA). Sign in as ADMIN → forbidden card (ADMIN lacks `patient.read`). Search box filters by name/phone/ID/HN. | S | P1 |
 | F21 | Multi-range booking windows                          | `feat/multi-range-booking-windows` | Replace F13's single `bookingWindowStart/EndMinute` columns on `department_appointment_types` with a child table `department_appointment_type_windows` (`startMinute`, `endMinute`, per-row CHECK `0 <= start < end <= 1440`) so a `(department, type)` can be bookable in N disjoint daily ranges (e.g. `09:00–11:00` ∪ `14:00–16:00`, or `before 11:00` ∪ `after 15:00`). One shared pure predicate `isSlotWithinBookingWindows(slotStart, slotEnd, windows)` — day-rollover-aware (a 23:30–00:00 slot's local end is **1440, not 0**, killing the F13 midnight-wrap class of bug) — is used by BOTH `SlotsService` (grid filter) and `AppointmentsService.create` (`APPOINTMENT_OUTSIDE_BOOKING_WINDOW` back-stop), so they can never disagree. Forward migration converts existing single windows into one child range each (NULL bounds → `0` / `1440`; both NULL → no rows = unrestricted). `GET /departments/:id/appointment-types` returns a `bookingWindows: [{startMinute,endMinute}]` array; the booking wizard renders multi-range copy. | US-21.1, US-21.2, US-21.3 | F13, F09 | See the **E21 test matrix** (17 rows) — every slot-finder case has a mirrored `POST /appointments` assertion: included slot → 201, excluded slot → 400 `APPOINTMENT_OUTSIDE_BOOKING_WINDOW`. Critical rows: a `[09:00–11:00, 14:00–16:00]` pair excludes 11:30/13:30 (gap) and includes 09:30/14:30; a `before-11`-only window excludes the 23:30 slot of a 16:00–00:00 schedule (the F13 regression); an `after-15` window includes it. | L | P1 |
+| F22 | Referral queue inline booking + cross-dept continuation visibility | `feat/referral-inline-book` | Replaces the F14 referrals queue's deep-link CTA (`/appointments/new?previousAppointmentId=<id>`) with an inline `<ReferralBookDialog>` mounted per-row — doctor select (locked + pre-filled for DOCTOR-with-`appointment.create.own`-only; picker scoped to the caller's department otherwise), continuation-only appointment-type select (`NEW_PATIENT_VISIT` excluded), date picker, slot grid (refreshes on `(doctor, type, date)` change), submit calls the standard `POST /appointments` with `previousAppointmentId` set to the source row. Drops the row's arrow-icon "Open source visit" button and the patient-name `Link` wrapper — the row is now a read-only summary plus the Book CTA. BE bug fix: adds `includeReferralsToOwnDepartment=true` to `GET /appointments`. When set, `.own` / `.own-department` scope widens to `OR(deptOrDoctor narrowing, referredToDepartmentId = caller.departmentId)` so the booking-wizard continuation picker surfaces a patient's prior visit even when that visit lives in another department but was referred TO the caller's. The pickup-queue path (`pendingReferralOnly=true`) keeps its existing dest-axis narrowing and is unaffected; `.all` callers are unaffected. | US-14.1 (amendment), US-14.5 (amendment) | F14 | Manual: NURSE in dept B opens `/referrals`, clicks Book on a row referred from dept A → dialog opens with doctor scoped to dept B; picks doctor + FOLLOW_UP + a date → slot grid loads; clicks a slot → Confirm becomes enabled; Confirm → routes to the new appointment's detail page; the source row drops off the pickup queue (referral fulfilled). Then in the booking wizard: a NURSE in dept B picks the same patient → the continuation picker now shows the prior visit (which lives in dept A but was referred to B); before the fix the picker was empty. `curl GET /appointments?patientId=…&includeReferralsToOwnDepartment=true` returns the cross-dept row, without the flag it does not. | S | P1 |
 
 > **F04, F10 were removed when patient sign-in / self-service was scoped out (2026-05-24).** The feature IDs are intentionally left as gaps — IDs stay stable so commit and PR references continue to resolve. F08 was repurposed for the medical records module and F09 absorbed the original "F08 staff booking" scope when the RBAC overhaul moved booking to NURSE (department-scoped) and DOCTOR (own-doctor) instead of a blanket STAFF role.
 
@@ -2277,6 +2278,157 @@ curl -i -X POST http://localhost:3001/api/v1/appointments \
   -d '{ "patientId":"…","doctorId":"…","departmentId":"…","appointmentType":"<TYPE>",
         "startAt":"<a 11:30 local instant in UTC>" }'
 # Expect: 400 APPOINTMENT_OUTSIDE_BOOKING_WINDOW.
+```
+
+---
+
+### F22 — Referral queue inline booking + cross-dept continuation visibility (P1, S)
+
+**Why a standalone feature**
+
+F14 left two rough edges that became visible once the referrals queue
+was in steady use:
+
+1. **Queue UX round-trip.** The pickup queue's primary CTA deep-linked
+   to `/appointments/new?previousAppointmentId=<id>`. The destination
+   department always lost the queue context for what is effectively a
+   three-input booking — patient and prior visit are already known; the
+   user only needs to pick doctor + appointment type + date + slot. A
+   full-page navigation + the wizard's four-step shell for that work is
+   the wrong shape.
+2. **Continuation picker invisibility.** `appointment.read.own-department`
+   narrowed `GET /appointments` to `where.departmentId = caller.departmentId`,
+   which is correct for the standard listing. But when the booking
+   wizard's continuation picker fired the SAME query for a patient
+   referred FROM dept A TO dept B, the prior visit in dept A was
+   filtered out — leaving the picker empty on the destination side even
+   though that visit IS the case the receiving staffer needs to continue.
+
+This feature lands the inline dialog + the BE widening together. Both
+ride the F14 referral plumbing (no new tables, no new permissions); the
+BE change is opt-in via a new query flag so existing listing surfaces
+are unchanged.
+
+**The one rule that matters — `includeReferralsToOwnDepartment`**
+
+`GET /appointments?includeReferralsToOwnDepartment=true` widens the
+caller's scope so destination-axis rows surface in addition to the
+standard narrowing:
+
+- `.own` scope (DOCTOR) →
+  `OR({ doctorId: caller.doctor.id }, { referredToDepartmentId: caller.departmentId })`.
+- `.own-department` scope (NURSE) →
+  `OR({ departmentId: caller.departmentId }, { referredToDepartmentId: caller.departmentId })`.
+- `.all` scope — flag is a no-op (caller already sees everything).
+- Caller with no `departmentId` — flag is a no-op (no widening to apply).
+- `pendingReferralOnly=true` already swaps narrowing for the dest axis;
+  the new flag is ignored on that path so the pickup queue's semantics
+  do not stack.
+
+The continuation picker passes the flag unconditionally. Other listing
+surfaces (appointments list, patient detail, find-slot) MUST NOT pass
+it — they keep the strict scope so a cross-dept incoming referral does
+not bleed into views where it has no business showing.
+
+**Files expected to change**
+
+Backend (`apps/api/`):
+- `appointments/dto/list-appointments.query.dto.ts` — add
+  `includeReferralsToOwnDepartment?: boolean` (`@IsOptional`,
+  `@IsBoolean`, `@Transform(value === 'true')` to match the existing
+  `pendingReferralOnly` boolean-string coercion).
+- `appointments/appointments.types.ts` — mirror the flag on
+  `ListAppointmentsArgs`.
+- `appointments/appointments.controller.ts` — thread the flag through
+  `list()` into the service args.
+- `appointments/appointments.service.ts` — in `list()`, after computing
+  `pickupQueueRequested`, derive
+  `widenByDestinationDept = flag === true && !pickupQueueRequested && caller.departmentId !== null`.
+  In the `.own` and `.own-department` branches, swap the single-key
+  equality for the `where.OR = [...]` shape above. `.all` and the
+  pickup queue branch are untouched.
+
+Frontend (`apps/web/`):
+- `lib/api/appointment.const.ts` — add
+  `INCLUDE_REFERRALS_TO_OWN_DEPARTMENT: "includeReferralsToOwnDepartment"`
+  to `APPOINTMENT_QUERY_PARAM` (no magic strings — CLAUDE.md §2b).
+- `lib/api/appointment.api.ts` + `lib/api/appointment.actions.ts` —
+  add the param to the params + action arg shapes; thread it through
+  `buildPaginationQuery`'s `extraParams` slot.
+- `components/appointment/ContinuationPicker.tsx` — pass
+  `includeReferralsToOwnDepartment: true` in its `loadPage` closure.
+- `components/appointment/ReferralBookDialog.tsx` (NEW) — mirrors the
+  booking wizard's slot step: `<DoctorSelect>` (scoped to
+  `referredToDepartmentId ?? departmentId`, disabled + pre-filled when
+  the caller's effective create scope is `appointment.create.own` only),
+  `<AppointmentTypeSelect>` narrowed via
+  `isContinuationAppointmentType` (no `NEW_PATIENT_VISIT`), HTML date
+  input with `min={todayLocalISODate()}`, slot grid that re-fetches via
+  `loadSlotsAction` on any of `(doctor, type, date)` change with a
+  `slotRequestSeq` ref to drop stale responses, submit calls
+  `createAppointmentAction` with `previousAppointmentId = referral.id`
+  and routes to the new appointment's detail page on success. State
+  is reset on close so a re-open starts clean.
+- `components/appointment/ReferralListRow.tsx` — replace the deep-link
+  `<Button component={Link} href=…>` with `onClick={() => setOpen(true)}`,
+  drop the trailing `ArrowForwardIcon` `<IconButton>` and the patient-
+  name `<Typography component={Link}>` wrapper (the row is now read-
+  only summary + Book CTA). Accept new props for the dialog plumbing:
+  `canBook`, `doctorSeed`, `doctorScopeDepartmentId`, `lockedDoctor`.
+- `app/[locale]/(app)/referrals/page.tsx` — resolve the dialog plumbing
+  server-side: derive `canBook` from `appointment.create.*`,
+  `isCreateOwnOnly` to compute `lockedDoctor` via `getMe()` + `getDoctor()`,
+  and `doctorSeed` via `fetchDoctorPickerSeed({ departmentId: callerDept })`.
+  Thread them into each `<ReferralListRow>`.
+- `messages/en.json` + `messages/th.json` — rename
+  `Referrals.List.bookFollowUp` text to "Book" / "จอง" (key stays
+  stable). Add a new `Referrals.BookDialog.*` namespace (title,
+  subtitle, doctor/type/date labels, slot panel copy, missing-input
+  errors, success / generic-error toasts). Re-run `pnpm gen:i18n`.
+
+**Files NOT touched**
+
+- `POST /appointments` — unchanged. The dialog posts the same payload
+  the wizard does (`previousAppointmentId` set), so F14's continuation
+  + referral-fulfilment transaction handles it natively. No new error
+  codes.
+- `pendingReferralOnly` semantics — unchanged. The pickup queue still
+  narrows on the destination axis; `includeReferralsToOwnDepartment` is
+  inert on that path.
+- Permission catalog — no new codes; both halves of F22 ride existing
+  `appointment.{read,create}.{own,own-department}`.
+
+**Reviewer smoke test**
+
+```bash
+# 1. Cross-dept continuation visibility — without the flag, the
+#    cross-dept row is filtered out:
+curl -s -H "Cookie: next-auth.session-token=<dept-B-NURSE-jwt>" \
+  "http://localhost:3001/api/v1/appointments?patientId=<referred-patient>&status=COMPLETED" \
+  | jq '.data | length'
+# Expect: 0 (the prior visit lives in dept A, which the caller's
+# .own-department scope filters out).
+
+# 2. Same call with the flag — the cross-dept referred row surfaces:
+curl -s -H "Cookie: next-auth.session-token=<dept-B-NURSE-jwt>" \
+  "http://localhost:3001/api/v1/appointments?patientId=<referred-patient>&status=COMPLETED&includeReferralsToOwnDepartment=true" \
+  | jq '.data | .[0].departmentId, .[0].referredToDepartmentId'
+# Expect: dept-A-id, dept-B-id (the source dept + the destination dept).
+
+# 3. UI walk-through (NURSE in dept B, dept B has a pending referral
+#    from dept A):
+#    - Open /en/referrals → row renders without the arrow icon, patient
+#      name is plain text, primary CTA reads "Book".
+#    - Click Book → dialog opens, doctor select is scoped to dept B,
+#      appointment-type select offers FOLLOW_UP / PROCEDURE /
+#      CONSULTATION (no NEW_PATIENT_VISIT), date picker defaults to
+#      today.
+#    - Pick doctor + FOLLOW_UP + a date → slot grid loads; click a slot
+#      → Confirm enables.
+#    - Confirm → navigates to /en/appointments/<newId>; reopening
+#      /en/referrals → the source row is gone (referral fulfilled).
+#    - Open /en/appointments/new → pick the same patient → continuation
+#      picker now shows the prior visit (dept A) as a Yes-branch row.
 ```
 
 ---

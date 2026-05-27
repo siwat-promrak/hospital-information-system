@@ -87,4 +87,19 @@ export class ListAppointmentsQueryDto extends PaginationQueryDto {
   @IsBoolean()
   @Transform(({ value }) => value === true || value === 'true')
   pendingReferralOnly?: boolean;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      "Widen the caller's scope so rows where `referredToDepartmentId = " +
+      "caller.departmentId` also match, in addition to the standard `.own` " +
+      "/ `.own-department` narrowing. Used by the booking-wizard " +
+      'continuation picker so a patient referred FROM another department ' +
+      "TO the caller's department still surfaces their prior visit. " +
+      'Ignored for `.all` scope and when the caller has no departmentId.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true')
+  includeReferralsToOwnDepartment?: boolean;
 }

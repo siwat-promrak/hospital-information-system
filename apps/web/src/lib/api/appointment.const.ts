@@ -59,6 +59,13 @@ export const APPOINTMENT_QUERY_PARAM = {
    * straight into the wizard with the prior visit pre-supplied.
    */
   PREVIOUS_APPOINTMENT_ID: "previousAppointmentId",
+  /**
+   * BE-bound — widen `.own` / `.own-department` scope so rows referred
+   * TO the caller's department also surface. Used by the booking-wizard
+   * continuation picker to expose prior visits in foreign departments
+   * that have a pending referral pointing back at the caller's dept.
+   */
+  INCLUDE_REFERRALS_TO_OWN_DEPARTMENT: "includeReferralsToOwnDepartment",
 } as const;
 
 export type AppointmentQueryParam =

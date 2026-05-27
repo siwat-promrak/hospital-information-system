@@ -194,6 +194,7 @@ interface ListAppointmentsActionArgs {
   status?: AppointmentStatus;
   order?: AppointmentListOrder;
   pendingReferralOnly?: boolean;
+  includeReferralsToOwnDepartment?: boolean;
 }
 
 /**

@@ -1466,6 +1466,24 @@ that the new appointment is linked into the same clinical thread.
 > excludes ungrouped COMPLETED rows entirely — see the updated rule
 > above.
 
+> **Amendment 2026-05-27 (F22 — cross-department continuation visibility):**
+> the original acceptance criterion was silent on what happens when a
+> patient was referred FROM dept A TO dept B and a staffer in dept B
+> opens the wizard to book the destination visit. Under the F09 scope
+> rules, `appointment.read.own-department` narrowed `GET /appointments`
+> to `where.departmentId = caller.departmentId`, so the prior visit in
+> dept A would be filtered out — leaving the picker empty even though
+> the referral target IS the caller's own dept. `GET /appointments`
+> now accepts `includeReferralsToOwnDepartment=true`: when set, the
+> service widens `.own` / `.own-department` scope to
+> `OR(deptOrDoctor scope, referredToDepartmentId = callerDept)` so a
+> referred-in patient's source visit surfaces alongside the caller's
+> own-dept rows. The continuation picker passes the flag unconditionally;
+> the pickup-queue path (`pendingReferralOnly=true`) keeps its existing
+> dest-axis narrowing and is unaffected. `.all` callers are unaffected
+> (they already see everything); callers with no `departmentId` get the
+> old narrowing (no widening to apply).
+
 ### US-14.2 — Group materialises lazily on continuation booking
 
 **US-14.2** — As the backend, I want a group to be created
@@ -1551,6 +1569,26 @@ that the referral flow completes end-to-end.
 - The booked appointment joins (or creates) the source row's group —
   the patient's case now spans two departments with consecutive
   `visit_number` values.
+
+> **Amendment 2026-05-27 (F22 — inline Book dialog):**
+> the original acceptance criterion routed the queue's Book CTA to the
+> standalone `/appointments/new` booking wizard with
+> `?previousAppointmentId=<srcId>` pre-filled. That round-trip cost the
+> receiving department a full page navigation for what is effectively a
+> three-input booking (doctor + appointment type + date → slot — patient
+> and prior visit are already known). The queue's primary CTA is now an
+> inline dialog mounted per-row. The dialog mirrors the wizard's slot
+> step: doctor select (pre-filled + locked when the caller's effective
+> create scope is `appointment.create.own` only; picker scoped to the
+> caller's department otherwise), an appointment-type select narrowed
+> to continuation types (i.e. every dept-allowed type except
+> `NEW_PATIENT_VISIT`), a date picker, and a slot grid that re-fetches
+> on any of `(doctor, type, date)` change. Submit posts the same
+> `POST /appointments` payload with `previousAppointmentId` set to the
+> source row's id and routes the caller to the new appointment's
+> detail page on success. The deprecated arrow-icon "open source visit"
+> button and the patient-name `Link` wrapper are removed — the queue
+> row is now a read-only summary plus the Book CTA.
 
 ### US-14.6 — Doctor closes a case
 

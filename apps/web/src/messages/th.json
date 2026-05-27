@@ -661,10 +661,32 @@
       "sourceDoctor": "โดย",
       "hnLabel": "HN",
       "viewAppointment": "เปิดนัดต้นทาง",
-      "bookFollowUp": "จองนัดต่อเนื่อง"
+      "bookFollowUp": "จอง"
     },
     "Errors": {
       "forbidden": "คุณไม่มีสิทธิ์ดูคิวรับการส่งต่อ"
+    },
+    "BookDialog": {
+      "title": "จองนัดจากการส่งต่อ",
+      "subtitle": "เลือกแพทย์ ประเภทนัด วันที่ และช่วงเวลาสำหรับ {patientName}",
+      "doctorLabel": "แพทย์",
+      "doctorPlaceholder": "เลือกแพทย์",
+      "doctorLockedHelper": "ล็อกเป็นโปรไฟล์แพทย์ของคุณ",
+      "typeLabel": "ประเภทนัด",
+      "dateLabel": "วันที่",
+      "dateHelper": "เลือกวันที่ จะแสดงช่วงเวลาด้านล่าง",
+      "slotsTitle": "ช่วงเวลาที่ว่าง",
+      "selectDoctorFirst": "เลือกแพทย์ ประเภท และวันที่ เพื่อดูช่วงเวลาที่ว่าง",
+      "loadingSlots": "กำลังโหลดช่วงเวลา…",
+      "emptySlots": "ไม่มีช่วงเวลาที่ว่างสำหรับการเลือกนี้",
+      "cancel": "ยกเลิก",
+      "submit": "ยืนยันการจอง",
+      "missingDoctor": "กรุณาเลือกแพทย์ก่อน",
+      "missingType": "กรุณาเลือกประเภทนัด",
+      "missingDate": "กรุณาเลือกวันที่",
+      "missingSlot": "กรุณาเลือกช่วงเวลา",
+      "successToast": "สร้างการจองจากการส่งต่อเรียบร้อย",
+      "genericError": "ไม่สามารถจองได้ กรุณาลองใหม่"
     }
   },
   "FindSlot": {

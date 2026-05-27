@@ -28,4 +28,15 @@ export interface ListAppointmentsArgs extends PaginationParams {
    * see referrals to every department.
    */
   pendingReferralOnly?: boolean;
+  /**
+   * Widen the caller's scope so they also see rows where
+   * `referredToDepartmentId = caller.departmentId`, in addition to the
+   * standard narrowing the scope already applies. Powers the booking-
+   * wizard continuation picker: when a patient was referred FROM another
+   * department TO the caller's department, the source visit lives in
+   * the foreign department and would otherwise be filtered out by
+   * `.own-department` / `.own` scope. Ignored for `.all` (already sees
+   * everything) and when the caller has no `departmentId`.
+   */
+  includeReferralsToOwnDepartment?: boolean;
 }

@@ -51,6 +51,14 @@ interface ListAppointmentsParams extends PaginationParams {
    * dept; `.all` → every dept).
    */
   pendingReferralOnly?: boolean;
+  /**
+   * Widen `.own` / `.own-department` scope so rows referred TO the
+   * caller's department also match. Used by the booking-wizard
+   * continuation picker so a patient referred from another department
+   * still surfaces their prior source visit on the destination dept's
+   * side.
+   */
+  includeReferralsToOwnDepartment?: boolean;
 }
 
 export function listAppointments(
@@ -66,6 +74,8 @@ export function listAppointments(
     [APPOINTMENT_QUERY_PARAM.ORDER]: params?.order,
     [APPOINTMENT_QUERY_PARAM.PENDING_REFERRAL_ONLY]:
       params?.pendingReferralOnly === true ? "true" : undefined,
+    [APPOINTMENT_QUERY_PARAM.INCLUDE_REFERRALS_TO_OWN_DEPARTMENT]:
+      params?.includeReferralsToOwnDepartment === true ? "true" : undefined,
   });
 
   return userFetch<Paginated<AppointmentResponse>>(
