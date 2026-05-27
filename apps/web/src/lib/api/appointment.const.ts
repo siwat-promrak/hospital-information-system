@@ -141,6 +141,18 @@ export type AppointmentErrorCode =
   (typeof APPOINTMENT_ERROR_CODE)[keyof typeof APPOINTMENT_ERROR_CODE];
 
 /**
+ * F16 — the sole appointment type valid for a STANDALONE booking (one
+ * that carries NO `previousAppointmentId`). The BE rejects any other
+ * type with `STANDALONE_APPOINTMENT_TYPE_INVALID`.
+ *
+ * The booking wizard uses this to narrow the per-department type catalog
+ * to only `NEW_PATIENT_VISIT` when the user has not linked a prior visit.
+ */
+export const STANDALONE_APPOINTMENT_TYPE = "NEW_PATIENT_VISIT" as const;
+
+export type StandaloneAppointmentType = typeof STANDALONE_APPOINTMENT_TYPE;
+
+/**
  * F14 (corrective tightening) — the appointment types that are valid
  * for a CONTINUATION booking (one that carries a `previousAppointmentId`).
  *
@@ -158,10 +170,15 @@ export type AppointmentErrorCode =
  * "come back next week") and `PROCEDURE` (the planned next-step
  * intervention against the prior diagnosis) make semantic sense as a
  * continuation of a prior visit.
+ *
+ * F17 update — `CONSULTATION` is now also a valid continuation type.
+ * The set is widened from `[FOLLOW_UP, PROCEDURE]` to every type EXCEPT
+ * `NEW_PATIENT_VISIT`. The BE enforces the same updated set.
  */
 export const CONTINUATION_APPOINTMENT_TYPES = [
   "FOLLOW_UP",
   "PROCEDURE",
+  "CONSULTATION",
 ] as const;
 
 export type ContinuationAppointmentType =
