@@ -69,10 +69,11 @@ export interface ClearableSelectProps<V extends string | number> {
    */
   helperText?: string;
   /**
-   * Optional placeholder. When provided we use MUI's `displayEmpty` so the
-   * placeholder text shows in the input slot while `value === ""`, and add
-   * a disabled placeholder `<MenuItem>` at the top of the dropdown so the
-   * user sees the same copy as a non-selectable cue.
+   * Optional placeholder. When provided we use MUI's `displayEmpty` +
+   * `renderValue` so the placeholder text shows in the input slot while
+   * `value === ""` — but the dropdown options list shows ONLY the real
+   * options. The placeholder is never a clickable entry in the menu (the
+   * input-slot text is the only place it surfaces).
    */
   placeholder?: string;
   /** Full-width by default; pass `fullWidth={false}` to opt out. */
@@ -136,12 +137,32 @@ export default function ClearableSelect<V extends string | number>({
   const isFullWidth = fullWidth !== false;
   const showClearIcon = Boolean(clearable) && value !== "" && !disabled;
   const ariaLabel = clearAriaLabel ?? DEFAULT_CLEAR_ARIA_LABEL;
-  // Whether to render the placeholder copy in the input slot (when empty)
-  // AND prepend a disabled placeholder MenuItem in the dropdown. Without
-  // `displayEmpty`, MUI hides the input value entirely while empty — the
-  // floating label fills the space and the user sees no hint of what
-  // belongs there.
+  // Whether to render the placeholder copy in the input slot when
+  // `value === ""`. Without `displayEmpty`, MUI hides the input value
+  // entirely while empty — the floating label fills the space and the
+  // user sees no hint of what belongs there. We pair `displayEmpty` with
+  // a `renderValue` that returns the placeholder for `""` and the
+  // matching option's label otherwise — that keeps the placeholder OUT
+  // of the dropdown options list (it lives only in the input slot).
   const showPlaceholder = Boolean(placeholder);
+
+  const renderValue = useMemo(() => {
+    if (!showPlaceholder) {
+      return undefined;
+    }
+
+    return (selected: V | "") => {
+      if (selected === "") {
+        return (
+          <span style={{ opacity: 0.6 }}>{placeholder}</span>
+        );
+      }
+
+      const match = options.find((opt) => opt.value === selected);
+
+      return match ? match.label : String(selected);
+    };
+  }, [showPlaceholder, placeholder, options]);
 
   const handleChange = useCallback(
     (event: SelectChangeEvent<V | "">) => {
@@ -194,13 +215,9 @@ export default function ClearableSelect<V extends string | number>({
         value={value}
         onChange={handleChange}
         displayEmpty={showPlaceholder}
+        renderValue={renderValue}
         endAdornment={endAdornment}
       >
-        {showPlaceholder ? (
-          <MenuItem value="" disabled>
-            {placeholder}
-          </MenuItem>
-        ) : null}
         {options.map((option) => (
           <MenuItem key={String(option.value)} value={option.value}>
             {option.label}

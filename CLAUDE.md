@@ -383,10 +383,14 @@ UX contract:
 - A picker that is always populated (sort direction, required form
   fields where the BE rejects empty) leaves `clearable` off. The
   wrapper's option list IS the field's affordance.
-- Placeholder text shows via MUI's `displayEmpty` + a disabled
-  placeholder `<MenuItem>` when the caller passes `placeholder`. No
-  "All X" placeholder MenuItem — the × clear icon is the only "no
-  filter" affordance, and the empty input state IS the empty signal.
+- Placeholder text shows via MUI's `displayEmpty` + a `renderValue`
+  callback that returns the placeholder string while `value === ""`
+  (and the matching option's label otherwise) when the caller passes
+  `placeholder`. The dropdown options list contains ONLY the real
+  options — the placeholder is never a clickable / disabled MenuItem
+  in the menu. No "All X" placeholder MenuItem either — the × clear
+  icon is the only "no filter" affordance, and the empty input state
+  IS the empty signal.
 
 Inlining a `<Select>` at a page or feature module means a department
 dropdown will drift from the others (clear icon styling, helper text
