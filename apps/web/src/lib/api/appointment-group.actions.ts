@@ -18,7 +18,7 @@ import {
  * need on-demand fetches) can call them without pulling `server-only` into
  * the browser bundle.
  *
- * F17 delta: `closeAppointmentGroupAction` is removed — the
+ * F18 delta: `closeAppointmentGroupAction` is removed — the
  * `POST /appointment-groups/:id/close` route is retired. Case closing is
  * now folded into `POST /appointments/:id/complete` on the BE.
  */

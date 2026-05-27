@@ -102,7 +102,7 @@ export function cancelAppointment(
 }
 
 /**
- * F17 — mark an appointment as `COMPLETED` and create a medical-records
+ * F18 — mark an appointment as `COMPLETED` and create a medical-records
  * row in the same transaction. Doctor-only (the BE checks
  * `appointment.update.own` + caller-is-the-appointment-doctor). Body
  * carries the mandatory `note` + optional `drug` for the visit record.
@@ -125,7 +125,7 @@ export function completeAppointment(
 }
 
 /**
- * F17 — stamp a referral on an appointment and create a medical-records row
+ * F18 — stamp a referral on an appointment and create a medical-records row
  * in the same transaction. The BE writes `referredToDepartmentId` +
  * `referredAt`, opens (or extends) the appointment-group lineage, and
  * surfaces the row on the destination department's pickup queue.
@@ -149,7 +149,7 @@ export function referAppointment(
 }
 
 /**
- * F17 — atomically complete the current visit and create a new FOLLOW_UP
+ * F18 — atomically complete the current visit and create a new FOLLOW_UP
  * appointment in the same group. Body `{ startAt, note, drug? }`. The BE
  * checks the slot against the doctor's schedule, creates the medical-records
  * row, transitions the current appointment to COMPLETED, and creates the new

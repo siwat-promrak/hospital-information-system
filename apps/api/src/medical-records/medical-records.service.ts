@@ -56,7 +56,7 @@ type MedicalRecordRow = Prisma.MedicalRecordGetPayload<{
 }>;
 
 /**
- * F17-updated medical records service. The standalone `create()` and
+ * F18-updated medical records service. The standalone `create()` and
  * `update()` methods have been removed. Records are now write-once and
  * authored exclusively via appointment-action endpoints (`complete`,
  * `refer`, `followUp`) which call `createInsideTx` inside their own
@@ -65,7 +65,7 @@ type MedicalRecordRow = Prisma.MedicalRecordGetPayload<{
  * Remaining methods:
  *   - `list(args)` — paginated read, scope-less (gated on
  *     `medical_records.read.all`). Supports `appointmentGroupId` filter
- *     (F17 visit-thread view).
+ *     (F18 visit-thread view).
  *   - `getById(id)` — single-record detail.
  *   - `createInsideTx(tx, args)` — write-side helper called inside a
  *     caller-owned Prisma transaction; enforces the per-appointment
@@ -82,7 +82,7 @@ export class MedicalRecordsService {
    * `medical_records.read.all`) so the optional filter axes simply pass
    * through.
    *
-   * F17 adds `appointmentGroupId` filtering — when set, restricts to records
+   * F18 adds `appointmentGroupId` filtering — when set, restricts to records
    * whose linked appointment belongs to the given group (visit-thread view).
    */
   async list(args: ListMedicalRecordsArgs = {}): Promise<Paginated<MedicalRecordResponseDto>> {

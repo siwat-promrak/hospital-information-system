@@ -180,7 +180,7 @@ export class AppointmentsService {
         //   a. Load + validate prev (same patient, COMPLETED, not in a
         //      closed group).
         //   b. Reject continuations whose appointmentType is not in
-        //      `CONTINUATION_APPOINTMENT_TYPES` (FOLLOW_UP / PROCEDURE).
+        //      `CONTINUATION_APPOINTMENT_TYPES` (FOLLOW_UP / PROCEDURE / CONSULTATION).
         //   c. If prev has a group → take group_id + compute
         //      visit_number = max(visitNumber) + 1.
         //   d. If prev has no group → create a fresh group, back-link
@@ -198,7 +198,7 @@ export class AppointmentsService {
         const grouping = await this.resolveGrouping(tx, caller, dto);
 
         // 0a. Standalone bookings (no prev) MUST be NEW_PATIENT_VISIT.
-        // Continuation bookings already validated FOLLOW_UP / PROCEDURE
+        // Continuation bookings already validated FOLLOW_UP / PROCEDURE / CONSULTATION
         // inside resolveGrouping above — don't repeat the check here.
         if (!dto.previousAppointmentId) {
           if (
@@ -612,10 +612,9 @@ export class AppointmentsService {
       }
     }
 
-    // Continuation visits must be FOLLOW_UP or PROCEDURE — a new
-    // patient visit is by definition not a continuation, and a
-    // consultation is a fresh advisory. Surfaces as
-    // `400 CONTINUATION_APPOINTMENT_TYPE_INVALID`.
+    // Continuation visits must be FOLLOW_UP, PROCEDURE, or CONSULTATION
+    // — NEW_PATIENT_VISIT is by definition not a continuation. Surfaces
+    // as `400 CONTINUATION_APPOINTMENT_TYPE_INVALID`.
     if (
       !(CONTINUATION_APPOINTMENT_TYPES as readonly AppointmentType[]).includes(
         dto.appointmentType,
@@ -623,7 +622,7 @@ export class AppointmentsService {
     ) {
       throw AppException.badRequest(
         ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
-        'Continuation visits must be FOLLOW_UP or PROCEDURE.',
+        'Continuation visits must be FOLLOW_UP, PROCEDURE, or CONSULTATION.',
         {
           previousAppointmentId: prev.id,
           appointmentType: dto.appointmentType,
@@ -1096,7 +1095,7 @@ export class AppointmentsService {
   }
 
   /**
-   * F17 — `POST /appointments/:id/complete`. Transitions `BOOKED →
+   * F18 — `POST /appointments/:id/complete`. Transitions `BOOKED →
    * COMPLETED`, inserts a `MedicalRecord` row, and (when the appointment
    * belongs to a group) closes the group — all inside a Serializable
    * transaction with single retry on P2034.
@@ -1222,7 +1221,7 @@ export class AppointmentsService {
   }
 
   /**
-   * F17 (extends F14) — `POST /appointments/:id/refer`. Atomic: inserts a
+   * F18 (extends F14) — `POST /appointments/:id/refer`. Atomic: inserts a
    * `MedicalRecord` row, transitions `status → COMPLETED`, stamps
    * `referredToDepartmentId = body.toDepartmentId`, and `referredAt = now()`.
    * The group stays open — destination NURSE picks up via the pending-referral
@@ -1365,7 +1364,7 @@ export class AppointmentsService {
   }
 
   /**
-   * F17 — `POST /appointments/:id/follow-up`. Atomic visit-ending +
+   * F18 — `POST /appointments/:id/follow-up`. Atomic visit-ending +
    * continuation booking:
    *  1. Validates current appointment is BOOKED + caller is the doctor.
    *  2. Inserts a `MedicalRecord` row for the current appointment.
@@ -1718,7 +1717,7 @@ export class AppointmentsService {
   }
 
   /**
-   * Shared assertion helper for the F14/F17 doctor-only actions (`complete`
+   * Shared assertion helper for the F14/F18 doctor-only actions (`complete`
    * / `refer` / `followUp`). Mirrors the cancel-side scope dispatch but reads
    * from the `appointment.update.*` family.
    */

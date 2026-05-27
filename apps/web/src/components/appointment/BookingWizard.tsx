@@ -40,7 +40,10 @@ import { K, NS } from "@/i18n/keys.generated";
 import { useRouter } from "@/i18n/navigation";
 import { dayjs } from "@/lib/dayjs";
 import { createAppointmentAction } from "@/lib/api/appointment.actions";
-import { isContinuationAppointmentType } from "@/lib/api/appointment.const";
+import {
+  isContinuationAppointmentType,
+  STANDALONE_APPOINTMENT_TYPE,
+} from "@/lib/api/appointment.const";
 import { getDepartmentAppointmentTypesAction } from "@/lib/api/department.actions";
 import { SNACKBAR_SUCCESS_KEY } from "@/lib/notifications/messages.const";
 import { useNotify } from "@/lib/notifications/use-notify";
@@ -420,61 +423,72 @@ export default function BookingWizard({
     }
   }, [departmentId, appointmentType, departments]);
 
-  // F14 (corrective tightening) — when a `previousAppointmentId` is set
-  // (either via the continuation picker OR via the referrals deep-link),
-  // the appointment-type chip catalog narrows to the
-  // `CONTINUATION_APPOINTMENT_TYPES` set (`FOLLOW_UP` and `PROCEDURE`).
-  // `NEW_PATIENT_VISIT` and `CONSULTATION` are not valid continuations —
-  // the BE rejects them with `CONTINUATION_APPOINTMENT_TYPE_INVALID` —
-  // so the wizard hides them from the chip selector. When the user
-  // clears the prior visit (back to "No"), the full per-department
-  // catalog is restored automatically because we derive the narrowed
-  // list from `departmentTypes` on each render.
+  // F14 / F16 / F17 — narrow the type catalog based on booking mode.
+  //
+  // Three cases:
+  //   1. `hasPrefilledSlot` (slot-finder deep-link) — return the full
+  //      per-department catalog untouched. The type is already locked to
+  //      whatever the slot finder chose; clearing or restricting it
+  //      would leave the wizard stuck (type = "" AND disabled select →
+  //      can never proceed). The BE validates the
+  //      (type, previousAppointmentId) pair on submit.
+  //
+  //   2. Continuation booking (`previousVisit != null`) — filter OUT
+  //      `NEW_PATIENT_VISIT`. Everything else (`FOLLOW_UP`, `PROCEDURE`,
+  //      `CONSULTATION`) is a valid continuation. The BE enforces the
+  //      same rule via `CONTINUATION_APPOINTMENT_TYPE_INVALID`.
+  //
+  //   3. Standalone booking (no prior visit) — filter DOWN to only
+  //      `NEW_PATIENT_VISIT`. The BE rejects any other type with
+  //      `STANDALONE_APPOINTMENT_TYPE_INVALID` (F16).
   //
   // We DON'T filter `DepartmentSelect.allowedAppointmentTypes` directly
   // — `departmentTypes` is the per-department-scoped catalog from
   // `GET /departments/:id/appointment-types` and is the authoritative
   // input to `<AppointmentTypeSelect>`.
-  //
-  // F15 exception — when the wizard was opened with a pre-filled slot
-  // (slot-finder deep-link), the appointment type is already locked to
-  // whatever the slot finder chose (e.g. `NEW_PATIENT_VISIT`). Even if
-  // the user subsequently answers "Yes, continues a prior visit" on the
-  // continuation step, we MUST NOT narrow the type catalog or clear the
-  // pre-filled type: the select is disabled, the user cannot change it,
-  // and clearing it would leave the wizard stuck (type = "" AND disabled
-  // select → can never proceed). The BE validates the
-  // (type, previousAppointmentId) pair on submit and will surface a
-  // clear error if the combination is semantically invalid.
   const isContinuationBooking = previousVisit != null;
   const visibleDepartmentTypes = useMemo(() => {
-    if (!isContinuationBooking || hasPrefilledSlot) {
+    if (hasPrefilledSlot) {
       return departmentTypes;
     }
 
-    return departmentTypes.filter((type) =>
-      isContinuationAppointmentType(type.code),
+    if (isContinuationBooking) {
+      return departmentTypes.filter((type) =>
+        isContinuationAppointmentType(type.code),
+      );
+    }
+
+    return departmentTypes.filter(
+      (type) => type.code === STANDALONE_APPOINTMENT_TYPE,
     );
   }, [departmentTypes, isContinuationBooking, hasPrefilledSlot]);
 
   // Write-side cascade matching the read-side narrowing above. If the
-  // user picks "Yes, continues" AFTER having already picked
-  // `NEW_PATIENT_VISIT` or `CONSULTATION`, drop the now-forbidden choice
-  // so the user re-picks from the narrowed catalog (instead of
-  // submitting an invalid pair).
+  // current `appointmentType` is no longer in the visible set (because
+  // the booking mode changed), drop it so the user re-picks from the
+  // narrowed catalog instead of submitting an invalid pair.
+  //
+  // Continuation → standalone: `NEW_PATIENT_VISIT` must now be selected;
+  //   any continuation type is cleared.
+  // Standalone → continuation: `NEW_PATIENT_VISIT` is no longer valid;
+  //   it is cleared so the user re-picks a continuation type.
   //
   // F15 exception — skip when `hasPrefilledSlot`: the pre-filled type
   // must never be cleared by this cascade (see the comment on
   // `visibleDepartmentTypes` above for the full rationale).
   useEffect(() => {
-    if (hasPrefilledSlot || !isContinuationBooking || !appointmentType) {
+    if (hasPrefilledSlot || !appointmentType) {
       return;
     }
 
-    if (!isContinuationAppointmentType(appointmentType)) {
+    const isInVisibleSet = visibleDepartmentTypes.some(
+      (type) => type.code === appointmentType,
+    );
+
+    if (!isInVisibleSet) {
       setAppointmentType("");
     }
-  }, [hasPrefilledSlot, isContinuationBooking, appointmentType]);
+  }, [hasPrefilledSlot, visibleDepartmentTypes, appointmentType]);
 
   // True when the wizard is on a continuation flow AND the picked
   // department offers neither `FOLLOW_UP` nor `PROCEDURE`. The

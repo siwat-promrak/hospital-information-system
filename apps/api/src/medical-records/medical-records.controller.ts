@@ -20,7 +20,7 @@ import {
 } from './medical-records.swagger';
 
 /**
- * F17-updated medical records controller. Records are write-once and
+ * F18-updated medical records controller. Records are write-once and
  * created exclusively inside appointment-action transactions. The
  * standalone `POST /medical-records` and `PATCH /medical-records/:id`
  * routes have been removed — only read-only endpoints remain.

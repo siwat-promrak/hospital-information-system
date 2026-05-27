@@ -17,7 +17,7 @@
  * Total: 33 codes split across 8 resources (user / role / appointment /
  * schedule / patient / doctor / medical_records / doctor_workspace).
  *
- * F17 delta: removed `medical_records.{create.own, update.own, update.all}`
+ * F18 delta: removed `medical_records.{create.own, update.own, update.all}`
  * (record creation moves inside workspace action endpoints; records become
  * write-once); added `doctor_workspace.read.own` (FE gate for workspace nav
  * + page — the BE does NOT check this code anywhere).
@@ -67,10 +67,10 @@ export const PERMISSION_CODE = {
   // ── Doctor (1) — scope-less catalog lookup ───────────────────────────
   DOCTOR_READ: "doctor.read",
 
-  // ── Medical Records (1) — no delete, no create/update (F17) ─────────
+  // ── Medical Records (1) — no delete, no create/update (F18) ─────────
   MEDICAL_RECORDS_READ_ALL: "medical_records.read.all",
 
-  // ── Doctor Workspace (1) — FE-only gate (F17) ────────────────────────
+  // ── Doctor Workspace (1) — FE-only gate (F18) ────────────────────────
   // The BE does NOT check this code anywhere; workspace data reads use
   // `appointment.read.own` + `medical_records.read.all`. This code gates
   // only the sidebar nav item and the `/workspace` page guard.

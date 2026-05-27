@@ -32,7 +32,7 @@ interface AppointmentDetailPageProps {
  *
  * Read-only summary usable by NURSE / MRO / PHARMACY / DOCTOR alike.
  * The doctor's actionable workspace panels have moved to
- * `/workspace/:id` (F17).
+ * `/workspace/:id` (F18).
  *
  * The BE returns `404 APPOINTMENT_NOT_FOUND` for both unknown ids AND
  * for ids the caller's scope can't see (no existence leak). The detail

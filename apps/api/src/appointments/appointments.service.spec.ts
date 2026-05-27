@@ -1,5 +1,5 @@
 /**
- * Unit coverage for the F14/F17 additions to `AppointmentsService` —
+ * Unit coverage for the F14/F18 additions to `AppointmentsService` —
  * `complete()`, `refer()`. Both are exercised with hand-rolled
  * Prisma stubs. Full end-to-end coverage (real DB, lazy-group flow)
  * lives in `test/appointments.e2e-spec.ts` +
@@ -433,7 +433,7 @@ describe('AppointmentsService.refer', () => {
 
 /**
  * Coverage for F14 — Rule 1 (prev must be COMPLETED with group still
- * open) + Rule 2 (continuation visits must be FOLLOW_UP or PROCEDURE).
+ * open) + Rule 2 (continuation visits must be FOLLOW_UP, PROCEDURE, or CONSULTATION).
  *
  * The booking transaction is heavy on collaborators — `tx` exposes the
  * department-type lookup, doctor + patient + schedule fetches, slot
@@ -650,12 +650,22 @@ describe('AppointmentsService.create — continuation validation', () => {
         expect.arrayContaining([
           AppointmentType.FOLLOW_UP,
           AppointmentType.PROCEDURE,
+          AppointmentType.CONSULTATION,
         ]),
       );
     }
   });
 
-  it('rejects a CONSULTATION continuation with CONTINUATION_APPOINTMENT_TYPE_INVALID', async () => {
+  it('accepts a CONSULTATION continuation from a COMPLETED prev', async () => {
+    const createSpy = jest.fn(async () =>
+      baseRow({
+        appointmentType: AppointmentType.CONSULTATION,
+        status: AppointmentStatus.BOOKED,
+        appointmentGroupId: 'group-new',
+        visitNumber: 2,
+      }),
+    );
+
     const prisma = buildPrismaMock({
       prev: {
         id: PREV_APPT_ID,
@@ -667,26 +677,22 @@ describe('AppointmentsService.create — continuation validation', () => {
         referredToDepartmentId: null,
         referralFulfilledByAppointmentId: null,
       },
+      onCreate: createSpy,
     });
     const service = new AppointmentsService(prisma, medicalRecordsStub);
 
-    try {
-      await service.create(DOCTOR_USER, {
-        patientId: PATIENT_ID,
-        doctorId: DOC_HOME_ID,
-        departmentId: HOME_DEPT_ID,
-        scheduleId: SCHEDULE_ID,
-        appointmentType: AppointmentType.CONSULTATION,
-        startAt: SLOT_START,
-        previousAppointmentId: PREV_APPT_ID,
-      });
-      fail('expected throw');
-    } catch (err) {
-      expect(err).toBeInstanceOf(AppException);
-      expect((err as AppException).code).toBe(
-        ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
-      );
-      expect((err as AppException).getStatus()).toBe(400);
-    }
+    const result = await service.create(DOCTOR_USER, {
+      patientId: PATIENT_ID,
+      doctorId: DOC_HOME_ID,
+      departmentId: HOME_DEPT_ID,
+      scheduleId: SCHEDULE_ID,
+      appointmentType: AppointmentType.CONSULTATION,
+      startAt: SLOT_START,
+      previousAppointmentId: PREV_APPT_ID,
+    });
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(result.appointmentGroupId).toBe('group-new');
+    expect(result.visitNumber).toBe(2);
   });
 });

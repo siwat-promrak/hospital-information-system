@@ -40,7 +40,7 @@ interface WorkspaceNotePanelProps {
 }
 
 /**
- * F17 — "use client" workspace panel with a required note textarea, an
+ * F18 — "use client" workspace panel with a required note textarea, an
  * optional drug textarea, and three end-of-visit action buttons. The
  * buttons are disabled until `note.trim().length > 0`.
  *

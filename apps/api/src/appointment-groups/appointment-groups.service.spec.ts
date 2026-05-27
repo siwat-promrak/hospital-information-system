@@ -2,7 +2,7 @@
  * Unit coverage for F14 `AppointmentGroupsService`.
  *
  * These tests exercise the scope-narrowing predicates using a
- * hand-rolled Prisma stub. The close() method was removed in F17;
+ * hand-rolled Prisma stub. The close() method was removed in F18;
  * group closure is now handled atomically by appointments.complete().
  * End-to-end behaviour lives in `test/appointment-groups.e2e-spec.ts`.
  */

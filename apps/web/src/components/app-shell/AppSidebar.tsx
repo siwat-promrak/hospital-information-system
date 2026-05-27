@@ -348,7 +348,7 @@ const ICON_FOR: Readonly<
   [NAV_ICON.APPOINTMENT_GROUPS]: AccountTreeIcon,
   [NAV_ICON.REFERRALS]: CallSplitIcon,
   [NAV_ICON.FIND_SLOT]: EventAvailableIcon,
-  // F17 — doctor workspace queue.
+  // F18 — doctor workspace queue.
   [NAV_ICON.WORKSPACE]: MedicalServicesIcon,
 };
 

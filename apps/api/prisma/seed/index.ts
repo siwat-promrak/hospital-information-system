@@ -26,9 +26,9 @@
  *   - 5 roles (ADMIN, DOCTOR, NURSE, MEDICAL_RECORDS_OFFICER, PHARMACY)
  *   - 33 permissions (CRUD-verb catalog: user 4 + role 4 + appointment 9 +
  *     schedule 9 + patient 4 + doctor 1 + medical_records 1 +
- *     doctor_workspace 1; three medical_records mutations removed in F17)
+ *     doctor_workspace 1; three medical_records mutations removed in F18)
  *   - 48 policies (9 ADMIN + 14 DOCTOR + 14 NURSE +
- *     8 MEDICAL_RECORDS_OFFICER + 3 PHARMACY; F17 removes 2 from DOCTOR +
+ *     8 MEDICAL_RECORDS_OFFICER + 3 PHARMACY; F18 removes 2 from DOCTOR +
  *     1 from MRO)
  *   - 81 users — 1 super-admin + 2 ADMIN + 1 NURSE +
  *     1 MEDICAL_RECORDS_OFFICER + 1 PHARMACY + 75 DOCTOR

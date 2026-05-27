@@ -47,7 +47,7 @@ export async function generateMetadata({
 }
 
 /**
- * F17 — doctor workspace list page (`/workspace`).
+ * F18 — doctor workspace list page (`/workspace`).
  *
  * Two independent sections:
  *  - Upcoming: BOOKED appointments from today onward, ascending.

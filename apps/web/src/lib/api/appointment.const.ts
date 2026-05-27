@@ -19,10 +19,10 @@ export const APPOINTMENT_API_PATH_BUILDER = {
   cancel: (id: string) => BE_PATH_BUILDER.appointmentCancel(id),
   // F14 — doctor-only "this visit is done" toggle. Body `{ note, drug? }`.
   complete: (id: string) => BE_PATH_BUILDER.appointmentComplete(id),
-  // F14 / F17 — doctor-only "send to another department" action. Body
+  // F14 / F18 — doctor-only "send to another department" action. Body
   // `{ referredToDepartmentId, note, drug? }`.
   refer: (id: string) => BE_PATH_BUILDER.appointmentRefer(id),
-  // F17 — doctor-only "follow up" action. Body `{ startAt, note, drug? }`.
+  // F18 — doctor-only "follow up" action. Body `{ startAt, note, drug? }`.
   followUp: (id: string) => BE_PATH_BUILDER.appointmentFollowUp(id),
 } as const;
 
@@ -138,7 +138,7 @@ export const APPOINTMENT_ERROR_CODE = {
    */
   CONTINUATION_APPOINTMENT_TYPE_INVALID: "CONTINUATION_APPOINTMENT_TYPE_INVALID",
   /**
-   * F17 — `POST /appointments/:id/complete|refer|follow-up` was called
+   * F18 — `POST /appointments/:id/complete|refer|follow-up` was called
    * on an appointment that already has a `medical_records` row (the
    * `medical_records.appointment_id @unique` invariant). Fires only when
    * a caller races two identical requests or the page is not refreshed.
@@ -148,6 +148,18 @@ export const APPOINTMENT_ERROR_CODE = {
 
 export type AppointmentErrorCode =
   (typeof APPOINTMENT_ERROR_CODE)[keyof typeof APPOINTMENT_ERROR_CODE];
+
+/**
+ * F16 — the sole appointment type valid for a STANDALONE booking (one
+ * that carries NO `previousAppointmentId`). The BE rejects any other
+ * type with `STANDALONE_APPOINTMENT_TYPE_INVALID`.
+ *
+ * The booking wizard uses this to narrow the per-department type catalog
+ * to only `NEW_PATIENT_VISIT` when the user has not linked a prior visit.
+ */
+export const STANDALONE_APPOINTMENT_TYPE = "NEW_PATIENT_VISIT" as const;
+
+export type StandaloneAppointmentType = typeof STANDALONE_APPOINTMENT_TYPE;
 
 /**
  * F14 (corrective tightening) — the appointment types that are valid
@@ -167,10 +179,15 @@ export type AppointmentErrorCode =
  * "come back next week") and `PROCEDURE` (the planned next-step
  * intervention against the prior diagnosis) make semantic sense as a
  * continuation of a prior visit.
+ *
+ * F17 update — `CONSULTATION` is now also a valid continuation type.
+ * The set is widened from `[FOLLOW_UP, PROCEDURE]` to every type EXCEPT
+ * `NEW_PATIENT_VISIT`. The BE enforces the same updated set.
  */
 export const CONTINUATION_APPOINTMENT_TYPES = [
   "FOLLOW_UP",
   "PROCEDURE",
+  "CONSULTATION",
 ] as const;
 
 export type ContinuationAppointmentType =

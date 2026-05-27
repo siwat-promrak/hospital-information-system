@@ -38,7 +38,7 @@ export function ApiListMedicalRecords(): MethodDecorator & ClassDecorator {
       description:
         'Returns medical records ordered by `createdAt DESC`. ' +
         'Filters: `?patientId=`, `?doctorId=`, `?appointmentId=`, ' +
-        '`?appointmentGroupId=` (F17 — visit-thread view). ' +
+        '`?appointmentGroupId=` (F18 — visit-thread view). ' +
         'All filters are AND-combined; missing filters mean no constraint. ' +
         'Reads are scope-less — every caller holding ' +
         '`medical_records.read.all` sees the full result set.',
@@ -50,7 +50,7 @@ export function ApiListMedicalRecords(): MethodDecorator & ClassDecorator {
       name: 'appointmentGroupId',
       required: false,
       description:
-        'F17 — Restrict to records whose linked appointment belongs to this group. ' +
+        'F18 — Restrict to records whose linked appointment belongs to this group. ' +
         'Use with `pageSize=all` for the visit-thread view.',
     }),
     ApiOkResponse({

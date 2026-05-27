@@ -35,7 +35,7 @@ export const MEDICAL_RECORD_QUERY_PARAM = {
   APPOINTMENT_ID: "appointmentId",
   DEPARTMENT_ID: "departmentId",
   /**
-   * F17 — filter records belonging to the same appointment-group lineage.
+   * F18 — filter records belonging to the same appointment-group lineage.
    * Consumed by `AppointmentVisitThread` to load the full case history in
    * a single round-trip (`pageSize=all`). The BE adds a nested Prisma
    * `appointment: { appointmentGroupId }` where clause on the list query.

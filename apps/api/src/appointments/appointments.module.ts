@@ -12,7 +12,7 @@ import { AppointmentsService } from './appointments.service';
  * scope-aware `appointment.{create|read|update|delete}.{own|own-department|all}`
  * permission family.
  *
- * F17 — imports `MedicalRecordsModule` so `AppointmentsService` can inject
+ * F18 — imports `MedicalRecordsModule` so `AppointmentsService` can inject
  * `MedicalRecordsService.createInsideTx` for the workspace-action endpoints.
  */
 @Module({

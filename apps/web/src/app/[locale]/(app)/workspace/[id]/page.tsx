@@ -32,7 +32,7 @@ interface WorkspaceDetailPageProps {
 }
 
 /**
- * F17 — dedicated doctor workspace detail page (`/workspace/:id`).
+ * F18 — dedicated doctor workspace detail page (`/workspace/:id`).
  *
  * Gated on `doctor_workspace.read.own`. After that gate, also verifies
  * that `me.doctor.id === appointment.doctorId` — if not, renders a

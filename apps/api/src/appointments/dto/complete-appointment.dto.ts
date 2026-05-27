@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 /**
- * Request body for `POST /appointments/:id/complete` (F17 — US-17.4).
+ * Request body for `POST /appointments/:id/complete` (F18 — US-17.4).
  *
  * The note + drug fields submit along with the end-of-visit action so a
  * DOCTOR cannot complete a visit without leaving a clinical record.

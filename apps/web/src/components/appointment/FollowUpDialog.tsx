@@ -36,7 +36,7 @@ interface FollowUpDialogProps {
 }
 
 /**
- * F17 — Follow-up dialog. Date input → fetch
+ * F18 — Follow-up dialog. Date input → fetch
  * `getSlots({ doctorId, departmentId, date, type: FOLLOW_UP })` → slot
  * grid inline → Confirm. Confirms submit `{ startAt, note, drug? }` to
  * `followUpAppointmentAction`. Toast + refresh on success.

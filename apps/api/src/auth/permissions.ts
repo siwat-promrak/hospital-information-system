@@ -31,11 +31,11 @@
  * `schedule.read.own-department`, `appointment.delete.own`.
  *
  * `medical_records` deliberately omits a delete permission — records are
- * permanent (no soft-delete column in the schema either). After F17 the
+ * permanent (no soft-delete column in the schema either). After F18 the
  * family holds exactly one code (`medical_records.read.all`) because
  * creation and mutation have moved inside the appointment-action endpoints.
  *
- * ── Catalog totals (F17) ─────────────────────────────────────────────────
+ * ── Catalog totals (F18) ─────────────────────────────────────────────────
  * 33 permissions (was 35): user 4 + role 4 + appointment 9 + schedule 9 +
  * patient 4 + doctor 1 + doctor_workspace 1 + medical_records 1.
  */
@@ -88,7 +88,7 @@ export const PERMISSION = {
   DOCTOR_WORKSPACE_READ_OWN: 'doctor_workspace.read.own',
 
   // ── Medical Records (1) ─ NO create/update/delete (records are
-  //    write-once via appointment-action endpoints after F17) ────────────
+  //    write-once via appointment-action endpoints after F18) ────────────
   MEDICAL_RECORDS_READ_ALL: 'medical_records.read.all',
 } as const;
 
@@ -216,7 +216,7 @@ export const PERMISSION_CATALOG: readonly PermissionCatalogEntry[] = [
       'and medical_records.read.all.',
   },
 
-  // ── Medical Records (1) — write-once after F17 ───────────────────────
+  // ── Medical Records (1) — write-once after F18 ───────────────────────
   {
     code: PERMISSION.MEDICAL_RECORDS_READ_ALL,
     description: 'View any medical record across every department',

@@ -152,13 +152,14 @@ const PREVIOUS_APPOINTMENT_NOT_COMPLETED_EXAMPLE = {
 const CONTINUATION_APPOINTMENT_TYPE_INVALID_EXAMPLE = {
   statusCode: 400,
   code: ErrorCode.CONTINUATION_APPOINTMENT_TYPE_INVALID,
-  message: 'Continuation visits must be FOLLOW_UP or PROCEDURE.',
+  message: 'Continuation visits must be FOLLOW_UP, PROCEDURE, or CONSULTATION.',
   details: {
     previousAppointmentId: '7c8e2a10-1234-5678-9abc-deadbeefcafe',
-    appointmentType: AppointmentType.CONSULTATION,
+    appointmentType: AppointmentType.NEW_PATIENT_VISIT,
     allowedAppointmentTypes: [
       AppointmentType.FOLLOW_UP,
       AppointmentType.PROCEDURE,
+      AppointmentType.CONSULTATION,
     ],
   },
 };
@@ -289,13 +290,13 @@ export function ApiCreateAppointment(): MethodDecorator & ClassDecorator {
 export function ApiCompleteAppointment(): MethodDecorator & ClassDecorator {
   return applyDecorators(
     ApiOperation({
-      summary: 'Complete an appointment (DOCTOR-only) — F17',
+      summary: 'Complete an appointment (DOCTOR-only) — F18',
       description:
         'Transitions `BOOKED → COMPLETED`, inserts a `MedicalRecord` row, and ' +
         '(when the appointment belongs to a group) closes the group — all in one ' +
         'Serializable transaction. Body: `{ note: string, drug?: string }`. ' +
         'Rejects from `CANCELLED` with `409 APPOINTMENT_NOT_BOOKED`. ' +
-        'Replaces the legacy F14 "close case" endpoint which is removed in F17.',
+        'Replaces the legacy F14 "close case" endpoint which is removed in F18.',
     }),
     ApiParam({ name: 'id', description: 'Appointment id (uuid).' }),
     ApiOkResponse({
@@ -327,9 +328,9 @@ export function ApiCompleteAppointment(): MethodDecorator & ClassDecorator {
 export function ApiReferAppointment(): MethodDecorator & ClassDecorator {
   return applyDecorators(
     ApiOperation({
-      summary: 'Refer an appointment to another department (DOCTOR-only) — F17',
+      summary: 'Refer an appointment to another department (DOCTOR-only) — F18',
       description:
-        'F17 extends the F14 shape: body is now ' +
+        'F18 extends the F14 shape: body is now ' +
         '`{ toDepartmentId, note: string, drug?: string }`. ' +
         'Atomic: inserts a `MedicalRecord` row, sets `status = COMPLETED`, ' +
         '`referredToDepartmentId = body.toDepartmentId`, and `referredAt = now()`. ' +
@@ -371,7 +372,7 @@ export function ApiReferAppointment(): MethodDecorator & ClassDecorator {
 export function ApiFollowUpAppointment(): MethodDecorator & ClassDecorator {
   return applyDecorators(
     ApiOperation({
-      summary: 'Follow up an appointment (DOCTOR-only) — F17',
+      summary: 'Follow up an appointment (DOCTOR-only) — F18',
       description:
         'Atomic action: completes the current appointment, creates a `MedicalRecord` ' +
         'row for it, and books the next FOLLOW_UP appointment in the same group — ' +

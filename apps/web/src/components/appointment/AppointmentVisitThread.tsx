@@ -19,7 +19,7 @@ interface AppointmentVisitThreadProps {
 }
 
 /**
- * F17 — read-only medical-records history.
+ * F18 — read-only medical-records history.
  *
  * Two fetch modes, chosen by whether the visit belongs to a case:
  *  - Grouped (`appointmentGroupId` set): every record in the case via

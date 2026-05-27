@@ -14,7 +14,7 @@ interface AppointmentPatientPanelProps {
 }
 
 /**
- * F17 — read-only patient demographics panel rendered on the
+ * F18 — read-only patient demographics panel rendered on the
  * appointment-detail page when the caller IS the appointment's doctor.
  *
  * Shows: name (en + th when present), HN, DOB, gender, blood group,

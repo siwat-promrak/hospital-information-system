@@ -1,19 +1,19 @@
 /**
- * End-to-end coverage for F08/F17 — `/medical-records` BE module.
+ * End-to-end coverage for F08/F18 — `/medical-records` BE module.
  *
  * Mirrors the F06 / F07 suite shape: tests run against the real Nest app +
  * seeded Postgres, but the whole suite skips gracefully when the DB is
  * unreachable so CI without Docker still passes.
  *
- * F17 note: `POST /medical-records` and `PATCH /medical-records/:id` were
+ * F18 note: `POST /medical-records` and `PATCH /medical-records/:id` were
  * removed. Records are now written exclusively inside appointment-action
  * transactions (complete / refer / follow-up). The fixture setup creates
  * one medical record directly via Prisma so the read-only routes still
  * have data to exercise.
  *
  * What is covered:
- *  - POST /medical-records → 404 (route removed in F17)
- *  - PATCH /medical-records/:id → 404 (route removed in F17)
+ *  - POST /medical-records → 404 (route removed in F18)
+ *  - PATCH /medical-records/:id → 404 (route removed in F18)
  *  - GET /medical-records
  *    - DOCTOR with `read.all` sees the full result set; filter narrowing
  *      by `?patientId=` / `?doctorId=` / `?appointmentId=` /
@@ -407,7 +407,7 @@ async function setupFixtures(prisma: PrismaService): Promise<Fixtures | null> {
   });
 
   // Seed one medical record directly — POST /medical-records was removed
-  // in F17 so the GET / GET :id read-only tests need data pre-seeded.
+  // in F18 so the GET / GET :id read-only tests need data pre-seeded.
   const medicalRecord = await prisma.medicalRecord.create({
     data: {
       appointmentId: apptForDoctorOwn.id,
@@ -586,9 +586,9 @@ describe('F08 — medical records e2e', () => {
       NEXTAUTH_SECRET,
     );
 
-  // ─── POST /medical-records — removed in F17 ──────────────────────────────
+  // ─── POST /medical-records — removed in F18 ──────────────────────────────
 
-  describe('POST /medical-records (F17: route removed)', () => {
+  describe('POST /medical-records (F18: route removed)', () => {
     maybe('Any request → 404 (no route registered)', async () => {
       const jwt = await jwtFor(fixtures!.doctorOwnUser);
 
@@ -598,7 +598,7 @@ describe('F08 — medical records e2e', () => {
         .send({
           patientId: fixtures!.patientOne.id,
           appointmentId: fixtures!.apptForDoctorOwn.id,
-          note: 'F17 removed this route.',
+          note: 'F18 removed this route.',
         });
 
       expect(res.status).toBe(404);
@@ -756,9 +756,9 @@ describe('F08 — medical records e2e', () => {
     });
   });
 
-  // ─── PATCH /medical-records/:id — removed in F17 ──────────────────────────
+  // ─── PATCH /medical-records/:id — removed in F18 ──────────────────────────
 
-  describe('PATCH /medical-records/:id (F17: route removed)', () => {
+  describe('PATCH /medical-records/:id (F18: route removed)', () => {
     maybe('Any PATCH → 404 (no route registered)', async () => {
       const jwt = await jwtFor(fixtures!.doctorOwnUser);
       const recordId = fixtures!.medicalRecord.id;
@@ -766,7 +766,7 @@ describe('F08 — medical records e2e', () => {
       const res = await request(server)
         .patch(`/api/v1/medical-records/${recordId}`)
         .set('Authorization', `Bearer ${jwt}`)
-        .send({ note: 'F17 removed this route.' });
+        .send({ note: 'F18 removed this route.' });
 
       expect(res.status).toBe(404);
     });

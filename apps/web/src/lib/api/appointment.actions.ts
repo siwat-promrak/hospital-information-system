@@ -98,7 +98,7 @@ export async function cancelAppointmentAction(
 }
 
 /**
- * F17 — mark an appointment as `COMPLETED` with a mandatory clinical note.
+ * F18 — mark an appointment as `COMPLETED` with a mandatory clinical note.
  * Surfaces inside `WorkspaceNotePanel` as the doctor's "Complete visit" action.
  * The BE creates the medical-records row in the same transaction.
  */
@@ -126,7 +126,7 @@ export async function completeAppointmentAction(
 }
 
 /**
- * F17 — stamp a referral to another department, including the mandatory
+ * F18 — stamp a referral to another department, including the mandatory
  * clinical note. Surfaces inside `WorkspaceNotePanel` as the doctor's
  * "Refer" action + modal. The BE creates the medical-records row in the
  * same transaction.
@@ -156,7 +156,7 @@ export async function referAppointmentAction(
 }
 
 /**
- * F17 — atomically complete the current visit and create a new FOLLOW_UP
+ * F18 — atomically complete the current visit and create a new FOLLOW_UP
  * appointment. Surfaces inside `WorkspaceNotePanel` → `FollowUpDialog`.
  * The BE creates the medical-records row in the same transaction.
  */

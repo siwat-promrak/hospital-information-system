@@ -42,7 +42,7 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     code: ROLE.DOCTOR,
     name: 'Doctor',
     description:
-      'Clinician with own-doctor scope on schedules + appointments (`*.own`). Sees own-department reads for cross-coverage context. Created via admin invite alongside a Doctor row. Medical-record creation moves inside appointment-action endpoints (F17); records become write-once.',
+      'Clinician with own-doctor scope on schedules + appointments (`*.own`). Sees own-department reads for cross-coverage context. Created via admin invite alongside a Doctor row. Medical-record creation moves inside appointment-action endpoints (F18); records become write-once.',
   },
   {
     code: ROLE.NURSE,
@@ -54,7 +54,7 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     code: ROLE.MEDICAL_RECORDS_OFFICER,
     name: 'Medical Records Officer',
     description:
-      'Cross-department medical records: views all appointments + schedules + medical records, full CRUD on patient demographics. Read-only on medical records after F17 (no mutation permission). No booking, no schedule management.',
+      'Cross-department medical records: views all appointments + schedules + medical records, full CRUD on patient demographics. Read-only on medical records after F18 (no mutation permission). No booking, no schedule management.',
   },
   {
     code: ROLE.PHARMACY,
@@ -80,7 +80,7 @@ export const SIGN_IN_ELIGIBLE_ROLES: readonly RoleCode[] = [
 /**
  * Seeded policy assignment: which permissions each role starts with.
  *
- * Totals (48 policies — F17 reduced from 50):
+ * Totals (48 policies — F18 reduced from 50):
  *   - ADMIN                   : 9   (4 user + 4 role + 1 doctor.read)
  *   - DOCTOR                  : 14  (5 schedule.own + 5 appointment.own + 1
  *                                    patient.read + 1 doctor.read + 1 doctor_workspace.read.own

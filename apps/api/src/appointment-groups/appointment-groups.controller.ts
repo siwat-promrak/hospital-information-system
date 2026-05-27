@@ -26,9 +26,9 @@ import { ListAppointmentGroupsQueryDto } from './dto/list-appointment-groups.que
 
 /**
  * F14 appointment-groups controller. Surfaces the multi-visit case
- * timeline (list + detail) — read-only surface after F17.
+ * timeline (list + detail) — read-only surface after F18.
  *
- * The `POST /:id/close` route has been removed in F17. Group closure is
+ * The `POST /:id/close` route has been removed in F18. Group closure is
  * now handled atomically by `POST /appointments/:id/complete`.
  *
  * Permission gating:

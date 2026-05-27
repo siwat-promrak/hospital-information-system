@@ -140,7 +140,7 @@ export interface CancelAppointmentBody {
 }
 
 /**
- * F17 — shared note + drug fields for the three workspace action endpoints
+ * F18 — shared note + drug fields for the three workspace action endpoints
  * (complete / refer / follow-up). Every workspace action creates a
  * `medical_records` row in the same transaction; `note` is required.
  */
@@ -150,12 +150,12 @@ export interface WorkspaceNoteBody {
 }
 
 /**
- * F17 — request body for `POST /appointments/:id/complete`.
+ * F18 — request body for `POST /appointments/:id/complete`.
  */
 export interface CompleteAppointmentBody extends WorkspaceNoteBody {}
 
 /**
- * F17 — request body for `POST /appointments/:id/refer`. Extends the
+ * F18 — request body for `POST /appointments/:id/refer`. Extends the
  * F14 refer body with the mandatory workspace note fields.
  */
 export interface ReferAppointmentWithNoteBody extends WorkspaceNoteBody {
@@ -163,7 +163,7 @@ export interface ReferAppointmentWithNoteBody extends WorkspaceNoteBody {
 }
 
 /**
- * F17 — request body for `POST /appointments/:id/follow-up`.
+ * F18 — request body for `POST /appointments/:id/follow-up`.
  * `startAt` is the ISO 8601 UTC datetime of the new follow-up slot.
  */
 export interface FollowUpAppointmentBody extends WorkspaceNoteBody {

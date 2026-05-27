@@ -25,7 +25,7 @@ import { APPOINTMENT_ERROR_CODE } from "@/lib/api/appointment.const";
 import { PATIENT_ERROR_CODE } from "@/lib/api/patient.const";
 import { SCHEDULE_ERROR_CODE } from "@/lib/api/schedule.const";
 
-// F17 error code that needs a localized toast. The code is BE-defined but
+// F18 error code that needs a localized toast. The code is BE-defined but
 // not repeated in `APPOINTMENT_ERROR_CODE` because it bridges the
 // `medical_records` and `appointments` domains — keeping it here avoids
 // polluting the appointment-specific catalog with a record-domain code.
@@ -48,7 +48,7 @@ export const SNACKBAR_SUCCESS_KEY = {
   APPOINTMENT_COMPLETED: "appointmentCompleted",
   APPOINTMENT_REFERRED: "appointmentReferred",
   APPOINTMENT_GROUP_CLOSED: "appointmentGroupClosed",
-  // F17 success toasts
+  // F18 success toasts
   APPOINTMENT_FOLLOWED_UP: "appointmentFollowedUp",
 } as const;
 
@@ -135,7 +135,7 @@ export const ERROR_CODE_TO_KEY: Readonly<
   [APPOINTMENT_GROUP_ERROR_CODE.APPOINTMENT_NOT_BOOKED]:
     K.Snackbar.Errors.appointmentNotBooked,
 
-  // F17 — duplicate workspace action on the same appointment. The panel
+  // F18 — duplicate workspace action on the same appointment. The panel
   // hides once status !== BOOKED so this is a race guard.
   [MEDICAL_RECORD_ALREADY_EXISTS_CODE]:
     K.Snackbar.Errors.medicalRecordAlreadyExists,

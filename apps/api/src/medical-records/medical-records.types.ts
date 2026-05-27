@@ -3,7 +3,7 @@ import type { PaginationParams } from '../common/pagination';
 /**
  * Service-layer arguments for `listMedicalRecords`. Pagination + optional
  * narrowing axes (patient, doctor, appointment, appointmentGroup) so the
- * patient-detail, doctor-detail, and F17 visit-thread views can scope the
+ * patient-detail, doctor-detail, and F18 visit-thread views can scope the
  * query.
  *
  * The row shape returned to the wire is `MedicalRecordResponseDto`
@@ -14,7 +14,7 @@ export interface ListMedicalRecordsArgs extends PaginationParams {
   patientId?: string;
   doctorId?: string;
   appointmentId?: string;
-  /** F17 — filter by appointment group (visit-thread view). */
+  /** F18 — filter by appointment group (visit-thread view). */
   appointmentGroupId?: string;
 }
 

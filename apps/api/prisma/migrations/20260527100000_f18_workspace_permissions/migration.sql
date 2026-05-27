@@ -1,4 +1,4 @@
--- F17 — Doctor workspace + RBAC collapse of medical-records mutations.
+-- F18 — Doctor workspace + RBAC collapse of medical-records mutations.
 --
 -- RBAC catalog delta (35 → 33 permissions, 50 → 48 policies):
 --   ADD  `doctor_workspace.read.own`    (DOCTOR-only FE nav gate)

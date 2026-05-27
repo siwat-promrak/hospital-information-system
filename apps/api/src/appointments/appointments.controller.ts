@@ -37,7 +37,7 @@ import { ListAppointmentsQueryDto } from './dto/list-appointments.query.dto';
 
 /**
  * F09 appointments controller. Front-desk booking + queue management.
- * F17 wires workspace-action endpoints with note + drug.
+ * F18 wires workspace-action endpoints with note + drug.
  *
  * Permission gating per CRUD verb:
  *  - `POST /appointments`              → `appointment.create.{own|own-department}`.

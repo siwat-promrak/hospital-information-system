@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO8601, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 /**
- * Request body for `POST /appointments/:id/follow-up` (F17 — US-17.5).
+ * Request body for `POST /appointments/:id/follow-up` (F18 — US-17.5).
  *
  * Atomic action that completes the current appointment, creates a
  * `MedicalRecord` row for it, and books the next FOLLOW_UP appointment

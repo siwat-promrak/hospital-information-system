@@ -12,12 +12,12 @@ import { buildPaginationQuery } from "./pagination";
 import { userFetch } from "./server-fetch";
 
 /**
- * Medical-record endpoints (F08 / F17). Every call is server-side on behalf
+ * Medical-record endpoints (F08 / F18). Every call is server-side on behalf
  * of the signed-in caller — the session cookie travels via `userFetch`, and
  * the BE's `JwtGuard` + `PermissionsGuard` decide whether to serve or 403
  * (gated on `medical_records.read.all` for reads).
  *
- * F17 delta: `POST /medical-records` and `PATCH /medical-records/:id` are
+ * F18 delta: `POST /medical-records` and `PATCH /medical-records/:id` are
  * REMOVED — record creation now happens inside the workspace action
  * endpoints (`/appointments/:id/complete|refer|follow-up`), and records
  * are write-once (immutable). This file retains only `listMedicalRecords`
@@ -34,7 +34,7 @@ interface ListMedicalRecordsParams extends PaginationParams {
   appointmentId?: string;
   departmentId?: string;
   /**
-   * F17 — fetch all medical records belonging to the same appointment group.
+   * F18 — fetch all medical records belonging to the same appointment group.
    * Used by `AppointmentVisitThread` to render the doctor's full visit
    * history for a case. Pass `pageSize=all` alongside this filter to avoid
    * pagination — visit threads are rarely more than a handful of rows.

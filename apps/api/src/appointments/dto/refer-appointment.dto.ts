@@ -2,9 +2,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 
 /**
- * Request body for `POST /appointments/:id/refer` (F17 update of F14 — US-17.6).
+ * Request body for `POST /appointments/:id/refer` (F18 update of F14 — US-17.6).
  *
- * F17 extends the F14 shape with required `note` and optional `drug` so the
+ * F18 extends the F14 shape with required `note` and optional `drug` so the
  * referring doctor's clinical reasoning is captured in the visit record as
  * part of the same atomic action. The service inserts a `MedicalRecord` row
  * before stamping `referredToDepartmentId` and transitioning to COMPLETED.
