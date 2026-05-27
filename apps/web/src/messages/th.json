@@ -741,5 +741,25 @@
     "drugLabel": "ยา",
     "doctorLabel": "แพทย์",
     "departmentLabel": "แผนก"
+  },
+  "MedicalRecords": {
+    "title": "เวชระเบียน",
+    "subtitle": "ดูประวัติทางคลินิกของผู้ป่วย — บันทึกและยาในทุกครั้งที่ผ่านมา",
+    "selectPatientHint": "เลือกผู้ป่วยเพื่อดูเวชระเบียน",
+    "empty": "ยังไม่มีเวชระเบียนของผู้ป่วยรายนี้",
+    "filterTitle": "ผู้ป่วย",
+    "filterClearAriaLabel": "ล้างผู้ป่วยที่เลือก",
+    "viewToggleAriaLabel": "มุมมองผลลัพธ์",
+    "viewList": "รายการ",
+    "viewGrid": "ตาราง",
+    "viewAppointment": "ดูนัดหมาย",
+    "doctorLabel": "แพทย์",
+    "departmentLabel": "แผนก",
+    "dateLabel": "บันทึกเมื่อ",
+    "noteLabel": "บันทึก",
+    "drugLabel": "ยา",
+    "Errors": {
+      "forbidden": "คุณไม่มีสิทธิ์ดูเวชระเบียน"
+    }
   }
 }
