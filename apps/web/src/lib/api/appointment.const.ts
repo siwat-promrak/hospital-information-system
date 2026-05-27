@@ -162,6 +162,17 @@ export const STANDALONE_APPOINTMENT_TYPE = "NEW_PATIENT_VISIT" as const;
 export type StandaloneAppointmentType = typeof STANDALONE_APPOINTMENT_TYPE;
 
 /**
+ * F18 — the appointment type used by the doctor workspace's "Follow Up"
+ * action. The workspace pre-checks the appointment's department-types
+ * catalog for a row with this code and hides the Follow Up button when
+ * absent, so the doctor never sees a dead click against the strict BE
+ * (`POST /appointments/:id/follow-up` → 400 `DEPARTMENT_TYPE_NOT_ALLOWED`).
+ */
+export const FOLLOW_UP_APPOINTMENT_TYPE = "FOLLOW_UP" as const;
+
+export type FollowUpAppointmentType = typeof FOLLOW_UP_APPOINTMENT_TYPE;
+
+/**
  * F14 (corrective tightening) — the appointment types that are valid
  * for a CONTINUATION booking (one that carries a `previousAppointmentId`).
  *

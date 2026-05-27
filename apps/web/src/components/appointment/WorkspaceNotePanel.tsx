@@ -35,6 +35,13 @@ interface WorkspaceNotePanelProps {
   sourceDepartmentId: string;
   departments: readonly DepartmentRow[];
   appointmentGroupId: string | null;
+  /**
+   * F18 — does this appointment's department offer the `FOLLOW_UP`
+   * appointment type? When `false`, the Follow Up button is hidden
+   * entirely (the BE would reject with `DEPARTMENT_TYPE_NOT_ALLOWED`).
+   * Required — no fallback, so future call sites must explicitly opt in.
+   */
+  canFollowUp: boolean;
   /** Locale string for slot time formatting in FollowUpDialog. */
   locale: string;
 }
@@ -59,6 +66,7 @@ export default function WorkspaceNotePanel({
   sourceDepartmentId,
   departments,
   appointmentGroupId,
+  canFollowUp,
   locale,
 }: WorkspaceNotePanelProps) {
   const t = useTranslations(NS.WorkspacePanel);
@@ -181,15 +189,17 @@ export default function WorkspaceNotePanel({
               {t(K.WorkspacePanel.completeAction)}
             </Button>
 
-            <Button
-              type="button"
-              variant="outlined"
-              color="primary"
-              disabled={!hasNote}
-              onClick={() => setFollowUpOpen(true)}
-            >
-              {t(K.WorkspacePanel.followUpAction)}
-            </Button>
+            {canFollowUp ? (
+              <Button
+                type="button"
+                variant="outlined"
+                color="primary"
+                disabled={!hasNote}
+                onClick={() => setFollowUpOpen(true)}
+              >
+                {t(K.WorkspacePanel.followUpAction)}
+              </Button>
+            ) : null}
 
             <Button
               type="button"
@@ -242,22 +252,25 @@ export default function WorkspaceNotePanel({
         </DialogActions>
       </Dialog>
 
-      {/* Follow-up dialog */}
-      <FollowUpDialog
-        open={followUpOpen}
-        onClose={() => setFollowUpOpen(false)}
-        appointmentId={appointmentId}
-        doctorId={doctorId}
-        departmentId={departmentId}
-        locale={locale}
-        note={note.trim()}
-        drug={drugValue}
-        appointmentGroupId={appointmentGroupId}
-        onSuccess={() => {
-          setFollowUpOpen(false);
-          router.refresh();
-        }}
-      />
+      {/* Follow-up dialog — only mounted when the department offers
+          FOLLOW_UP, since the trigger button is hidden otherwise. */}
+      {canFollowUp ? (
+        <FollowUpDialog
+          open={followUpOpen}
+          onClose={() => setFollowUpOpen(false)}
+          appointmentId={appointmentId}
+          doctorId={doctorId}
+          departmentId={departmentId}
+          locale={locale}
+          note={note.trim()}
+          drug={drugValue}
+          appointmentGroupId={appointmentGroupId}
+          onSuccess={() => {
+            setFollowUpOpen(false);
+            router.refresh();
+          }}
+        />
+      ) : null}
 
       {/* Refer dialog */}
       <Dialog
