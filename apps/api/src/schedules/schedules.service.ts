@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
+import dayjs from 'dayjs';
 
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '../common/errors';
@@ -209,10 +210,14 @@ export class SchedulesService {
       dto.departmentId,
     );
 
-    const startAt = new Date(dto.startAt);
-    const endAt = new Date(dto.endAt);
-    const breakStartAt = dto.breakStartAt ? new Date(dto.breakStartAt) : null;
-    const breakEndAt = dto.breakEndAt ? new Date(dto.breakEndAt) : null;
+    const startAt = dayjs.utc(dto.startAt).toDate();
+    const endAt = dayjs.utc(dto.endAt).toDate();
+    const breakStartAt = dto.breakStartAt
+      ? dayjs.utc(dto.breakStartAt).toDate()
+      : null;
+    const breakEndAt = dto.breakEndAt
+      ? dayjs.utc(dto.breakEndAt).toDate()
+      : null;
 
     const row = await this.prisma.$transaction(async (tx) => {
       await assertDoctorInDepartment(tx, dto.doctorId, dto.departmentId);
@@ -284,16 +289,16 @@ export class SchedulesService {
 
     const merged = {
       departmentId: dto.departmentId ?? existing.departmentId,
-      startAt: dto.startAt ? new Date(dto.startAt) : existing.startAt,
-      endAt: dto.endAt ? new Date(dto.endAt) : existing.endAt,
+      startAt: dto.startAt ? dayjs.utc(dto.startAt).toDate() : existing.startAt,
+      endAt: dto.endAt ? dayjs.utc(dto.endAt).toDate() : existing.endAt,
       breakStartAt:
         dto.breakStartAt === undefined
           ? existing.breakStartAt
-          : new Date(dto.breakStartAt),
+          : dayjs.utc(dto.breakStartAt).toDate(),
       breakEndAt:
         dto.breakEndAt === undefined
           ? existing.breakEndAt
-          : new Date(dto.breakEndAt),
+          : dayjs.utc(dto.breakEndAt).toDate(),
       acceptsBooking: dto.acceptsBooking ?? existing.acceptsBooking,
     };
 
@@ -396,7 +401,7 @@ export class SchedulesService {
     await this.prisma.doctorSchedule.update({
       where: { id },
       data: {
-        deletedAt: new Date(),
+        deletedAt: dayjs.utc().toDate(),
         deletedBy: caller.id,
       },
     });
@@ -468,29 +473,14 @@ export interface ResolvedListRange {
 export function resolveListRange(
   from: string | undefined,
   to: string | undefined,
-  now: Date = new Date(),
+  now: Date = dayjs.utc().toDate(),
 ): ResolvedListRange {
-  const start = from ? startOfDayUtc(from) : startOfMonthUtc(now);
-  const end = to ? endOfDayUtc(to) : endOfMonthUtc(now);
+  const start = from
+    ? dayjs.utc(from).startOf('day').toDate()
+    : dayjs.utc(now).startOf('month').toDate();
+  const end = to
+    ? dayjs.utc(to).endOf('day').toDate()
+    : dayjs.utc(now).endOf('month').toDate();
 
   return { rangeStart: start, rangeEnd: end };
-}
-
-function startOfDayUtc(iso: string): Date {
-  return new Date(`${iso}T00:00:00.000Z`);
-}
-
-function endOfDayUtc(iso: string): Date {
-  return new Date(`${iso}T23:59:59.999Z`);
-}
-
-function startOfMonthUtc(now: Date): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-}
-
-function endOfMonthUtc(now: Date): Date {
-  // Day 0 of next month is the last day of this month.
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
-  );
 }
