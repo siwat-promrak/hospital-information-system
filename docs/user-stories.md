@@ -1979,6 +1979,21 @@ end up with a `COMPLETED` appointment and no booked continuation
   standalone-type guard (which would reject FOLLOW_UP without a
   previous) does not fire.
 
+> **Amendment 2026-05-27 (`fix/follow-up-department-type-relaxation`):**
+> the original AC routed every step through the `(departmentId, FOLLOW_UP)`
+> row in `department_appointment_types` for the slot duration + booking
+> window. Two seed departments (General Surgery, Emergency Medicine)
+> didn't carry that row and the Follow Up action surfaced
+> `400 DEPARTMENT_TYPE_NOT_ALLOWED`. Two changes land in this branch:
+> (1) the seed now defines `FOLLOW_UP` on those two departments; (2) the
+> follow-up endpoint additionally tolerates a missing catalog row by
+> falling back to a 15-minute default duration with an open booking
+> window. Rationale: a follow-up is a continuation of an existing visit
+> the department already accepted, so a missing catalog row must not
+> block the action. Standalone bookings (`POST /appointments` without
+> `previousAppointmentId`) remain strict and continue to require the
+> catalog row.
+
 ### US-18.6 — Doctor refers to another department
 
 **US-18.6** — As the appointment's doctor, I want **Refer** to keep

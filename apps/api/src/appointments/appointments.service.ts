@@ -40,6 +40,7 @@ import {
   BLOCKING_APPOINTMENT_STATUSES,
   CONTINUATION_APPOINTMENT_TYPES,
   type ContinuationAppointmentType,
+  FOLLOW_UP_DEFAULT_DURATION_MINUTES,
   STANDALONE_APPOINTMENT_TYPES,
   type StandaloneAppointmentType,
 } from './appointments.const';
@@ -1500,7 +1501,14 @@ export class AppointmentsService {
         // always shows them, so any valid slot resolves to a real schedule).
         const followUpType = AppointmentType.FOLLOW_UP;
 
-        // (department, type) allowed — also fetches duration + booking window.
+        // (department, type) lookup yields the per-pair duration + booking
+        // window when the catalog row exists. Unlike standalone bookings,
+        // a follow-up is a continuation of an existing visit that the
+        // department already accepted — so a missing `(dept, FOLLOW_UP)`
+        // row does NOT block the action. We fall back to the global
+        // FOLLOW_UP default (15 min) and an open booking window so the
+        // doctor can always schedule the next visit. The catalog
+        // override applies when present (post-F13).
         const allowed = await tx.departmentAppointmentType.findFirst({
           where: {
             departmentId: current.departmentId,
@@ -1515,20 +1523,20 @@ export class AppointmentsService {
           },
         });
 
-        if (!allowed) {
-          throw AppException.badRequest(
-            ErrorCode.DEPARTMENT_TYPE_NOT_ALLOWED,
-            'Department does not offer FOLLOW_UP appointment type.',
-            {
-              departmentId: current.departmentId,
-              appointmentType: followUpType,
-            },
-          );
-        }
+        const durationMinutes =
+          allowed?.durationMinutes ?? FOLLOW_UP_DEFAULT_DURATION_MINUTES;
+        const bookingWindowStartMinute =
+          allowed?.bookingWindowStartMinute ?? null;
+        const bookingWindowEndMinute =
+          allowed?.bookingWindowEndMinute ?? null;
 
-        const endAt = startAt.add(allowed.durationMinutes, 'minute');
+        const endAt = startAt.add(durationMinutes, 'minute');
 
-        // F13 booking-window back-stop.
+        // F13 booking-window back-stop. When the catalog row is absent
+        // (fallback path) both window bounds are null and
+        // `isWithinBookingWindow(_, _, null, null)` returns true — i.e.
+        // an open window, mirroring the absent-catalog "no restriction"
+        // intent.
         const slotStartLocalMin = localMinuteOfDay(startAt.toDate());
         const slotEndLocalMin = localMinuteOfDay(endAt.toDate());
 
@@ -1536,8 +1544,8 @@ export class AppointmentsService {
           !isWithinBookingWindow(
             slotStartLocalMin,
             slotEndLocalMin,
-            allowed.bookingWindowStartMinute,
-            allowed.bookingWindowEndMinute,
+            bookingWindowStartMinute,
+            bookingWindowEndMinute,
           )
         ) {
           throw AppException.badRequest(
@@ -1548,8 +1556,8 @@ export class AppointmentsService {
               appointmentType: followUpType,
               startAt: dto.startAt,
               endAt: endAt.toISOString(),
-              bookingWindowStartMinute: allowed.bookingWindowStartMinute,
-              bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+              bookingWindowStartMinute,
+              bookingWindowEndMinute,
             },
           );
         }
@@ -1644,9 +1652,9 @@ export class AppointmentsService {
             breakEndAt: schedule.breakEndAt,
             doctor: { id: current.doctorId, doctorCode: '', name: '' },
           },
-          durationMinutes: allowed.durationMinutes,
-          bookingWindowStartMinute: allowed.bookingWindowStartMinute,
-          bookingWindowEndMinute: allowed.bookingWindowEndMinute,
+          durationMinutes,
+          bookingWindowStartMinute,
+          bookingWindowEndMinute,
           blockingAppointments: blockers,
           now: now.toDate(),
         });
@@ -1660,7 +1668,7 @@ export class AppointmentsService {
             {
               scheduleId: schedule.id,
               slotStartAt: slotStartIso,
-              durationMinutes: allowed.durationMinutes,
+              durationMinutes,
             },
           );
         }
