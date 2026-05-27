@@ -741,5 +741,25 @@
     "drugLabel": "Medications",
     "doctorLabel": "Doctor",
     "departmentLabel": "Department"
+  },
+  "MedicalRecords": {
+    "title": "Medical records",
+    "subtitle": "Browse a patient's clinical history — notes and medications across every prior visit.",
+    "selectPatientHint": "Select a patient to view their medical records.",
+    "empty": "No medical records for this patient yet.",
+    "filterTitle": "Patient",
+    "filterClearAriaLabel": "Clear selected patient",
+    "viewToggleAriaLabel": "Result view",
+    "viewList": "List",
+    "viewGrid": "Grid",
+    "viewAppointment": "View appointment",
+    "doctorLabel": "Doctor",
+    "departmentLabel": "Department",
+    "dateLabel": "Recorded",
+    "noteLabel": "Note",
+    "drugLabel": "Medications",
+    "Errors": {
+      "forbidden": "You don't have permission to view medical records."
+    }
   }
 }

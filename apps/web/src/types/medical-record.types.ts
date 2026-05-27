@@ -11,6 +11,17 @@ export interface MedicalRecordDoctorRef {
 }
 
 /**
+ * Nested patient ref on `MedicalRecordResponse`. Mirrors
+ * `MedicalRecordPatientRefDto` in the BE response DTO.
+ */
+export interface MedicalRecordPatientRef {
+  id: string;
+  hn: string;
+  firstNameEn: string;
+  lastNameEn: string;
+}
+
+/**
  * Nested department ref on `MedicalRecordResponse`. Mirrors
  * `MedicalRecordDepartmentRefDto` in the BE response DTO.
  */
@@ -45,5 +56,6 @@ export interface MedicalRecordResponse {
   createdAt: string;
   updatedAt: string;
   doctor: MedicalRecordDoctorRef;
+  patient: MedicalRecordPatientRef;
   department: MedicalRecordDepartmentRef;
 }
