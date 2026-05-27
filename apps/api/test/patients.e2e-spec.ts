@@ -32,7 +32,6 @@ import request from 'supertest';
 import '../src/dayjs';
 
 import { ROLE } from '../src/auth/roles';
-import { PERMISSION } from '../src/auth/permissions';
 import { AppModule } from '../src/app.module';
 import { ErrorCode } from '../src/common/errors';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
