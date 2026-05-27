@@ -683,6 +683,79 @@ describe('computeSchedulesSlots', () => {
         '2099-06-15T04:00:00.000Z',
       ]);
     });
+
+    it('midnight-wrap regression: 16:00–00:00 local schedule returns NO slots when windowEndMinute = 660 (11:00 local)', () => {
+      // Repro from the bug report: a schedule that runs from 16:00 local to
+      // 00:00 local (midnight) with bookingWindowEndMinute = 660 (= 11:00
+      // local) should produce zero slots — the entire schedule is after 11:00.
+      //
+      // Asia/Bangkok is UTC+7, so:
+      //   16:00 local = 09:00 UTC
+      //   00:00 local (next day) = 17:00 UTC same calendar day
+      //
+      // The bug: the last slot (23:30–00:00 local = 16:30–17:00 UTC) had
+      // slotEndMin = localMinuteOfDay('17:00 UTC') = 0 (midnight wraps to 0).
+      // The old check `0 > 660` was false, so the slot passed incorrectly.
+      // The fix normalises slotEndMin to 1440 when it wraps below slotStartMin.
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          // 09:00 UTC = 16:00 Asia/Bangkok; 17:00 UTC = 00:00 Asia/Bangkok.
+          startAt: dt('2099-06-15T09:00:00Z'),
+          endAt: dt('2099-06-15T17:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 30,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: 660, // 11:00 local
+        blockingAppointments: [],
+        now: dt('2099-01-01T00:00:00Z'),
+      });
+
+      expect(slots).toEqual([]);
+    });
+
+    it('midnight-wrap positive: pre-window slot in an early schedule is still returned', () => {
+      // Positive case: a schedule that runs from 08:00 to 11:00 local (just
+      // touching the window end) with bookingWindowEndMinute = 660 should
+      // still return the first two slots (08:00–09:00 and 09:00–10:00 local).
+      // The 10:00–11:00 local slot starts at minute 600 and ends at minute
+      // 660 — slotEndMin (660) is NOT less than slotStartMin (600), so no
+      // midnight-wrap normalisation applies, and the end-bound check is
+      // 660 > 660 → false → slot kept.
+      //
+      // 08:00 local = 01:00 UTC; 11:00 local = 04:00 UTC.
+      const slots = computeSchedulesSlots({
+        schedule: {
+          id: SCHEDULE_ID,
+          departmentId: SCHEDULE_DEPT_ID,
+          // 01:00 UTC = 08:00 Asia/Bangkok; 04:00 UTC = 11:00 Asia/Bangkok.
+          startAt: dt('2099-06-15T01:00:00Z'),
+          endAt: dt('2099-06-15T04:00:00Z'),
+          breakStartAt: null,
+          breakEndAt: null,
+          doctor: DOCTOR_REF,
+        },
+        durationMinutes: 60,
+        bookingWindowStartMinute: null,
+        bookingWindowEndMinute: 660, // 11:00 local
+        blockingAppointments: [],
+        now: dt('2099-01-01T00:00:00Z'),
+      });
+
+      // 08:00 local (480 min) → end 09:00 (540 min): 540 ≤ 660 → kept.
+      // 09:00 local (540 min) → end 10:00 (600 min): 600 ≤ 660 → kept.
+      // 10:00 local (600 min) → end 11:00 (660 min): 660 ≤ 660 → kept
+      //   (end-bound check is `effectiveSlotEndMin > windowEndMin` = `660 > 660` = false).
+      expect(slots.map((s) => s.startAt)).toEqual([
+        '2099-06-15T01:00:00.000Z', // 08:00 local
+        '2099-06-15T02:00:00.000Z', // 09:00 local
+        '2099-06-15T03:00:00.000Z', // 10:00 local
+      ]);
+    });
   });
 });
 

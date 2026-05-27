@@ -21,6 +21,7 @@ import dayjs from 'dayjs';
 import {
   CLINIC_TIMEZONE_ENV_VAR,
   DEFAULT_CLINIC_TIMEZONE,
+  MINUTES_PER_DAY,
   MINUTES_PER_HOUR,
 } from './clinic.const';
 
@@ -61,15 +62,19 @@ export function localMinuteOfDay(instant: Date | string): number {
  * `[windowStartMin, windowEndMin)`. Either bound may be null =
  * open-ended on that side; both null = always inside.
  *
- * Bug history: a previous single-minute-of-day variant only checked
+ * Bug history (1): a previous single-minute-of-day variant only checked
  * `slotStart < windowEnd`, which let a 30-min slot at 10:40 local pass a
  * 11:00 window-end (the slot actually ends at 11:10 — past the window).
- * The current two-bound check rejects that case.
+ * The two-bound check rejects that case.
  *
- * NOTE: assumes slots do NOT cross local midnight (clinic schedules are
- * intraday). If a future overnight schedule needs support, `slotEndMin`
- * will roll back to a small value and the `slotEndMin <= windowEndMin`
- * comparison will be wrong — handle explicitly at the call site.
+ * Bug history (2 — midnight wrap): `localMinuteOfDay` returns 0 when a
+ * slot ends at exactly local midnight (00:00 local = minute 0). Without
+ * special-casing, `0 > windowEndMin` is false for any realistic window,
+ * so a slot like 23:30–00:00 local incorrectly passes a "before 11:00"
+ * window. The fix: when `slotEndMin` wraps to a value strictly less than
+ * `slotStartMin` (local midnight crossed), treat `slotEndMin` as 1440
+ * (= full day) for the upper-bound comparison. 1440 > any realistic
+ * `windowEndMin`, so the slot is correctly rejected.
  *
  * Pure function — exported so `SlotsService` (slot grid filter) and
  * `AppointmentsService.create` (create back-stop) call exactly the same
@@ -85,7 +90,14 @@ export function isWithinBookingWindow(
     return false;
   }
 
-  if (windowEndMin !== null && slotEndMin > windowEndMin) {
+  // Midnight-wrap normalisation: a slot that ends at exactly 00:00 local
+  // has slotEndMin === 0, which is numerically less than slotStartMin.
+  // Treat the wrapped value as 1440 so the upper-bound comparison is
+  // correct regardless of the windowEndMin value.
+  const effectiveSlotEndMin =
+    slotEndMin < slotStartMin ? MINUTES_PER_DAY : slotEndMin;
+
+  if (windowEndMin !== null && effectiveSlotEndMin > windowEndMin) {
     return false;
   }
 
