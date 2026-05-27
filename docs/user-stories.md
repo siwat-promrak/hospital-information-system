@@ -1410,13 +1410,27 @@ that the new appointment is linked into the same clinical thread.
 - The booking wizard adds a step after patient selection:
   "Is this a continuation of a prior visit?" — default **No**.
 - **Yes** branch shows a picker listing the patient's prior
-  non-cancelled appointments (open groups + ungrouped). Each row shows
-  date, department, doctor, and (if grouped) `visit_number`.
+  continuation-eligible appointments. A row is eligible iff
+  `status === COMPLETED` AND it belongs to an appointment group whose
+  `closedAt IS NULL` (i.e., the case is still open). Ungrouped
+  COMPLETED rows are NOT shown — post-F18 the Complete action is the
+  universal "case is done" signal, so a one-shot ungrouped visit that
+  was completed represents a finished case (just without a group row
+  to stamp `closedAt` on). Each row shows date, department, doctor,
+  and (if grouped) `visit_number`.
 - Picking a row sets `previousAppointmentId` in the `POST /appointments`
   payload.
 - `GET /appointment-groups?patientId=&status=open|closed|all` provides
   the data (open + closed groups filterable, with member count + latest
   visit summary). Gated on `appointment.read.*`.
+
+> **Amendment 2026-05-27 (`fix/continuation-picker-ungrouped-completed`):**
+> the original acceptance criterion listed "open groups + ungrouped" as
+> the eligible set. That language pre-dated F18, which collapsed the
+> separate Complete and Close-Case actions into a single Complete that
+> stamps `closedAt` on the group whenever one exists. The picker now
+> excludes ungrouped COMPLETED rows entirely — see the updated rule
+> above.
 
 ### US-14.2 — Group materialises lazily on continuation booking
 

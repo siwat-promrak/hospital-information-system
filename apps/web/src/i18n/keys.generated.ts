@@ -170,7 +170,6 @@ export const K = {
       rowDateLabel: "rowDateLabel",
       rowDepartmentLabel: "rowDepartmentLabel",
       rowDoctorLabel: "rowDoctorLabel",
-      rowUngrouped: "rowUngrouped",
       rowVisitLabel: "rowVisitLabel",
       selectedSummary: "selectedSummary",
       showingCount: "showingCount",
